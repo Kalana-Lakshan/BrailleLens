@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Model artifacts / generated outputs
+braille_cnn/checkpoints/
+*.pt
+*.pth
+*.npy
+braille_cnn/sample_grid.png
+
+# Datasets (large, downloadable separately)
+data DBSI/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Local assistant context
+CLAUDE.md
