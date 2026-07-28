@@ -16,8 +16,14 @@ braille_cnn/checkpoints/
 *.npy
 braille_cnn/sample_grid.png
 
+# Datasets (large, downloadable separately)
+data DBSI/
+
 # OS / editor
 .DS_Store
 Thumbs.db
 .vscode/
 .idea/
+
+# Local assistant context
+CLAUDE.md
