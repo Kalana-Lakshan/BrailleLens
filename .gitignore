@@ -1,0 +1,4 @@
+data DBSI/
+braille_cnn/checkpoints/
+__pycache__/
+*.pyc
