@@ -66,5 +66,11 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>BrailleLens uses the camera for live Braille character detection.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>BrailleLens uses the microphone to recognize your voice answers.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>BrailleLens uses speech recognition to detect your spoken answers offline.</string>
 </dict>
 </plist>
