@@ -1,0 +1,8 @@
+torch
+torchvision
+pillow
+opencv-python
+pyttsx3
+SpeechRecognition
+pyaudio
+scikit-learn
