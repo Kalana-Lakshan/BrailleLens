@@ -340,6 +340,8 @@ def code_to_label(code: int, lang: str = "en") -> str:
     Unknown codes return '#<code>'.
     """
     table = CODE_TO_SINHALA if lang == "si" else CODE_TO_LETTER
+    if lang == "si" and code == 0:
+        return " "
     return table.get(code, f"#{code}")
 
 
