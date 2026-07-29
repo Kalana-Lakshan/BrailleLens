@@ -1,4 +1,13 @@
+# Dataset (clone separately — see README)
 data DBSI/
+
+# Trained model weights and eval artifacts
 braille_cnn/checkpoints/
+*.npy
+
+# Python cache
 __pycache__/
 *.pyc
+
+# Debug / temp outputs
+debug_*.png
