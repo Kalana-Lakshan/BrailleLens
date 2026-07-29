@@ -28,7 +28,13 @@ from PIL import Image, ImageDraw
 
 from .cnn import SimpleBrailleCNN
 from .dot_detect import cluster_into_cells, detect_dot_centers
-from .labels import code_to_label
+from .labels import (
+    CODE_TO_SINHALA,
+    INDICATOR_CODES,
+    TWO_CELL_VOWEL_SIGNS,
+    _is_combining_vowel_sign,
+    code_to_label,
+)
 
 NUM_CLASSES = 64
 
@@ -81,14 +87,19 @@ def _save_grid_debug_overlay(image, region, boxes, out_path):
     print(f"saved debug overlay: {out_path} (red = --region, green = per-cell crop boxes)")
 
 
-def run_fixed_grid(image, args):
+def run_fixed_grid(image, args, model=None, device=None):
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if model is None:
+        model = load_model(args.checkpoint, device)
+
     region = _parse_region(args.region, image.width, image.height)
     crops, boxes = _cell_crops(image, args.rows, args.cols, region, args.img_size, args.margin_scale)
 
     if args.debug_out:
         _save_grid_debug_overlay(image, region, boxes, Path(args.debug_out))
 
-    preds, confidences = _classify(crops, args)
+    preds, confidences = _classify(crops, model, device)
 
     print(f"\npredicted grid ({args.rows} rows x {args.cols} cols), checkpoint={args.checkpoint}:\n")
     idx = 0
@@ -165,12 +176,17 @@ def _group_into_lines(clusters):
     return lines
 
 
-def _assemble_line_text(line, labels):
+def _line_word_gaps(line):
     gaps = [
         line[i + 1]["bbox"][0] - line[i]["bbox"][2]
         for i in range(len(line) - 1)
     ]
     word_gap = np.median(gaps) * 1.8 if gaps else 0.0
+    return gaps, word_gap
+
+
+def _assemble_line_text(line, labels):
+    gaps, word_gap = _line_word_gaps(line)
 
     out = [labels[0]]
     for i in range(1, len(line)):
@@ -180,16 +196,82 @@ def _assemble_line_text(line, labels):
     return "".join(out)
 
 
-def run_auto(image, args):
+def _decode_line_with_confidence(line, code_by_id, conf_by_id, lang, conf_threshold):
+    """Assemble one braille line into readable text, marking low-confidence cells as '_'."""
+    gaps, word_gap = _line_word_gaps(line)
+
+    if lang != "si":
+        labels = []
+        for c in line:
+            code, conf = code_by_id[id(c)]
+            if conf < conf_threshold:
+                labels.append("_")
+            else:
+                labels.append(code_to_label(code, lang=lang))
+        return _assemble_line_text(line, labels)
+
+    parts: list[str] = []
+    i = 0
+    while i < len(line):
+        if i > 0 and gaps[i - 1] > max(word_gap, 1.0):
+            parts.append(" ")
+
+        c = line[i]
+        code, conf = code_by_id[id(c)]
+
+        if conf < conf_threshold:
+            parts.append("_")
+            i += 1
+            continue
+
+        if code in INDICATOR_CODES and i + 1 < len(line):
+            c2 = line[i + 1]
+            code2, conf2 = code_by_id[id(c2)]
+            if conf2 >= conf_threshold:
+                pair = (code, code2)
+                if pair in TWO_CELL_VOWEL_SIGNS:
+                    sign = TWO_CELL_VOWEL_SIGNS[pair]
+                    if parts and _is_combining_vowel_sign(sign):
+                        parts[-1] = parts[-1] + sign
+                    else:
+                        parts.append(sign)
+                    i += 2
+                    continue
+
+        if code == 0:
+            parts.append(" ")
+        else:
+            parts.append(CODE_TO_SINHALA.get(code, f"#{code}"))
+        i += 1
+
+    return "".join(parts)
+
+
+def _assemble_transcription(lines, valid, preds, confidences, lang, conf_threshold):
+    code_by_id = {id(c): preds[i].item() for i, c in enumerate(valid)}
+    conf_by_id = {id(c): confidences[i].item() for i, c in enumerate(valid)}
+    text_lines = [
+        _decode_line_with_confidence(line, code_by_id, conf_by_id, lang, conf_threshold)
+        for line in lines
+    ]
+    sentence = "\n".join(text_lines)
+    return text_lines, sentence
+
+
+def run_auto_transcribe(image, args, model=None, device=None):
+    """Detect, classify, and return structured transcription data (no printing)."""
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if model is None:
+        model = load_model(args.checkpoint, device)
+
+    conf_threshold = getattr(args, "conf_threshold", 0.0)
+
     gray = np.asarray(image, dtype=np.float32)
     points = detect_dot_centers(gray, percentile=args.dot_percentile, footprint=args.dot_footprint)
     clusters = cluster_into_cells(points, link_distance=args.link_distance)
-    print(f"detected {len(points)} candidate dots -> {len(clusters)} cell clusters "
-          f"({sum(c['merged'] for c in clusters)} flagged as merged/uncertain)")
 
     cell_w, cell_h = _estimate_cell_size(clusters)
-    print(f"estimated single-cell size: {cell_w:.1f} x {cell_h:.1f} px")
-
     valid = [c for c in clusters if not c["merged"]]
     boxes = [
         _cluster_crop_box(c["center"], cell_w, cell_h, args.cell_margin_scale, image.width, image.height)
@@ -199,41 +281,76 @@ def run_auto(image, args):
         image.crop(tuple(int(round(v)) for v in box)).resize((args.img_size, args.img_size), Image.Resampling.BICUBIC)
         for box in boxes
     ]
-    preds, confidences = _classify(crops, args)
-    labels = [code_to_label(p.item(), lang=args.lang) for p in preds]
-
+    preds, confidences = _classify(crops, model, device)
     lines = _group_into_lines(valid)
-    label_by_id = {id(c): (lbl, conf.item()) for c, lbl, conf in zip(valid, labels, confidences)}
+    text_lines, sentence = _assemble_transcription(
+        lines, valid, preds, confidences, args.lang, conf_threshold
+    )
 
-    print(f"\ntranscription attempt ({len(lines)} lines detected), checkpoint={args.checkpoint}:\n")
-    for line in lines:
-        line_labels = [label_by_id[id(c)][0] for c in line]
-        print("  " + _assemble_line_text(line, line_labels))
+    return {
+        "num_dots": len(points),
+        "num_clusters": len(clusters),
+        "num_merged": sum(c["merged"] for c in clusters),
+        "cell_size": (cell_w, cell_h),
+        "lines": text_lines,
+        "sentence": sentence,
+        "num_valid_cells": len(valid),
+        "clusters": clusters,
+        "valid": valid,
+        "boxes": boxes,
+        "preds": preds,
+        "confidences": confidences,
+        "grouped_lines": lines,
+    }
+
+
+def run_auto(image, args, model=None, device=None, quiet=False):
+    result = run_auto_transcribe(image, args, model=model, device=device)
+
+    if not quiet:
+        print(f"detected {result['num_dots']} candidate dots -> {result['num_clusters']} cell clusters "
+              f"({result['num_merged']} flagged as merged/uncertain)")
+        cell_w, cell_h = result["cell_size"]
+        print(f"estimated single-cell size: {cell_w:.1f} x {cell_h:.1f} px")
+        print(f"\ntranscription ({len(result['lines'])} lines detected), checkpoint={args.checkpoint}:\n")
+        for line in result["lines"]:
+            print(f"  {line}")
 
     if args.debug_out:
         overlay = image.convert("RGB").copy()
         draw = ImageDraw.Draw(overlay)
-        for c in clusters:
+        for c in result["clusters"]:
             color = (255, 0, 0) if c["merged"] else (0, 255, 0)
             x0, y0, x1, y1 = c["bbox"]
             draw.rectangle([x0 - 2, y0 - 2, x1 + 2, y1 + 2], outline=color, width=1)
-        for c, box in zip(valid, boxes):
-            lbl, conf = label_by_id[id(c)]
+        cell_label_by_id = {
+            id(c): (code_to_label(result["preds"][i].item(), lang=args.lang), result["confidences"][i].item())
+            for i, c in enumerate(result["valid"])
+        }
+        for c, box in zip(result["valid"], result["boxes"]):
+            lbl, _conf = cell_label_by_id[id(c)]
             draw.rectangle(box, outline=(0, 128, 255), width=1)
             draw.text((box[0], max(box[1] - 10, 0)), f"{lbl}", fill=(0, 128, 255))
         overlay.save(args.debug_out)
-        print(f"\nsaved debug overlay: {args.debug_out} "
-              f"(green = single-cell cluster, red = flagged merged cluster, blue = classified crop box)")
+        if not quiet:
+            print(f"\nsaved debug overlay: {args.debug_out} "
+                  f"(green = single-cell cluster, red = flagged merged cluster, blue = classified crop box)")
+
+    return result
 
 
 # --------------------------------------------------------------- shared
 
-def _classify(crops, args):
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+def load_model(checkpoint: str, device: torch.device):
+    """Load the CNN once at startup and return the model ready for inference."""
     model = SimpleBrailleCNN(num_classes=NUM_CLASSES).to(device)
-    model.load_state_dict(torch.load(args.checkpoint, map_location=device))
+    model.load_state_dict(torch.load(checkpoint, map_location=device, weights_only=True))
     model.eval()
+    return model
 
+
+def _classify(crops, model, device):
+    """Run inference on a list of PIL crops using a pre-loaded model."""
     if not crops:
         return torch.empty(0, dtype=torch.long), torch.empty(0)
 
@@ -251,7 +368,9 @@ def _classify(crops, args):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--image", type=str, required=True, help="path to the page photo/scan")
+    parser.add_argument("--image", type=str, default=None, help="path to the page photo/scan")
+    parser.add_argument("--camera", action="store_true",
+                         help="open a live camera feed instead of a static image (uses camera_capture/)")
     parser.add_argument("--auto", action="store_true",
                          help="detect dots and cluster into cells automatically instead of a fixed --rows/--cols grid")
     parser.add_argument("--rows", type=int, default=None, help="[fixed-grid] number of braille-cell rows in --region")
@@ -274,19 +393,31 @@ def main():
                               "(0.8 matches DBSIDataset's convention, i.e. what braille_cnn_dbsi_finetuned.pt "
                               "was actually trained on -- see dbsi_dataset.py's _cell_box)")
     parser.add_argument("--lang", type=str, default="en", choices=["en", "si"])
+    parser.add_argument("--conf-threshold", type=float, default=0.0,
+                        help="cells with softmax confidence below this are shown as '_' in transcription")
     parser.add_argument("--debug-out", type=str, default=None,
                          help="optional path to save an overlay image showing the detected/assumed grid")
     args = parser.parse_args()
 
+    if args.camera:
+        from camera_capture.camera import run_camera
+        run_camera(args)
+        return
+
+    if args.image is None:
+        parser.error("--image is required unless --camera is set")
     if not args.auto and (args.rows is None or args.cols is None):
         parser.error("--rows and --cols are required unless --auto is set")
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = load_model(args.checkpoint, device)
 
     image = Image.open(args.image).convert("L")
 
     if args.auto:
-        run_auto(image, args)
+        run_auto(image, args, model=model, device=device)
     else:
-        run_fixed_grid(image, args)
+        run_fixed_grid(image, args, model=model, device=device)
 
 
 if __name__ == "__main__":
