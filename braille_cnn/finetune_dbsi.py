@@ -31,11 +31,15 @@ def evaluate(model, loader, device):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dbsi-root", type=str, default="data DBSI")
-    parser.add_argument("--init-checkpoint", type=str, default="braille_cnn/checkpoints/braille_cnn_best.pt")
+    parser.add_argument("--init-checkpoint", type=str, default=None,
+                        help="pre-trained checkpoint to start from; omit or pass --scratch to train from random init")
+    parser.add_argument("--scratch", action="store_true",
+                        help="train from random initialisation (no --init-checkpoint needed)")
     parser.add_argument("--out-checkpoint", type=str, default="braille_cnn/checkpoints/braille_cnn_dbsi_finetuned.pt")
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--batch-size", type=int, default=64)
-    parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--lr", type=float, default=1e-3,
+                        help="learning rate (default 1e-3 suits scratch training; use 1e-4 when fine-tuning)")
     parser.add_argument("--img-size", type=int, default=64)
     parser.add_argument("--eval-subset", type=int, default=8000)
     parser.add_argument("--out-dir", type=str, default="braille_cnn/checkpoints")
@@ -56,10 +60,15 @@ def main():
     quick_eval_loader = DataLoader(quick_eval_ds, batch_size=256, shuffle=False)
 
     model = SimpleBrailleCNN(num_classes=NUM_CLASSES).to(device)
-    model.load_state_dict(torch.load(args.init_checkpoint, map_location=device))
+    from_scratch = args.scratch or args.init_checkpoint is None
+    if not from_scratch:
+        model.load_state_dict(torch.load(args.init_checkpoint, map_location=device, weights_only=True))
+        print(f"loaded init checkpoint: {args.init_checkpoint}")
+    else:
+        print("training from random initialisation (no pre-trained checkpoint)")
 
     start_acc, _ = evaluate(model, quick_eval_loader, device)
-    print(f"pre-finetune accuracy on eval subset: {start_acc:.4f}")
+    print(f"starting accuracy on eval subset: {start_acc:.4f}")
 
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
     criterion = nn.CrossEntropyLoss()
@@ -94,10 +103,13 @@ def main():
             print(f"  saved new best checkpoint ({args.out_checkpoint})")
 
     if best_acc == start_acc:
-        print("\nfine-tuning never beat the pre-finetune baseline; keeping the original checkpoint for final eval")
-        model.load_state_dict(torch.load(args.init_checkpoint, map_location=device))
+        if not from_scratch and args.init_checkpoint:
+            print("\ntraining never beat the starting baseline; reloading init checkpoint for final eval")
+            model.load_state_dict(torch.load(args.init_checkpoint, map_location=device, weights_only=True))
+        else:
+            print("\nno improvement over random init recorded; model state left as-is")
     else:
-        model.load_state_dict(torch.load(args.out_checkpoint, map_location=device))
+        model.load_state_dict(torch.load(args.out_checkpoint, map_location=device, weights_only=True))
 
     print("\nrunning full DBSI test-set evaluation with best checkpoint...")
     test_loader = DataLoader(test_ds, batch_size=256, shuffle=False)
