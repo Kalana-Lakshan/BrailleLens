@@ -15,7 +15,7 @@ class BrailleLensApp extends StatelessWidget {
     return MaterialApp(
       title: 'BrailleLens Offline',
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.darkTheme,
+      theme: AppTheme.darkHighContrastTheme,
       home: const HomeScreen(),
     );
   }
