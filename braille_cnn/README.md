@@ -5,6 +5,9 @@ dot patterns (2×3 grid, 6 bits) it is. Letter/language decoding is a separate l
 (`labels.py`), not baked into the model. This is the first sub-problem of the larger
 Braille-to-Sinhala transcription pipeline.
 
+For the full stage-by-stage walkthrough of what happens to an image at inference time (which
+file/function handles each step), see [`PIPELINE.md`](PIPELINE.md).
+
 ---
 
 ## Architecture Overview

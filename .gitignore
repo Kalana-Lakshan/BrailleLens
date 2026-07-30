@@ -9,5 +9,8 @@ braille_cnn/checkpoints/
 __pycache__/
 *.pyc
 
+# Virtual environment (recreate with: uv sync)
+.venv/
+
 # Debug / temp outputs
 debug_*.png
