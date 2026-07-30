@@ -56,6 +56,12 @@ Camera / Image
           Terminal / TTS output
 ```
 
+**Since this diagram was drawn**, `dot_detect.py`'s first stage gained an optional learned
+verification step (`DotPatchCNN`, via `--dot-classifier-checkpoint`) between dot detection and
+cell clustering, and a grid-fitting step (`fit_cell_grid`/`cluster_by_grid`) that replaces
+distance-based clustering when it succeeds — see Key findings 7-10 below for why, and the
+Quick start section for the full command.
+
 ### Why this split architecture?
 
 The CNN predicts **which 6-dot pattern** is embossed — a pure visual task with 64 classes.
@@ -147,8 +153,16 @@ python -m braille_cnn.finetune_dbsi
 # evaluate on DBSI
 python -m braille_cnn.eval_dbsi --checkpoint braille_cnn/checkpoints/braille_cnn_dbsi_finetuned.pt
 
+# train the dot verification classifier (DBSI ground truth)
+python -m braille_cnn.train_dot_classifier
+
 # infer on a real page photo (auto dot-detection, recommended)
 python -m braille_cnn.infer_page --image path/to/photo.jpg --auto --lang si --debug-out debug.png
+
+# full validated pipeline on a DBSI-style scan (see Key findings 7-10)
+python -m braille_cnn.infer_page --image path/to/scan.jpg --auto --lang si \
+    --dot-z-threshold 2.0 --dot-peak-y-offset 5.5 \
+    --dot-classifier-checkpoint braille_cnn/checkpoints/dot_classifier_best.pt --debug-out debug.png
 
 # verify the Sinhala label table (run after any edit to labels.py)
 python -m braille_cnn.check_labels
@@ -162,9 +176,10 @@ python -m braille_cnn.check_labels
 |---|---|---|---|
 | `braille_cnn_best.pt` | Synthetic renders only | Synthetic images (~100%) | Real photos (51.2% zero-shot on DBSI) |
 | `braille_cnn_dbsi_finetuned.pt` | Synthetic → fine-tuned on DBSI real scans | DBSI-style flatbed scans (98.44%) | Synthetic images (~14% — catastrophic forgetting) |
+| `dot_classifier_best.pt` | DBSI dot positions + own detector's false positives + mirrored verso bleed-through | Verifying candidate dots on DBSI-style scans (~99% precision, ~98.5% recall — see below) | Not yet confirmed on handheld phone photos (DBSI-only training data) |
 
-There is currently **no checkpoint good at both**, and neither is validated on handheld phone
-photos (see Known Issues).
+There is currently **no character-classification checkpoint good at both** synthetic and real
+images, and neither is validated on handheld phone photos (see Known Issues).
 
 ---
 
@@ -202,8 +217,11 @@ photos (see Known Issues).
 
 | File | What it does |
 |---|---|
-| `dot_detect.py` | Finds embossed-dot highlights in a raw photo via GaussianBlur difference + percentile threshold + non-max suppression + connected-component clustering. |
-| `infer_page.py` | End-to-end inference on a real page photo. `--auto` mode uses `dot_detect.py` (handles skew, variable line length). Fixed `--rows`/`--cols` grid mode for flat scans only. Always check `--debug-out`. |
+| `dot_detect.py` | Finds embossed-dot highlights in a raw photo (local z-score, not a global percentile — see Key findings), then either `cluster_by_grid` (preferred, needs `fit_cell_grid` to succeed) or `cluster_into_cells` (distance-based fallback) to group them into per-cell clusters. `fit_cell_grid`/`grid_cell_center` fit the page's regular cell grid from a clean point set and derive each cell's *true* center/pitch from the page-wide model instead of that cell's own (possibly incomplete/asymmetric) points. |
+| `dot_classifier.py` | `DotPatchCNN` — tiny binary CNN (32×32 patch → dot/not-dot), a learned replacement for brightness-threshold-only dot verification (mirrors the DSBI paper's own Haar+Adaboost approach). |
+| `dot_patch_dataset.py` | Builds `DotPatchCNN`'s training data from DBSI ground truth: positives anchored on the detector's own candidate peak (not the exact ground-truth pixel — matters, see Key findings) + jitter augmentation; negatives from the detector's real false positives plus explicit mirrored-verso bleed-through examples. |
+| `train_dot_classifier.py` | Trains `DotPatchCNN` → `dot_classifier_best.pt`. |
+| `infer_page.py` | End-to-end inference on a real page photo. `--auto` mode uses `dot_detect.py` (handles skew, variable line length). Fixed `--rows`/`--cols` grid mode for flat scans only. Always check `--debug-out`. Key flags for the full validated pipeline: `--dot-classifier-checkpoint braille_cnn/checkpoints/dot_classifier_best.pt --dot-peak-y-offset 5.5` (DBSI-calibrated, see Key findings — omit `--dot-peak-y-offset` for other capture domains until re-measured there). |
 
 ---
 
@@ -214,7 +232,12 @@ photos (see Known Issues).
 3. Fine-tuning on DBSI real train split fixes it: **98.44%** on full DBSI test set.
 4. Verso is slightly better than recto (98.65% vs 98.24%) — contradicts the papers' framing of verso as harder.
 5. Perspective/skew: synthetic-only checkpoint drops 99.97% → **87.47%** under a realistic homography warp. Not yet retrained to fix this.
-6. Real handheld phone photo: dot detection and cropping work visually, but neither checkpoint produces coherent letters — raking-light phone photos don't match either training domain. This is the primary remaining blocker.
+6. Real handheld phone photo: dot detection and cropping work visually, but neither checkpoint produces coherent letters — raking-light phone photos don't match either training domain. This remains the primary blocker for real deployment (see item 11).
+7. **A single global brightness threshold can't detect dots reliably across different photos** — settings tuned on one phone photo (~1000 real dots found) collapsed to ~140 (mostly false) on a differently-lit DBSI flatbed scan. Fixed with a *local* z-score instead of a global percentile (`dot_detect.detect_dot_centers`) — adapts per-region, no per-photo retuning.
+8. **No single detection threshold gets both good precision and good recall** — a sweep on held-out DBSI pages showed either ~44% precision/~86% recall or the reverse, never both. Fixed by adding `DotPatchCNN`, a learned dot/not-dot classifier (same strategy as the DSBI paper's Haar+Adaboost stage, modernized): **44-53% → ~99% precision at ~90%+ recall** on held-out pages.
+9. **Distance-based clustering silently merges adjacent real cells** whenever their combined dot count stays under the 6-dot limit (e.g. a 1-dot cell next to a 2-dot cell) — cost ~150 of 618 true cells their own cluster on a held-out page, invisibly (no merge-flag triggered). Fixed by `cluster_by_grid`: assign each point to its nearest *fitted grid slot* instead of clustering by geometric distance — matched-cell coverage went from 76% to 99% on that page.
+10. **This detector's peak lands a real, consistent ~2-6px ABOVE the true dot center** on DBSI scans (confirmed by averaging the z-field over 1000+ ground-truth dot positions on 5 different books — bright above center, cleanly negative below; a genuine asymmetric-lighting signature, not fixable by smarter peak-finding since the underlying signal itself is off-center). A calibrated `peak_y_offset=5.5` correction, combined with findings 8-9, took **end-to-end cell classification from 24.9% to 73.9-97.4%** across three held-out DBSI pages (see `infer_page.py`'s `--dot-peak-y-offset` flag). Confirmed via a controlled test that the *character CNN itself* is not the bottleneck: same cells, exact-vs-approximate crop only, 47.8% vs 96.2%.
+11. None of findings 7-10's specific calibrations (`peak_y_offset`, `DotPatchCNN`'s weights) are confirmed to transfer to real handheld phone photos — they were measured/trained on DBSI's specific scanner. Re-measure before assuming they apply to a different capture setup.
 
 ---
 
@@ -232,9 +255,10 @@ photos (see Known Issues).
 
 | Feature | Status |
 |---|---|
-| **Live camera feed** (Branch 2: `feat/camera-capture`) | Planned — `cv2.VideoCapture` loop with frame-stability check feeding into `run_auto` |
-| **Sinhala terminal output** (Branch 3: `feat/live-sinhala-output`) | Planned — in-place terminal refresh, confidence threshold, `decode_sequence()` integration |
-| **Handheld phone camera fine-tuning** | Blocked on collecting labeled real-camera crops |
+| **Live camera feed** (Branch 2: `feat/camera-capture`) | Done — see `camera_capture/` |
+| **Sinhala terminal output** (Branch 3: `feat/live-sinhala-output`) | Done — see `camera_capture/` |
+| **DBSI-domain detection + classification pipeline** | Done — 73.9-97.4% end-to-end on held-out DBSI pages (was ~25%), see Key findings 7-10 |
+| **Handheld phone camera fine-tuning** (character CNN *and* `DotPatchCNN`/`peak_y_offset`) | Blocked on collecting labeled real-camera crops — see Key finding 11 |
 | **Perspective/skew robustness** | Renderer supports it; model not yet retrained with it enabled |
 | **Finger occlusion handling** | Proposed: pre-scan page to build `(row,col)→char` table, then track fingertip per frame |
 | **Angelina dataset** | Deferred — needs full-page detection or object-detection architecture |

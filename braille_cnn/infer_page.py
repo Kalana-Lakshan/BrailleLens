@@ -27,7 +27,16 @@ import torch
 from PIL import Image, ImageDraw
 
 from .cnn import SimpleBrailleCNN
-from .dot_detect import cluster_into_cells, detect_dot_centers
+from .dot_classifier import DotPatchCNN
+from .dot_detect import (
+    cluster_by_grid,
+    cluster_into_cells,
+    detect_dot_centers,
+    estimate_link_distance,
+    fit_cell_grid,
+    grid_cell_center,
+)
+from .normalize import normalize_crop
 from .labels import (
     CODE_TO_SINHALA,
     INDICATOR_CODES,
@@ -137,6 +146,29 @@ def _cluster_crop_box(center, cell_w, cell_h, margin_scale, img_w, img_h):
     )
 
 
+def _grid_crop_box(center, dx, dy, margin_scale, img_w, img_h):
+    """Crop box matching DBSIDataset._cell_box's exact (asymmetric!) formula:
+    width = dx*(1 + 2*margin_scale), height = 2*dy*(1 + margin_scale) -- the
+    vertical margin there is scaled off a single row-gap (y1-y0), not the
+    full top-to-bottom dot span (y2-y0), so width and height do NOT use the
+    same multiplier. braille_cnn_dbsi_finetuned.pt was trained on crops built
+    with this exact formula (via DBSIDataset); _cluster_crop_box's symmetric
+    formula only approximates it via a single averaged cell_w/cell_h, which
+    measurably hurt accuracy (47.8% vs 96.2% on the same held-out cells with
+    an exact-formula crop -- see chat history / README). Only usable where a
+    grid fit succeeded (need dx, dy from dot_detect.fit_cell_grid).
+    """
+    cx, cy = center
+    half_w = dx * (0.5 + margin_scale)
+    half_h = dy * (1.0 + margin_scale)
+    return (
+        max(cx - half_w, 0),
+        max(cy - half_h, 0),
+        min(cx + half_w, img_w),
+        min(cy + half_h, img_h),
+    )
+
+
 def _line_gap_threshold(sorted_ys, cell_h_med):
     """Otsu-split the y-center gaps into "same line" vs "line break" groups.
 
@@ -176,6 +208,27 @@ def _group_into_lines(clusters):
     return lines
 
 
+def _group_into_lines_by_grid(valid, centers, grid):
+    """Same output shape as _group_into_lines, but groups by the fitted
+    grid's own line index instead of a separate y-gap heuristic -- exact
+    (derived from the same page-wide model already used for crop centering)
+    instead of approximate, and avoids the two disagreeing (confirmed: the
+    y-gap heuristic reported 40 "lines" on a page the grid fit correctly
+    resolved to 28, once noisy/near-miss cluster y-jitter got amplified by
+    grid-based clustering producing more, cleaner, more tightly-spaced
+    clusters per true line than before).
+    """
+    Py, phase_y = grid["Py"], grid["phase_y"]
+    by_line = {}
+    for c, center in zip(valid, centers):
+        line_idx = int(round((center[1] - phase_y) / Py))
+        by_line.setdefault(line_idx, []).append(c)
+    lines = [by_line[k] for k in sorted(by_line)]
+    for line in lines:
+        line.sort(key=lambda c: c["center"][0])
+    return lines
+
+
 def _line_word_gaps(line):
     gaps = [
         line[i + 1]["bbox"][0] - line[i]["bbox"][2]
@@ -196,7 +249,7 @@ def _assemble_line_text(line, labels):
     return "".join(out)
 
 
-def _decode_line_with_confidence(line, code_by_id, conf_by_id, lang, conf_threshold):
+def _decode_line_with_confidence(line, code_by_id, lang, conf_threshold):
     """Assemble one braille line into readable text, marking low-confidence cells as '_'."""
     gaps, word_gap = _line_word_gaps(line)
 
@@ -248,47 +301,143 @@ def _decode_line_with_confidence(line, code_by_id, conf_by_id, lang, conf_thresh
 
 
 def _assemble_transcription(lines, valid, preds, confidences, lang, conf_threshold):
-    code_by_id = {id(c): preds[i].item() for i, c in enumerate(valid)}
-    conf_by_id = {id(c): confidences[i].item() for i, c in enumerate(valid)}
+    code_by_id = {
+        id(c): (preds[i].item(), confidences[i].item()) for i, c in enumerate(valid)
+    }
     text_lines = [
-        _decode_line_with_confidence(line, code_by_id, conf_by_id, lang, conf_threshold)
+        _decode_line_with_confidence(line, code_by_id, lang, conf_threshold)
         for line in lines
     ]
     sentence = "\n".join(text_lines)
     return text_lines, sentence
 
 
-def run_auto_transcribe(image, args, model=None, device=None):
+def load_dot_classifier(checkpoint: str, device: torch.device):
+    model = DotPatchCNN().to(device)
+    model.load_state_dict(torch.load(checkpoint, map_location=device, weights_only=True))
+    model.eval()
+    return model
+
+
+def verify_dots(points, image, dot_model, device, patch_size=32, threshold=0.5):
+    """Filters candidate dot points through a trained DotPatchCNN, dropping
+    ones it doesn't recognize as a real dot. See dot_patch_dataset.py /
+    train_dot_classifier.py -- this is the learned replacement for a
+    hand-tuned brightness threshold (mirrors the DSBI paper's own
+    Haar+Adaboost verification stage). Confirmed on held-out DBSI pages to
+    take raw-detector precision from ~44-53% to ~99% at a modest recall cost
+    (~86% -> ~90% depending on settings); NOT yet confirmed to transfer to
+    real handheld photos (trained on DBSI only) -- see chat history/README.
+    """
+    if len(points) == 0:
+        return points
+    half = patch_size // 2
+    patches, keep_idx = [], []
+    for i, (x, y) in enumerate(points):
+        xi, yi = int(round(x)), int(round(y))
+        box = (xi - half, yi - half, xi - half + patch_size, yi - half + patch_size)
+        if box[0] < 0 or box[1] < 0 or box[2] > image.width or box[3] > image.height:
+            continue
+        patches.append(np.asarray(image.crop(box), dtype=np.uint8))
+        keep_idx.append(i)
+    if not patches:
+        return np.empty((0, 2))
+    batch = torch.from_numpy(np.stack(patches)).float().unsqueeze(1).to(device) / 255.0
+    with torch.no_grad():
+        probs = torch.softmax(dot_model(batch), dim=1)[:, 1].cpu().numpy()
+    keep_idx = np.array(keep_idx)[probs > threshold]
+    return points[keep_idx]
+
+
+def run_auto_transcribe(image, args, model=None, device=None, dot_model=None):
     """Detect, classify, and return structured transcription data (no printing)."""
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if model is None:
         model = load_model(args.checkpoint, device)
 
+    dot_classifier_checkpoint = getattr(args, "dot_classifier_checkpoint", None)
+    if dot_model is None and dot_classifier_checkpoint:
+        dot_model = load_dot_classifier(dot_classifier_checkpoint, device)
+
     conf_threshold = getattr(args, "conf_threshold", 0.0)
 
     gray = np.asarray(image, dtype=np.float32)
-    points = detect_dot_centers(gray, percentile=args.dot_percentile, footprint=args.dot_footprint)
-    clusters = cluster_into_cells(points, link_distance=args.link_distance)
+    points = detect_dot_centers(gray, z_threshold=args.dot_z_threshold, footprint=args.dot_footprint,
+                                 peak_y_offset=getattr(args, "dot_peak_y_offset", 0.0))
+    if dot_model is not None:
+        points = verify_dots(points, image, dot_model, device,
+                              threshold=getattr(args, "dot_classifier_threshold", 0.5))
+
+    # Fit the page's regular cell grid from the (ideally classifier-verified,
+    # i.e. clean) points first, since it changes BOTH how points get grouped
+    # into cells and where each cell's crop is centered:
+    #
+    # - Clustering: cluster_into_cells' distance threshold can silently fuse
+    #   two different real cells into one "valid" (not merged-flagged)
+    #   cluster whenever their combined point count stays under the 6-dot
+    #   limit (e.g. a 1-dot cell next to a 2-dot cell). Confirmed on a
+    #   held-out DBSI page: this cost ~150 of 618 true cells their own
+    #   cluster. cluster_by_grid assigns each point to whichever grid slot
+    #   it's actually closest to, so two real cells can't merge as long as
+    #   the grid fit itself is accurate -- pushed matched-cell coverage from
+    #   76% to 99% on that same page.
+    # - Centering: a cluster's own point centroid is a bad crop center for
+    #   asymmetric dot patterns (e.g. only the right-column dots active
+    #   pulls the centroid off the true cell center); the grid's fitted
+    #   center doesn't have that problem.
+    #
+    # Only trust either on a clean point set -- the same fit attempted on
+    # raw noisy (unverified) detections failed outright (see chat history).
+    grid = fit_cell_grid(points) if getattr(args, "use_cell_grid", True) else None
+
+    if grid is not None:
+        clusters = cluster_by_grid(points, grid)
+        link_distance = None
+    else:
+        link_distance = args.link_distance
+        if link_distance is None:
+            link_distance = estimate_link_distance(points)
+        clusters = cluster_into_cells(points, link_distance=link_distance)
 
     cell_w, cell_h = _estimate_cell_size(clusters)
     valid = [c for c in clusters if not c["merged"]]
+
+    centers = []
+    used_grid_box = []
+    for c in valid:
+        center = c["center"]
+        on_grid = False
+        if grid is not None:
+            fitted = grid_cell_center(center, grid)
+            if fitted is not None:
+                center = fitted
+                on_grid = True
+        centers.append(center)
+        used_grid_box.append(on_grid)
+
     boxes = [
-        _cluster_crop_box(c["center"], cell_w, cell_h, args.cell_margin_scale, image.width, image.height)
-        for c in valid
+        _grid_crop_box(center, grid["dx"], grid["dy"], args.cell_margin_scale, image.width, image.height)
+        if on_grid else
+        _cluster_crop_box(center, cell_w, cell_h, args.cell_margin_scale, image.width, image.height)
+        for center, on_grid in zip(centers, used_grid_box)
     ]
     crops = [
         image.crop(tuple(int(round(v)) for v in box)).resize((args.img_size, args.img_size), Image.Resampling.BICUBIC)
         for box in boxes
     ]
     preds, confidences = _classify(crops, model, device)
-    lines = _group_into_lines(valid)
+    if grid is not None:
+        lines = _group_into_lines_by_grid(valid, centers, grid)
+    else:
+        lines = _group_into_lines(valid)
     text_lines, sentence = _assemble_transcription(
         lines, valid, preds, confidences, args.lang, conf_threshold
     )
 
     return {
         "num_dots": len(points),
+        "link_distance": link_distance,
         "num_clusters": len(clusters),
         "num_merged": sum(c["merged"] for c in clusters),
         "cell_size": (cell_w, cell_h),
@@ -308,8 +457,9 @@ def run_auto(image, args, model=None, device=None, quiet=False):
     result = run_auto_transcribe(image, args, model=model, device=device)
 
     if not quiet:
+        link_desc = f"{result['link_distance']:.1f}px" if result["link_distance"] is not None else "n/a (grid-based clustering)"
         print(f"detected {result['num_dots']} candidate dots -> {result['num_clusters']} cell clusters "
-              f"({result['num_merged']} flagged as merged/uncertain)")
+              f"({result['num_merged']} flagged as merged/uncertain), link_distance={link_desc}")
         cell_w, cell_h = result["cell_size"]
         print(f"estimated single-cell size: {cell_w:.1f} x {cell_h:.1f} px")
         print(f"\ntranscription ({len(result['lines'])} lines detected), checkpoint={args.checkpoint}:\n")
@@ -355,7 +505,7 @@ def _classify(crops, model, device):
         return torch.empty(0, dtype=torch.long), torch.empty(0)
 
     batch = torch.stack([
-        torch.from_numpy(np.asarray(crop, dtype=np.float32) / 255.0).unsqueeze(0)
+        torch.from_numpy(normalize_crop(crop)).unsqueeze(0)
         for crop in crops
     ]).to(device)
 
@@ -377,12 +527,39 @@ def main():
     parser.add_argument("--cols", type=int, default=None, help="[fixed-grid] number of braille-cell columns in --region")
     parser.add_argument("--region", type=str, default=None,
                          help="[fixed-grid] x0,y0,x1,y1 pixel box containing the grid; default is the whole image")
-    parser.add_argument("--link-distance", type=float, default=15.0,
-                         help="[auto] max pixel distance between dots to link them into the same cell")
-    parser.add_argument("--dot-percentile", type=float, default=99.3,
-                         help="[auto] brightness-difference percentile cutoff for a peak to count as a dot")
+    parser.add_argument("--link-distance", type=float, default=None,
+                         help="[auto] max pixel distance between dots to link them into the same cell; "
+                              "default (unset) auto-estimates this per-image from the photo's own dot "
+                              "spacing instead of assuming one fixed pixel value (see "
+                              "dot_detect.estimate_link_distance)")
+    parser.add_argument("--dot-z-threshold", type=float, default=3.0,
+                         help="[auto] local z-score cutoff for a peak to count as a dot (see dot_detect.py); "
+                              "adapts per-region instead of one global brightness percentile, so it transfers "
+                              "across photos/scans with different lighting without retuning")
     parser.add_argument("--dot-footprint", type=int, default=9,
                          help="[auto] non-max-suppression window in pixels (~one dot's diameter)")
+    parser.add_argument("--dot-peak-y-offset", type=float, default=0.0,
+                         help="[auto] added to every detected dot's y-coordinate. Confirmed empirically on 5 "
+                              "different DBSI books that this detector's peak lands ~2-6px ABOVE the true dot "
+                              "center (a real asymmetric-lighting effect in the underlying signal, not a bug a "
+                              "smarter peak-finder fixes -- see dot_detect.detect_dot_centers docstring). 5.5 is "
+                              "a well-supported default for DBSI-style flatbed scans (cut end-to-end "
+                              "misclassification roughly in half across 3 held-out pages); defaults to 0.0 "
+                              "(off) here since it's unverified on other capture setups (e.g. phone photos) -- "
+                              "re-measure before assuming it transfers.")
+    parser.add_argument("--dot-classifier-checkpoint", type=str, default=None,
+                         help="[auto] optional path to a trained DotPatchCNN (train_dot_classifier.py) to verify "
+                              "candidate dots before clustering, replacing brightness-threshold-only filtering. "
+                              "Validated on held-out DBSI pages (~44-53%% -> ~99%% precision); NOT yet confirmed "
+                              "to transfer to real handheld photos (DBSI-only training data) -- disabled by "
+                              "default for that reason.")
+    parser.add_argument("--dot-classifier-threshold", type=float, default=0.5,
+                         help="[auto] softmax probability cutoff for the dot classifier, if enabled")
+    parser.add_argument("--no-cell-grid", dest="use_cell_grid", action="store_false",
+                         help="[auto] disable grid-fitted crop centering (dot_detect.fit_cell_grid) and fall "
+                              "back to the raw cluster centroid; grid-fitting needs a reasonably clean point "
+                              "set to work well (pair with --dot-classifier-checkpoint) or it may do nothing "
+                              "useful (falls back silently per-cell where the fit doesn't cover it)")
     parser.add_argument("--checkpoint", type=str,
                          default="braille_cnn/checkpoints/braille_cnn_dbsi_finetuned.pt")
     parser.add_argument("--img-size", type=int, default=64)
