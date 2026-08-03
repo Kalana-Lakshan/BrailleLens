@@ -62,6 +62,15 @@ converted to a grayscale array. No other preprocessing at this stage.
   `dy`), cell-to-cell pitch (`Px`, `Py`), and each line's horizontal starting position
   (`line_phase_x` — fit **per line**, since indentation/content varies line to line, unlike `Py`
   which is fit once for the whole page since lines stack vertically in a regular way).
+- **Column-swap ambiguity fix (`_resolve_column_ambiguity`)**: a cell's two dot columns are `dx`
+  apart, so fitting each line's phase independently can lock onto "the right column is offset 0"
+  instead of "the left column is offset 0" — indistinguishable from one line's x-positions alone.
+  Confirmed on a real DBSI page: this was silently costing ~67 accuracy points end-to-end (30.1% →
+  97.4% once fixed). Fixed by chain-resolving each line's phase against its already-resolved
+  *neighbor* in line order (not one single global reference — a global-reference version fixed
+  DBSI identically but wrecked Angelina, since a handheld photo's phase can legitimately drift
+  smoothly line-to-line from perspective skew, and forcing every line to one fixed reference fights
+  that real drift). See `README.md` Key finding 16.
 - Refined with a least-squares polish pass (`_refine_x_fit`/`_refine_y_fit`, iterated a few times)
   for precision beyond the coarse tolerance-voting search.
 - Returns `None` if there aren't enough points or the page doesn't show clean periodicity (e.g.
@@ -87,12 +96,18 @@ Two paths, depending on whether Stage 4 succeeded:
 
 **File: `infer_page.py`, `_grid_crop_box` / `_cluster_crop_box`**
 
-- For grid-covered cells: crop box uses the grid's own `dx`/`dy` and reproduces
-  `DBSIDataset._cell_box`'s exact (asymmetric — width and height use different margin
-  multipliers) formula, since that's what the character CNN was actually trained on. A cluster's
-  own point centroid is also a bad crop center for asymmetric dot patterns (e.g. only the
-  right-column dots active pulls the centroid off the true cell center); `grid_cell_center`
-  derives the true center from the page-wide grid model instead.
+- For grid-covered cells: crop box uses the grid's own `dx`/`dy` and reproduces whichever crop
+  *shape* the loaded character-CNN checkpoint was actually trained on — selected via
+  `--crop-shape`. `dbsi` (default) reproduces `DBSIDataset._cell_box`'s exact (asymmetric — width
+  and height use different margin multipliers) formula: width `dx*(1+2*margin)`, height
+  `2*dy*(1+margin)`. `angelina` reproduces `AngelinaDataset`'s box convention instead: width
+  `2*dx*(1+2*margin)`, height `3*dy*(1+2*margin)` (symmetric margin) — confirmed empirically that
+  its cell boxes are ~2×dx wide by ~3×dy tall, not DBSI's dx-wide/2×dy-tall shape. Using the wrong
+  shape for the loaded checkpoint's domain silently costs ~33 accuracy points end-to-end even with
+  an otherwise-correct grid fit (see `README.md` Key finding 12-13) — always match `--crop-shape`
+  to `--checkpoint`'s training domain. A cluster's own point centroid is also a bad crop center for
+  asymmetric dot patterns (e.g. only the right-column dots active pulls the centroid off the true
+  cell center); `grid_cell_center` derives the true center from the page-wide grid model instead.
 - For non-grid-covered cells: falls back to a page-wide average cell size (`_estimate_cell_size`)
   and the cluster's own centroid.
 - Each crop is resized to 64×64.

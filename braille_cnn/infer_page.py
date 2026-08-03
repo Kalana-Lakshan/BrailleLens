@@ -33,6 +33,7 @@ from .dot_detect import (
     cluster_into_cells,
     detect_dot_centers,
     estimate_link_distance,
+    filter_ruler_lines,
     fit_cell_grid,
     grid_cell_center,
 )
@@ -161,6 +162,32 @@ def _grid_crop_box(center, dx, dy, margin_scale, img_w, img_h):
     cx, cy = center
     half_w = dx * (0.5 + margin_scale)
     half_h = dy * (1.0 + margin_scale)
+    return (
+        max(cx - half_w, 0),
+        max(cy - half_h, 0),
+        min(cx + half_w, img_w),
+        min(cy + half_h, img_h),
+    )
+
+
+def _angelina_grid_crop_box(center, dx, dy, margin_scale, img_w, img_h):
+    """Crop box matching AngelinaDataset's box convention: its annotated
+    cell boxes are consistently ~2*dx wide by ~3*dy tall (confirmed by
+    measuring true box width/height against a fitted grid's dx/dy on a real
+    Angelina photo: width/dx=1.98, height/dy=3.07), unlike DBSI's tighter,
+    asymmetric _grid_crop_box formula. Using the DBSI formula's crop shape
+    on an Angelina photo starved the classifier of most of its cell margin
+    (~60% the expected crop size) and measurably wrecked accuracy end-to-end
+    (10% vs 43% on the same detected cells with this formula, same
+    checkpoint) even though braille_cnn_angelina_finetuned.pt saw both crop
+    conventions during its mixed fine-tuning -- crop *shape*, not just
+    classifier training domain, matters. margin_scale is applied the same
+    way AngelinaDataset itself applies it (symmetric fraction of box
+    width/height), not DBSI's per-axis-different convention.
+    """
+    cx, cy = center
+    half_w = dx * (1.0 + 2 * margin_scale)
+    half_h = 1.5 * dy * (1.0 + 2 * margin_scale)
     return (
         max(cx - half_w, 0),
         max(cy - half_h, 0),
@@ -369,6 +396,9 @@ def run_auto_transcribe(image, args, model=None, device=None, dot_model=None):
         points = verify_dots(points, image, dot_model, device,
                               threshold=getattr(args, "dot_classifier_threshold", 0.5))
 
+    if getattr(args, "filter_ruler_lines", True):
+        points = filter_ruler_lines(points)
+
     # Fit the page's regular cell grid from the (ideally classifier-verified,
     # i.e. clean) points first, since it changes BOTH how points get grouped
     # into cells and where each cell's crop is centered:
@@ -416,10 +446,15 @@ def run_auto_transcribe(image, args, model=None, device=None, dot_model=None):
         centers.append(center)
         used_grid_box.append(on_grid)
 
+    crop_shape = getattr(args, "crop_shape", "dbsi")
+    crop_shape_fn = _angelina_grid_crop_box if crop_shape == "angelina" else _grid_crop_box
+    cell_margin_scale = getattr(args, "cell_margin_scale", None)
+    if cell_margin_scale is None:
+        cell_margin_scale = 0.15 if crop_shape == "angelina" else 0.8
     boxes = [
-        _grid_crop_box(center, grid["dx"], grid["dy"], args.cell_margin_scale, image.width, image.height)
+        crop_shape_fn(center, grid["dx"], grid["dy"], cell_margin_scale, image.width, image.height)
         if on_grid else
-        _cluster_crop_box(center, cell_w, cell_h, args.cell_margin_scale, image.width, image.height)
+        _cluster_crop_box(center, cell_w, cell_h, cell_margin_scale, image.width, image.height)
         for center, on_grid in zip(centers, used_grid_box)
     ]
     crops = [
@@ -555,20 +590,39 @@ def main():
                               "default for that reason.")
     parser.add_argument("--dot-classifier-threshold", type=float, default=0.5,
                          help="[auto] softmax probability cutoff for the dot classifier, if enabled")
+    parser.add_argument("--crop-shape", type=str, default="dbsi", choices=["dbsi", "angelina"],
+                         help="[auto] which crop-box geometry to use when a grid fit succeeds: 'dbsi' (dx wide x "
+                              "2*dy tall, asymmetric margin -- matches DBSIDataset/_grid_crop_box, what "
+                              "braille_cnn_dbsi_finetuned.pt was built on) or 'angelina' (2*dx wide x 3*dy tall, "
+                              "symmetric margin -- matches AngelinaDataset's own box convention). Getting this "
+                              "wrong for the photo's actual domain silently starves the classifier of the crop "
+                              "shape it was trained on -- confirmed to cost ~33 accuracy points end-to-end on a "
+                              "real Angelina photo even with an otherwise-correct grid fit and checkpoint. Use "
+                              "'angelina' for real handheld phone photos, 'dbsi' for flatbed scans.")
     parser.add_argument("--no-cell-grid", dest="use_cell_grid", action="store_false",
                          help="[auto] disable grid-fitted crop centering (dot_detect.fit_cell_grid) and fall "
                               "back to the raw cluster centroid; grid-fitting needs a reasonably clean point "
                               "set to work well (pair with --dot-classifier-checkpoint) or it may do nothing "
                               "useful (falls back silently per-cell where the fit doesn't cover it)")
+    parser.add_argument("--no-ruler-line-filter", dest="filter_ruler_lines", action="store_false",
+                         help="[auto] disable filtering out long, dense, near-straight horizontal point runs "
+                              "(dot_detect.filter_ruler_lines) before grid-fitting/clustering -- some real "
+                              "Braille pages use a decorative/structural divider line between sections that "
+                              "isn't part of any cell but reads as many closely-spaced real dots to the "
+                              "detector, corrupting nearby cells' clustering and the page-wide grid fit if left "
+                              "in. On by default; disable only if it's incorrectly stripping real dots from a "
+                              "genuinely dense page.")
     parser.add_argument("--checkpoint", type=str,
                          default="braille_cnn/checkpoints/braille_cnn_dbsi_finetuned.pt")
     parser.add_argument("--img-size", type=int, default=64)
     parser.add_argument("--margin-scale", type=float, default=0.2,
                          help="[fixed-grid] extra padding around each cell as a fraction of cell PITCH")
-    parser.add_argument("--cell-margin-scale", type=float, default=0.8,
-                         help="[auto] extra padding around each cell as a fraction of the measured dot-span "
-                              "(0.8 matches DBSIDataset's convention, i.e. what braille_cnn_dbsi_finetuned.pt "
-                              "was actually trained on -- see dbsi_dataset.py's _cell_box)")
+    parser.add_argument("--cell-margin-scale", type=float, default=None,
+                         help="[auto] extra padding around each cell as a fraction of the measured dot-span. "
+                              "Defaults depend on --crop-shape: 0.8 for 'dbsi' (matches DBSIDataset's convention, "
+                              "see dbsi_dataset.py's _cell_box) or 0.15 for 'angelina' (matches AngelinaDataset's "
+                              "own margin_scale default -- confirmed empirically to be near-optimal on a real "
+                              "photo; both 0.3 and 0.8 measurably hurt accuracy there).")
     parser.add_argument("--lang", type=str, default="en", choices=["en", "si"])
     parser.add_argument("--conf-threshold", type=float, default=0.0,
                         help="cells with softmax confidence below this are shown as '_' in transcription")

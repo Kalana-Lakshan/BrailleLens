@@ -137,6 +137,86 @@ def estimate_link_distance(points, diagonal_factor=1.5, fallback=15.0, min_point
     return base_pitch * diagonal_factor
 
 
+def filter_ruler_lines(points, y_tol=3.0, max_gap_factor=1.5, min_chain_points=10,
+                        min_span_fraction=0.35):
+    """Removes points belonging to long, dense, near-straight horizontal
+    runs -- decorative/structural separator lines some real Braille pages
+    use between sections, which are not part of any cell but read as many
+    closely-spaced raised dots to the detector. Confirmed on a real user
+    photo (test-img3.jpeg): a visible dashed horizontal divider line
+    produced a solid run of detector points dense enough to flag every
+    cluster along it as "merged", and risks injecting noise into
+    fit_cell_grid's periodicity search for any real text line near it (its
+    points land in the same horizontal/vertical displacement histograms
+    used to estimate dx/dy/Px/Py).
+
+    Points are linked (mirroring cluster_into_cells' connected-components
+    approach) if they're within y_tol vertically and max_gap horizontally
+    of each other -- chaining like this (rather than one fixed y-bin)
+    tolerates a photo's slight overall tilt, since each individual link
+    only needs a small y-difference even though the whole chain can drift
+    further over its length. A resulting chain long AND wide enough to
+    only plausibly be a deliberate straight line is dropped entirely.
+
+    max_gap_factor is deliberately tight (1.5x the overall nearest-neighbor
+    scale, not a looser multiple like ~3.5x): a wider gap bridges real
+    same-subrow dots across DIFFERENT cells too (adjacent cells sharing,
+    say, their top-left dot are Px apart, not dx) -- confirmed this was a
+    real, severe false-positive mode on DBSI at max_gap_factor=3.5: dense
+    real text easily produces 14-25+ dots at the exact same sub-row height
+    across most of a line's width (there are only 3 possible sub-row
+    heights per line, so many cells sharing one by chance is normal, not
+    exceptional), which looks identical to a real divider line under a
+    loose gap/span/count check alone and cost DBSI ~37 accuracy points
+    (97.4% to 60.4%) by stripping real dots wholesale. The measured true
+    divider-line pitch on test-img3.jpeg was ~8-13px, well under any real
+    dx/Px on either DBSI or Angelina, so a tight max_gap (comfortably above
+    the divider's own pitch, comfortably below a real cross-cell gap)
+    empirically separates the two cleanly: confirmed to remove 0 points on
+    both DBSI and Angelina test pages while still fully removing the
+    test-img3.jpeg divider line's ~48 points.
+    """
+    n = len(points)
+    if n < min_chain_points:
+        return points
+    tree = cKDTree(points)
+    nn_dist, _ = tree.query(points, k=2)
+    scale = float(np.median(nn_dist[:, 1]))
+    if scale <= 0:
+        return points
+    max_gap = scale * max_gap_factor
+    page_width = points[:, 0].max() - points[:, 0].min()
+    if page_width <= 0:
+        return points
+
+    search_r = max(y_tol, max_gap)
+    pairs = tree.query_pairs(r=search_r, output_type="ndarray")
+    if len(pairs) == 0:
+        return points
+    dxp = np.abs(points[pairs[:, 0], 0] - points[pairs[:, 1], 0])
+    dyp = np.abs(points[pairs[:, 0], 1] - points[pairs[:, 1], 1])
+    linked = pairs[(dyp <= y_tol) & (dxp <= max_gap)]
+    if len(linked) == 0:
+        return points
+
+    rows = np.concatenate([linked[:, 0], linked[:, 1]])
+    cols = np.concatenate([linked[:, 1], linked[:, 0]])
+    data = np.ones(len(rows))
+    graph = csr_matrix((data, (rows, cols)), shape=(n, n))
+    n_comp, labels = connected_components(graph, directed=False)
+
+    ruler_mask = np.zeros(n, dtype=bool)
+    for label in range(n_comp):
+        idx = np.nonzero(labels == label)[0]
+        if len(idx) < min_chain_points:
+            continue
+        span = points[idx, 0].max() - points[idx, 0].min()
+        if span >= min_span_fraction * page_width:
+            ruler_mask[idx] = True
+
+    return points[~ruler_mask]
+
+
 def cluster_into_cells(points, link_distance=None):
     """Groups nearby dot centers into per-cell clusters via connected components.
 
@@ -235,6 +315,59 @@ def _best_phase(coords, period, suboffsets, tol=4.0, step=1.0):
     return best_phase, best_score
 
 
+def _snap_phase(phase, ref_phase, dx, Px):
+    """Of {phase, phase-dx, phase+dx}, returns whichever lands closest to
+    ref_phase modulo Px."""
+    best_ph, best_dist = phase, None
+    for cand in (phase, phase - dx, phase + dx):
+        dist = abs((cand - ref_phase + Px / 2) % Px - Px / 2)
+        if best_dist is None or dist < best_dist:
+            best_dist, best_ph = dist, cand
+    return best_ph
+
+
+def _resolve_column_ambiguity(line_phase_x, dx, Px, weights):
+    """Fixes a column-swap ambiguity in independently-fit per-line x-phases.
+
+    A cell's two dot columns are dx apart, so fitting phase_x per line via
+    _best_phase(..., [0, dx]) can lock onto "the right column is offset 0"
+    instead of "the left column is offset 0" -- indistinguishable from x
+    positions alone on a line whose own dot pattern happens to favor that
+    reading. Confirmed on a real DBSI page: independently-fit per-line
+    phases split into two clean clusters exactly dx apart (mod Px, residual
+    <2.5px on either side) rather than genuine indentation differences,
+    which cost the page ~65 accuracy points end-to-end (30% vs the 97%
+    class-level accuracy confirmed on ground-truth crops from the exact
+    same page) since half the lines' crops were centered a full dx off from
+    every true cell.
+
+    Resolves each line against its immediate NEIGHBOR in line order (not one
+    single global reference) -- confirmed necessary on a real Angelina
+    photo: unlike DBSI's flat scan, a handheld photo's per-line phase can
+    genuinely drift smoothly line-to-line (perspective skew), and snapping
+    every line to one fixed global reference fights that real drift instead
+    of just fixing the binary dx ambiguity, measurably hurting accuracy
+    there (20.7% vs 43.2%). Chaining from the most-supported line outward
+    through physical line order tracks real gradual drift (each snap
+    compares to an already-resolved *neighbor*, not a possibly-distant
+    reference) while still correcting an isolated dx-flip, since a flip is a
+    one-line outlier against its neighbors either way.
+    """
+    if len(line_phase_x) < 2:
+        return line_phase_x
+    lines_sorted = sorted(line_phase_x.keys())
+    anchor = max(line_phase_x, key=lambda li: weights.get(li, 0))
+    anchor_pos = lines_sorted.index(anchor)
+    resolved = {anchor: line_phase_x[anchor]}
+    for i in range(anchor_pos - 1, -1, -1):
+        li, prev_li = lines_sorted[i], lines_sorted[i + 1]
+        resolved[li] = _snap_phase(line_phase_x[li], resolved[prev_li], dx, Px)
+    for i in range(anchor_pos + 1, len(lines_sorted)):
+        li, prev_li = lines_sorted[i], lines_sorted[i - 1]
+        resolved[li] = _snap_phase(line_phase_x[li], resolved[prev_li], dx, Px)
+    return resolved
+
+
 def _refine_y_fit(points, dx, dy, Px, Py, phase_y, tol):
     """Least-squares polish of (phase_y, Py, dy) using ALL points at once
     (not the coarse per-value tolerance-voting search), given each point's
@@ -320,18 +453,65 @@ def fit_cell_grid(points, min_points=40, refine=True):
     points = np.asarray(points, dtype=np.float64)
     if len(points) < min_points:
         return None
+
+    # Scale anchor: overall 1st-nearest-neighbor distance, not restricted to
+    # one axis. This is resolution/distance-agnostic (a photo taken closer
+    # or scanned at a different DPI just scales this number), unlike a fixed
+    # pixel range -- confirmed necessary empirically: search bounds tuned
+    # for DBSI's scale (dx/dy ~20px) found completely wrong values (~2x too
+    # large for dx, ~1.5x too small for dy) on Angelina's photos, which have
+    # a different physical scale (cell width ~25px but a much bigger
+    # relative gap between cells) -- so a photo-specific pitch has to be
+    # re-derived from the photo's own points, not assumed from one dataset.
     tree = cKDTree(points)
-    pairs = tree.query_pairs(r=100.0, output_type="ndarray")
+    nn_dist, _ = tree.query(points, k=2)
+    scale_anchor = float(np.median(nn_dist[:, 1]))
+    if scale_anchor <= 0:
+        return None
+
+    search_radius = max(100.0, scale_anchor * 10)
+    pairs = tree.query_pairs(r=search_radius, output_type="ndarray")
     if len(pairs) == 0:
         return None
     disp = points[pairs[:, 1]] - points[pairs[:, 0]]
 
     horiz = np.abs(disp[np.abs(disp[:, 1]) < 6][:, 0])
     vert = np.abs(disp[np.abs(disp[:, 0]) < 6][:, 1])
-    dx, _ = _robust_peak(horiz, 10, 35)
-    dy, _ = _robust_peak(vert, 10, 35)
-    Px, _ = _robust_peak(horiz, 38, 70)
-    Py, _ = _robust_peak(vert, 65, 100)
+
+    # Vertical periodicity is the cleaner signal to estimate the fundamental
+    # dot pitch from: horizontal has an extra confound vertical doesn't --
+    # real text has inter-WORD gaps (a third, larger structural spacing) on
+    # top of intra-cell and inter-cell spacing, and that third peak can
+    # outvote the true (smaller) intra-cell pitch in an unconstrained global
+    # search. Confirmed on a real photo: the single strongest horizontal
+    # peak (143 votes) was ~2.5x the true dot pitch found cleanly on the
+    # vertical axis (only two peaks there, cleanly harmonically related).
+    # Standard Braille dot spacing is physically ~isotropic (nearly the same
+    # horizontal and vertical pitch by spec), so dy anchors the dx search
+    # range instead of searching dx independently and risking exactly that
+    # word-gap confound. Falls back to an unconstrained search if nothing
+    # is found near dy (e.g. a genuinely different layout).
+    #
+    # The anchor window has to be kept tight (~+-35%), not the physically
+    # "safe"-looking 0.6-1.7x: a real photo has another confound at almost
+    # exactly Px-dx (the gap from one cell's rightmost dot column to the
+    # next cell's leftmost one) which a wide window happily includes.
+    # Confirmed on an Angelina photo: true dx=14 (verified directly from
+    # points matched to their ground-truth cell), but Px-dx=33-14=19 sat
+    # inside the old [dy*0.6, dy*1.7] window and had denser local support
+    # there than the true, wider-spread 12-16 cluster, so the tolerance
+    # search locked onto ~19 instead -- which then pushed the Px search's
+    # lower bound (dx*1.8) past the true Px peak entirely and onto its 2x
+    # harmonic. A tighter window keeps that Px-dx confound (~1.4-1.9x dy
+    # once dx is even a little too high) out of range from the start.
+    dy, _ = _robust_peak(vert, scale_anchor * 0.4, scale_anchor * 2.2)
+    if dy is None:
+        return None
+    dx, dx_votes = _robust_peak(horiz, dy * 0.75, dy * 1.35)
+    if dx is None:
+        dx, _ = _robust_peak(horiz, scale_anchor * 0.4, scale_anchor * 2.2)
+    Px, _ = _robust_peak(horiz, max(scale_anchor * 2.2, dx * 1.8 if dx else 0), scale_anchor * 8)
+    Py, _ = _robust_peak(vert, scale_anchor * 2.2, scale_anchor * 8)
     if None in (dx, dy, Px, Py):
         return None
 
@@ -351,12 +531,16 @@ def fit_cell_grid(points, min_points=40, refine=True):
 
     line_idx = np.round((points[:, 1] - phase_y) / Py).astype(int)
     line_phase_x = {}
+    line_weights = {}
     for li in np.unique(line_idx):
         mask = line_idx == li
         if mask.sum() < 4:
             continue
         ph, _ = _best_phase(points[mask, 0], Px, [0, dx])
         line_phase_x[int(li)] = ph
+        line_weights[int(li)] = int(mask.sum())
+
+    line_phase_x = _resolve_column_ambiguity(line_phase_x, dx, Px, line_weights)
 
     if refine:
         for _ in range(4):

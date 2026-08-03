@@ -32,4 +32,4 @@ class SyntheticBrailleDataset(Dataset):
         img = render_braille_cell(code, img_size=self.img_size, augment=True, rng=rng, max_perspective=self.max_perspective)
         arr = normalize_crop(img)
         tensor = torch.from_numpy(arr).unsqueeze(0)
-        return tensor, class_idx
+        return tensor, torch.tensor(class_idx, dtype=torch.int64)
