@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m braille_cnn.infer_page --image \"test-img2.jpeg\" --auto --checkpoint braille_cnn/checkpoints_normalized/braille_cnn_dbsi_finetuned.pt)",
+      "Bash(py -3.11 -c ' *)",
+      "Bash(py -3.11 -m braille_cnn.train_dot_classifier)",
+      "Bash(py -3.11 *)",
+      "Bash(uv --version)",
+      "Bash(uv venv *)",
+      "Bash(uv add *)",
+      "Bash(.venv/Scripts/python.exe -c \"import torch; print\\(torch.__version__, 'cuda available:', torch.cuda.is_available\\(\\)\\)\")",
+      "Bash(nvidia-smi)",
+      "Bash(.venv/Scripts/python.exe -c ' *)",
+      "Bash(py -3.11 -m braille_cnn.infer_page --image test-img3.jpeg --auto --checkpoint braille_cnn/checkpoints/braille_cnn_angelina_finetuned.pt --dot-classifier-checkpoint braille_cnn/checkpoints/dot_classifier_mixed.pt --dot-z-threshold 1.5 --crop-shape angelina --debug-out /c/Users/Himandhi/AppData/Local/Temp/claude/c--UOM-CSE--5th-semester-BrailleLens/4c8d318b-7ec4-4340-90f1-863626b6fc95/scratchpad/testimg3_debug_filtered.png)"
+    ]
+  }
+}

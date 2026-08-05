@@ -2,6 +2,9 @@
 data DBSI/
 AngelinaDataset-master/
 
+# Architecture docs (generated/local)
+docs/architecture/
+
 # Trained model weights and eval artifacts
 braille_cnn/checkpoints/
 *.npy

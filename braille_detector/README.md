@@ -71,7 +71,56 @@ python -m braille_detector.infer --checkpoint braille_detector/checkpoints/detec
 
 ## Status
 
-First working proof-of-concept, not yet a tuned/converged model — see chat
-history for the actual accuracy numbers from the first training run and how
-they compare to `braille_cnn/`'s grid-fitting pipeline (97.4% DBSI / 43.2%
-Angelina, end-to-end, on the same two held-out test pages).
+Two training rounds so far, 18000 steps total (CPU), on combined DBSI +
+Angelina page data. End-to-end results on the same two held-out test pages
+used throughout this session for `braille_cnn/`'s numbers:
+
+| | `braille_cnn/` (grid-fitting) | `braille_detector/` round 1 (9000 steps, fixed scale) | round 2 (+9000 steps: scale-jitter + rotation aug, auto-calibrated scale) |
+|---|---|---|---|
+| DBSI FM+17+recto (618 cells) | **97.4%** | 62.3% | 72.0% |
+| Angelina chudo_derevo (169 cells) | 43.2% | 91.1% | **98.8%** |
+
+**Angelina now essentially matches ground-truth-crop accuracy (98.8%)** and
+beats the grid-fitting pipeline by over 2x — the headline result, since
+that's exactly the domain (real handheld photos) where this session's
+grid-fitting bugs kept showing up, and the object-detection approach has no
+grid to get wrong.
+
+**DBSI improved (62.3%→72.0%) but is still behind** (vs 97.4%) — diagnosed
+in round 1 as a real recall gap, not classification: predicted box size
+matches ground truth almost exactly, and classification is ~94-98% accurate
+wherever a prediction *is* matched. DBSI's much higher page density (618
+characters vs Angelina's 169 on the two test pages) plausibly still needs
+more training exposure than Angelina to close the rest of the gap.
+
+**Round 2 additions** (see `data.py`, `scale.py`):
+- **Scale-jitter (±30%) + independent vertical stretch (±10%) + rotation
+  (±5°, 70% of samples)** augmentation, matching the paper's recipe (skipped
+  in round 1 to save time) — box-rotation math was empirically verified
+  against PIL's actual rotation behavior (not just derived by hand) before
+  trusting it in training, given a sign error would have silently corrupted
+  every rotated sample's labels.
+- **Auto-calibrated per-image scale** (`scale.py`) instead of a hardcoded
+  per-dataset constant — measures any photo's own dot pitch directly (a much
+  simpler nearest-neighbor estimate than `braille_cnn/dot_detect.py`'s full
+  grid-fitting; only needs a rough overall scale, not precise cell
+  positions). This alone improved round-1's checkpoint before any
+  retraining (Angelina 91.1%→97.0%, DBSI 62.3%→64.6%), confirming the
+  per-dataset hardcoded scale was leaving real accuracy on the table.
+
+**Confidence-threshold calibration matters a lot** in both rounds: the
+initial default (`--conf-threshold 0.3`, an arbitrary guess) was badly
+miscalibrated — many true positives score well under that. The current
+default (0.05) was swept empirically; re-sweep if training continues
+further, since calibration shifts as the model trains more.
+
+**Tested on `test-img3.jpeg`** (the user's own photo, in neither training
+set, with dotted horizontal divider lines between sections not part of any
+cell): auto-calibration correctly measured its ~9px dot pitch (scale=1.78,
+matching a manually-tuned estimate from before this was automated). The
+divider lines are **not** reliably ignored by architecture alone — they
+produce low-confidence false detections that a stricter threshold filters
+out at the cost of also losing some real text on this out-of-training-domain
+photo. Round 2's augmentation improved the ratio of real-to-false detections
+here too, but this photo's domain (never seen in training) remains the
+hardest case of the three.
