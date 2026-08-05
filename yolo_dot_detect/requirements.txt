@@ -1,4 +1,4 @@
-ultralytics>=8.0.0
+ultralytics>=8.4.0
 torch
 torchvision
 numpy

@@ -1,6 +1,5 @@
-# YOLOv8 Braille-dot detection
-#
-# Datasets are regenerated from DSBI - do not commit raw page copies.
+colab_upload/
+*.zip
 datasets/
 runs/
 *.pt

@@ -21,14 +21,16 @@ import numpy as np
 
 
 def _default_weights() -> Path:
-    return (
-        Path(__file__).resolve().parent
-        / "runs"
-        / "detect"
-        / "braille_dot_yolov8"
-        / "weights"
-        / "best.pt"
-    )
+    here = Path(__file__).resolve().parent / "runs" / "detect"
+    for name in (
+        "braille_dot_yolo26_tiled",
+        "braille_dot_yolo26",
+        "braille_dot_yolov8",
+    ):
+        cand = here / name / "weights" / "best.pt"
+        if cand.exists():
+            return cand
+    return here / "braille_dot_yolo26_tiled" / "weights" / "best.pt"
 
 
 def _draw_detections(bgr, detections, color=(0, 200, 80)):
@@ -82,6 +84,13 @@ def main():
     )
     parser.add_argument("--link-distance", type=float, default=15.0)
     parser.add_argument(
+        "--tile",
+        type=int,
+        default=640,
+        help="Tiled inference size (match training tile); 0 disables tiling",
+    )
+    parser.add_argument("--tile-overlap", type=int, default=96)
+    parser.add_argument(
         "--compare-classical",
         action="store_true",
         help="Also run braille_cnn classical detector and save side-by-side",
@@ -112,11 +121,21 @@ def main():
         raise SystemExit(f"Failed to read image: {args.image}")
 
     detector = YoloDotDetector(
-        weights=weights, conf=args.conf, imgsz=args.imgsz, device=args.device
+        weights=weights,
+        conf=args.conf,
+        imgsz=args.imgsz,
+        device=args.device,
+        tile=args.tile or None,
+        tile_overlap=args.tile_overlap,
     )
     detections = detector.detect_boxes(bgr)
-    centers = detector.detect(bgr)
-    print(f"YOLOv8 detections: {len(detections)} dots")
+    centers = (
+        np.array([d["center"] for d in detections], dtype=np.float64)
+        if detections
+        else np.zeros((0, 2), dtype=np.float64)
+    )
+    mode = f"tiled@{args.tile}" if args.tile else "whole-image"
+    print(f"YOLO detections ({mode}): {len(detections)} dots")
 
     overlay = _draw_detections(bgr, detections)
 

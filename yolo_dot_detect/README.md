@@ -1,8 +1,11 @@
 # YOLOv8 Braille Dot Detection
 
 Separate module that replaces classical peak-finding (`braille_cnn/dot_detect.py`)
-with a **YOLOv8 transfer-learned** embossed-dot detector, trained on DSBI with
-strong data augmentation.
+with a **YOLO26** (or YOLOv8) transfer-learned embossed-dot detector, trained on
+DSBI with strong data augmentation.
+
+**Prefer Google Colab GPU** for training — see [`COLAB_SETUP.md`](COLAB_SETUP.md)
+and [`BrailleLens_YOLO26_Colab.ipynb`](BrailleLens_YOLO26_Colab.ipynb).
 
 Does **not** modify the existing CNN cell classifier — only improves the
 *where are the dots?* stage. Detected centers plug into the same
@@ -29,6 +32,8 @@ detector with photometric / geometric augmentation targets that domain gap.
 yolo_dot_detect/
 ├── prepare_dataset.py   # Step 1: DSBI annotations → YOLO boxes
 ├── visualize_labels.py  # Step 1b: sanity-check label overlays
+├── tile_dataset.py      # Step 1c: slice pages into 640px tiles (avoids OOM)
+├── pack_for_colab.py    # Zip dataset for Google Drive upload
 ├── train.py             # Step 2: transfer learning + augmentation
 ├── evaluate.py          # Step 3: mAP / precision / recall
 ├── infer.py             # Step 4: run on a photo + optional cell clustering
@@ -81,6 +86,20 @@ py -3.11 -m yolo_dot_detect.visualize_labels --n 4
 
 Outputs land in `yolo_dot_detect/datasets/braille_dots/` (`images/`, `labels/`, `data.yaml`).
 
+### Step 1c — Tile the pages (strongly recommended)
+
+A full page holds 1,000–5,000 dots. YOLO's label assigner allocates memory
+proportional to *boxes × anchors*, so full pages cause
+`CUDA OutOfMemoryError in TaskAlignedAssigner`. Tiling also keeps dots at native
+pixel size instead of shrinking them during resize.
+
+```bash
+py -3.11 -m yolo_dot_detect.tile_dataset
+```
+
+Produces `datasets/braille_dots_tiled/` with ~110 dots per 640px tile. Train on
+it with `imgsz=640`, and run inference with `--tile 640`.
+
 ### Step 2 — Transfer learning + data augmentation
 
 Starts from **COCO-pretrained** `yolov8n.pt` and fine-tunes on the Braille-dot
@@ -120,10 +139,13 @@ Reports Precision, Recall, mAP50, mAP50-95 on the DSBI test split (used as val).
 
 ### Step 4 — Infer on a page photo
 
+Tiled inference is on by default (`--tile 640`), matching tiled training:
+
 ```bash
 py -3.11 -m yolo_dot_detect.infer --image test-img.jpeg
 py -3.11 -m yolo_dot_detect.infer --image test-img.jpeg --cluster --link-distance 15
 py -3.11 -m yolo_dot_detect.infer --image test-img.jpeg --compare-classical
+py -3.11 -m yolo_dot_detect.infer --image test-img.jpeg --tile 0   # whole-image
 ```
 
 ### Use from code
@@ -132,7 +154,7 @@ py -3.11 -m yolo_dot_detect.infer --image test-img.jpeg --compare-classical
 from yolo_dot_detect import YoloDotDetector
 from braille_cnn.dot_detect import cluster_into_cells
 
-det = YoloDotDetector(conf=0.25, device="cpu")
+det = YoloDotDetector(conf=0.25, device="cpu", tile=640)
 centers = det.detect("test-img.jpeg")          # (N, 2) xy
 clusters = cluster_into_cells(centers, link_distance=15.0)
 ```

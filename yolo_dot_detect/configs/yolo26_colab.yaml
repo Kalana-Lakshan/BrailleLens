@@ -1,0 +1,35 @@
+# YOLO26 Colab defaults — Braille embossed-dot detection
+# Used by BrailleLens_YOLO26_Colab.ipynb (override cells there if needed).
+
+model: yolo26n.pt          # COCO pretrained; options: yolo26n/s/m/l/x.pt
+imgsz: 1280                # larger than 640 — critical for tiny Braille dots
+epochs: 80
+batch: 8                   # raise to 16 on A100 / lower to 4 if OOM on T4
+device: 0
+workers: 4
+patience: 25
+optimizer: auto            # YOLO26 default (MuSGD / AdamW selection)
+lr0: 0.01
+lrf: 0.01
+weight_decay: 0.0005
+warmup_epochs: 3.0
+seed: 42
+max_det: 3000
+save_period: 1             # write checkpoint every epoch -> Drive (disconnect-safe)
+
+# augmentation (no L/R or U/D flips — Braille orientation)
+hsv_h: 0.015
+hsv_s: 0.50
+hsv_v: 0.40
+degrees: 10.0
+translate: 0.10
+scale: 0.40
+shear: 2.0
+perspective: 0.0008
+flipud: 0.0
+fliplr: 0.0
+mosaic: 0.9
+mixup: 0.15
+copy_paste: 0.0
+erasing: 0.25
+close_mosaic: 15

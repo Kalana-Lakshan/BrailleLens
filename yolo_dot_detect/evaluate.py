@@ -15,14 +15,12 @@ from pathlib import Path
 
 
 def _default_weights() -> Path:
-    return (
-        Path(__file__).resolve().parent
-        / "runs"
-        / "detect"
-        / "braille_dot_yolov8"
-        / "weights"
-        / "best.pt"
-    )
+    here = Path(__file__).resolve().parent / "runs" / "detect"
+    for name in ("braille_dot_yolo26", "braille_dot_yolov8"):
+        cand = here / name / "weights" / "best.pt"
+        if cand.exists():
+            return cand
+    return here / "braille_dot_yolo26" / "weights" / "best.pt"
 
 
 def main():

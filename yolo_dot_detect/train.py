@@ -54,7 +54,7 @@ def main():
             "Run first: py -3.11 -m yolo_dot_detect.prepare_dataset"
         )
 
-    model_name = args.model or cfg.get("model", "yolov8n.pt")
+    model_name = args.model or cfg.get("model", "yolo26n.pt")
     epochs = args.epochs if args.epochs is not None else cfg.get("epochs", 50)
     batch = args.batch if args.batch is not None else cfg.get("batch", 8)
     imgsz = args.imgsz if args.imgsz is not None else cfg.get("imgsz", 640)
@@ -109,6 +109,7 @@ def main():
         erasing=cfg.get("erasing", 0.2),
         close_mosaic=cfg.get("close_mosaic", 10),
         max_det=cfg.get("max_det", 3000),
+        save_period=cfg.get("save_period", 1),
         plots=True,
         save=True,
     )
