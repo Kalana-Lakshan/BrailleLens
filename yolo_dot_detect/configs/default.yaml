@@ -1,0 +1,41 @@
+# YOLOv8 transfer-learning defaults for Braille embossed-dot detection.
+# Override any key from the CLI (train.py --epochs 50 etc.).
+
+# --- model (transfer learning) ---
+model: yolov8n.pt          # pretrained COCO weights; options: n/s/m/l/x
+imgsz: 640
+epochs: 50
+batch: 8                   # CPU-friendly; raise if you have GPU VRAM
+device: cpu                # set to 0 for first CUDA GPU
+workers: 2
+patience: 15               # early stopping
+optimizer: AdamW
+lr0: 0.001
+lrf: 0.01
+weight_decay: 0.0005
+warmup_epochs: 3.0
+seed: 42
+max_det: 3000              # Braille pages often have 1000+ raised dots
+
+# --- data augmentation (Ultralytics built-in) ---
+# Tuned for small embossed dots on paper: strong photometric + mild geometric.
+hsv_h: 0.015               # hue jitter
+hsv_s: 0.50                # saturation (helps scanner vs phone color)
+hsv_v: 0.40                # brightness / exposure
+degrees: 10.0              # in-plane rotation (page tilt)
+translate: 0.10
+scale: 0.30                # zoom in/out (dot size variation)
+shear: 2.0
+perspective: 0.0005        # mild perspective (phone-camera domain)
+flipud: 0.0                # never flip vertically (Braille orientation matters)
+fliplr: 0.0                # never flip horizontally
+mosaic: 0.8                # mosaic for small-object detection
+mixup: 0.1
+copy_paste: 0.0
+erasing: 0.2               # random erase (simulates worn / occluded dots)
+close_mosaic: 10           # disable mosaic for last N epochs
+
+# --- dataset paths (filled by prepare_dataset.py) ---
+data: datasets/braille_dots/data.yaml
+project: runs/detect
+name: braille_dot_yolov8

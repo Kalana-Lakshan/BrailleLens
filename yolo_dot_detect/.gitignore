@@ -1,0 +1,10 @@
+# YOLOv8 Braille-dot detection
+#
+# Datasets are regenerated from DSBI - do not commit raw page copies.
+datasets/
+runs/
+*.pt
+!configs/
+__pycache__/
+*.png
+!docs/
