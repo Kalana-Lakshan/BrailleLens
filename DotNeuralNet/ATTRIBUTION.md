@@ -16,3 +16,7 @@
 #
 # Sinhala decode from cell patterns (Part 1):
 #   py -3.11 DotNeuralNet/decode_patterns.py --patterns 100000 101011 --lang si
+#
+# Image → lines/words → Sinhala (Part 2):
+#   $env:PYTHONIOENCODING = "utf-8"
+#   py -3.11 DotNeuralNet/transcribe_image.py --image path\to\page.jpg --lang si --save-overlay out.png
