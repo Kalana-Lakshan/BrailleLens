@@ -13,3 +13,6 @@
 #
 # Live preview (from BrailleLens repo root):
 #   py -3.11 DotNeuralNet/live_camera.py --source http://PHONE_IP:8080/video
+#
+# Sinhala decode from cell patterns (Part 1):
+#   py -3.11 DotNeuralNet/decode_patterns.py --patterns 100000 101011 --lang si
