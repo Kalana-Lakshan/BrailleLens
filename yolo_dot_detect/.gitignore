@@ -1,0 +1,9 @@
+colab_upload/
+*.zip
+datasets/
+runs/
+*.pt
+!configs/
+__pycache__/
+*.png
+!docs/
