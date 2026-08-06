@@ -25,3 +25,6 @@ yolo_dot_detect/test_images/output_dotneuralnet/
 
 # Nested clone leftovers
 DotNeuralNet/.git/
+
+# finger_cell_track local venv (MediaPipe isolated from system TF/protobuf)
+finger_cell_track/.venv/
