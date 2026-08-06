@@ -29,3 +29,4 @@ DotNeuralNet/.git/
 # finger_cell_track local venv (MediaPipe isolated from system TF/protobuf)
 finger_cell_track/.venv/
 finger_cell_track/_*.png
+finger_cell_track/datasets/
