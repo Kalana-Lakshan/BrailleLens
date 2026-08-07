@@ -1,59 +1,60 @@
 # finger_cell_track
 
-PC prototype: **MediaPipe Hands** index-fingertip tracking + DotNeuralNet cell
-pre-scan → hit-test which Braille cell the finger covers (Learning / Testing).
+PC prototype: **YOLO26 fingertip** tracking + DotNeuralNet cell pre-scan →
+hit-test which Braille cell the finger covers (Learning / Testing).
 
-Runs on your computer (webcam or IP Webcam). Phone / Flutter port is later.
+Works with tip-only / no-palm views (unlike MediaPipe). Phone / glasses later.
 
 ## Setup
 
-Uses a **local venv** (avoids system TensorFlow/protobuf clashes with MediaPipe):
+Uses a **local venv**:
 
 ```powershell
 cd finger_cell_track
 py -3.11 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --trusted-host pypi.org --trusted-host files.pythonhosted.org -r requirements.txt
-# For DotNeuralNet pre-scan (Step 4+):
 .\.venv\Scripts\python.exe -m pip install --trusted-host pypi.org --trusted-host files.pythonhosted.org ultralytics torch --index-url https://download.pytorch.org/whl/cpu
 cd ..
 ```
 
-DotNeuralNet weights must exist at `DotNeuralNet/weights/yolov8_braille.pt`
-(for pre-scan / live Learning–Testing).
+Needed weights:
+
+- Braille cells: `DotNeuralNet/weights/yolov8_braille.pt`
+- Fingertip: `finger_cell_track/weights/yolo26n_fingertip_best.pt` (from Colab)
 
 ## Quick start
 
 ```powershell
 $py = "finger_cell_track\.venv\Scripts\python.exe"
 
-# Step 2 — hand tip only
-& $py finger_cell_track/hand_track.py --source 0
+# Tip YOLO only (webcam or IP Webcam)
+& $py finger_cell_track/tip_track.py --source 0
+& $py finger_cell_track/tip_track.py --source http://PHONE_IP:8080/video
 
-# IP Webcam
-& $py finger_cell_track/hand_track.py --source http://192.168.x.x:8080/video
-
-# Step 5 — full app (after all steps)
+# Full CellMap + tip → Learning/Testing
 & $py finger_cell_track/live_app.py --source 0 --mode learning --lang en
+
+# Auto-label tip-on-Braille photos (then correct in Roboflow + fine-tune)
+& $py finger_cell_track/auto_label_tips.py --images path\to\photos
 ```
 
-## Landmark
+Train tip model on Colab T4: `BrailleLens_Fingertip_YOLO26_Colab.ipynb` (see `COLAB_TRAIN.md`).
 
-Index fingertip = MediaPipe Hands landmark **8**.
-
-## Keys (live apps)
+## Keys (live_app)
 
 | Key | Action |
 |-----|--------|
 | Q | Quit |
-| R | Rescan page → rebuild CellMap (live_app) |
-| L / T | Learning / Testing mode (live_app) |
+| R | Rescan page → rebuild CellMap |
+| L / T | Learning / Testing mode |
 
 ## Layout
 
 | File | Role |
 |------|------|
-| `hand_track.py` | Live MediaPipe tip overlay |
-| `cell_map.py` | CellMap, hit-test, dwell, SessionMemory |
-| `prescan.py` | DotNeuralNet frame/image → CellMap |
-| `modes.py` | Learning / Testing state |
-| `live_app.py` | Combined PC demo |
+| `tip_yolo.py` | Load tip weights, detect tip center |
+| `tip_track.py` | Live tip YOLO overlay |
+| `live_app.py` | Tip + CellMap Learning/Testing |
+| `auto_label_tips.py` | Pseudo-label photos for domain fine-tune |
+| `hand_track.py` | Legacy MediaPipe tip (palm required) |
+| `cell_map.py` / `prescan.py` / `modes.py` | CellMap + modes |

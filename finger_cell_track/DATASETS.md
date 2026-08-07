@@ -25,7 +25,7 @@ finger_cell_track/datasets/
 | **TI1K** | 1,000 images | Hand box + thumb & index tip `(x,y)` | Free on GitHub | Strong — tip points, egocentric-ish | [GitHub repo](https://github.com/MahmudulAlam/TI1K-Dataset) · [ZIP (master)](https://github.com/MahmudulAlam/TI1K-Dataset/archive/refs/heads/master.zip) |
 | **mobiofp fingertip256** | 256 images | YOLO boxes on fingertip | Google Drive in repo | Strong — Ultralytics format; small | [mobiofp repo](https://github.com/rotiroti/mobiofp) · [fingertip256obj.zip](https://drive.google.com/file/d/15akG23eTbT2TZv78kJHRImCWeKS1XL2X) · [YOLOv8n weights amd64](https://drive.google.com/file/d/1THsT9OcTbjl_Qadw_4WqvdOEoJxVYuDW) · [weights arm64](https://drive.google.com/file/d/1ia2Vkf4UfRI6Q_SIV1k30_WiorrlRd3K) |
 | **Roboflow Finger Tip Detection** | ~538 images | Object detection (finger tips) | Roboflow export (YOLO) | Good starter | [Universe project](https://universe.roboflow.com/first-leo0f/finger-tip-detection-i4xqf) |
-| **Roboflow tip_detect** | ~14.5k images | Tip keypoints | Roboflow | Good — keypoints, not Braille domain | [Universe project](https://universe.roboflow.com/pinpoint/tip_detect) |
+| **Roboflow tip_detect** | ~14.5k images | Pen/stylus tip keypoints | Roboflow | **Skip** — not human fingertips | [Universe](https://universe.roboflow.com/pinpoint/tip_detect) |
 | **Roboflow FingerTip (several)** | ~300–900 each | Tip / finger classes | Roboflow Universe | Mixed quality; check before use | [Search: fingertip](https://universe.roboflow.com/search?q=fingertip) · [Search: FingerTip](https://universe.roboflow.com/search?q=FingerTip) |
 
 ### Manual steps (tip-only sets)
@@ -33,7 +33,7 @@ finger_cell_track/datasets/
 1. **TI1K** — clone or download ZIP above → extract to `datasets/TI1K/`  
    *(Already downloaded locally: 900 train + 100 test.)*
 2. **fingertip256** — open Drive link → save `fingertip256obj.zip` → extract to `datasets/fingertip256/`
-3. **Roboflow** — create free account → open project → **Download Dataset** → format **YOLOv8** → unzip under `datasets/roboflow_*`
+3. **Roboflow** — create free account → open project → **Download Dataset** → format **YOLO26** (or **YOLOv8** if YOLO26 is not listed; labels are compatible) → unzip under `datasets/roboflow_*`
 
 ---
 
