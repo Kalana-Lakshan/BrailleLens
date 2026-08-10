@@ -5,10 +5,18 @@
 
 Keys:
   Q     quit
-  R     rescan current frame → CellMap
+  R     (re)scan current frame -> CellMap + new registration reference frame
   L / T learning / testing mode
   In testing: after a dwell prompt, type the letter in the terminal and press Enter
               (or press the letter key in the OpenCV window for a–z / 0–9).
+
+R only needs to be pressed once at the start, not every time the page or
+camera shifts: every live frame is automatically re-aligned back onto the
+scanned reference frame (registration.py, ORB + RANSAC homography), so the
+CellMap stays valid under drift on its own. Press R again only to scan a
+genuinely different/new page, or as a manual reset if the HUD's `reg=`
+status shows LOST for an extended stretch (e.g. camera pointed somewhere
+with too little texture to match against, like a blank area of the page).
 """
 
 from __future__ import annotations
@@ -28,13 +36,49 @@ for p in (_HERE, _ROOT, _DNN):
     if s not in sys.path:
         sys.path.insert(0, s)
 
-from cell_map import CellMap, DwellFilter, TipEMA, hit_test  # noqa: E402
+import numpy as np  # noqa: E402
+
+from cell_map import Cell, CellMap, DwellFilter, TipEMA, hit_test  # noqa: E402
 from hand_track import open_source  # noqa: E402
 from modes import LearningMode, TestingMode  # noqa: E402
 from prescan import draw_cellmap, prescan_bgr  # noqa: E402
+from registration import FrameRegistration  # noqa: E402
 from tip_yolo import TipYOLO  # noqa: E402
 
 _DEFAULT_CELL_WEIGHTS = _DNN / "weights" / "yolov8_braille.pt"
+
+
+def _cellmap_for_display(cell_map: CellMap, homography: np.ndarray | None) -> CellMap:
+    """Cell boxes are stored in the pre-scan's reference frame. Drawing
+    them directly onto a live frame that's since drifted would show boxes
+    in the wrong place even though hit-testing (which goes through
+    registration) is still correct -- so for display only, project each
+    box from reference space back into the current live frame via the
+    inverse homography. Axis-aligned bounding box of the 4 transformed
+    corners (a box doesn't stay a box under a perspective transform, but
+    this is a fine approximation for small frame-to-frame drift)."""
+    if homography is None or not cell_map.cells:
+        return cell_map
+    try:
+        inv_h = np.linalg.inv(homography)
+    except np.linalg.LinAlgError:
+        return cell_map
+
+    out_cells = []
+    for c in cell_map.cells:
+        x0, y0, x1, y1 = c.xyxy
+        corners = np.array([[[x0, y0]], [[x1, y0]], [[x0, y1]], [[x1, y1]]], dtype=np.float32)
+        mapped = cv2.perspectiveTransform(corners, inv_h).reshape(-1, 2)
+        nx0, ny0 = mapped.min(axis=0)
+        nx1, ny1 = mapped.max(axis=0)
+        out_cells.append(
+            Cell(
+                id=c.id, xyxy=(float(nx0), float(ny0), float(nx1), float(ny1)),
+                char=c.char, pattern=c.pattern, code=c.code, conf=c.conf,
+                line=c.line, col=c.col,
+            )
+        )
+    return CellMap(cells=out_cells)
 
 
 def main() -> None:
@@ -85,6 +129,11 @@ def main() -> None:
     last_frame = None
     highlight_id = None
     status = "Press R to scan page"
+    # Reference-frame registration: maps each live frame's tip position
+    # back onto the coordinate frame the CellMap was scanned in, so the
+    # map stays valid as the page/camera drifts instead of needing a
+    # manual rescan every time. None until the first successful scan.
+    registration: FrameRegistration | None = None
 
     win = "finger_cell_track — Live (Q quit, R rescan, L/T mode)"
     cv2.namedWindow(win, cv2.WINDOW_NORMAL)
@@ -104,7 +153,21 @@ def main() -> None:
 
             tip_raw, tip_box, tip_conf = tipper.detect(frame)
             tip = ema.update(tip_raw)
-            hit = hit_test(tip, cell_map, margin_frac=args.margin) if tip else None
+
+            # Track the live<->reference homography once per frame (used
+            # both to map the tip for hit-testing, and to re-project the
+            # CellMap's boxes for display -- without this, hit-testing
+            # would silently assume the camera hasn't moved since the last
+            # R rescan, and the drawn boxes would visibly lag behind).
+            live_h = None
+            reg_inliers = 0
+            if registration is not None:
+                live_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                live_h = registration.homography_or_last(live_gray)
+                reg_inliers = registration.last_inliers
+
+            ref_tip = registration.transform_point(tip, live_h) if (tip is not None and live_h is not None) else None
+            hit = hit_test(ref_tip, cell_map, margin_frac=args.margin) if ref_tip else None
             highlight_id = hit.id if hit else None
 
             if hit is None:
@@ -129,12 +192,14 @@ def main() -> None:
                 x1, y1, x2, y2 = tip_box
                 cv2.rectangle(out, (x1, y1), (x2, y2), (0, 200, 0), 2)
             if cell_map.cells:
-                out = draw_cellmap(out, cell_map, highlight_id=highlight_id)
+                display_map = _cellmap_for_display(cell_map, live_h)
+                out = draw_cellmap(out, display_map, highlight_id=highlight_id)
             if tip is not None:
                 cv2.circle(out, (int(tip[0]), int(tip[1])), 10, (0, 255, 255), -1)
 
+            reg_status = "-" if registration is None else (f"OK({reg_inliers})" if live_h is not None else "LOST")
             hud1 = (
-                f"mode={mode}  cells={len(cell_map)}  "
+                f"mode={mode}  cells={len(cell_map)}  reg={reg_status}  "
                 f"hit={hit.char if hit else '-'}  tip={'Y' if tip else 'N'}"
                 + (f" {tip_conf:.2f}" if tip_raw else "")
             )
@@ -175,6 +240,11 @@ def main() -> None:
                     imgsz=args.imgsz,
                     device=args.device,
                 )
+                # New reference frame for registration -- every subsequent
+                # live frame gets aligned back to *this* snapshot, so the
+                # CellMap keeps working as the page/camera drifts instead
+                # of needing another manual rescan.
+                registration = FrameRegistration(cv2.cvtColor(last_frame, cv2.COLOR_BGR2GRAY))
                 dwell.reset()
                 ema.reset()
                 learn = LearningMode()
