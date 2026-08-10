@@ -2,6 +2,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
+from .normalize import normalize_crop
 from .render import render_braille_cell
 
 
@@ -29,6 +30,6 @@ class SyntheticBrailleDataset(Dataset):
         code = self.codes[class_idx]
         rng = np.random.default_rng() if self.train else np.random.default_rng(self.seed + idx)
         img = render_braille_cell(code, img_size=self.img_size, augment=True, rng=rng, max_perspective=self.max_perspective)
-        arr = np.asarray(img, dtype=np.float32) / 255.0
+        arr = normalize_crop(img)
         tensor = torch.from_numpy(arr).unsqueeze(0)
-        return tensor, class_idx
+        return tensor, torch.tensor(class_idx, dtype=torch.int64)
