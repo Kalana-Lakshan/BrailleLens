@@ -1,5 +1,6 @@
 # Dataset (clone separately — see README)
 data DBSI/
+AngelinaDataset-master/
 
 # Trained model weights and eval artifacts
 braille_cnn/checkpoints/
@@ -9,8 +10,14 @@ braille_cnn/checkpoints/
 __pycache__/
 *.pyc
 
+# Virtual environment (recreate with: uv sync)
+.venv/
+
 # Debug / temp outputs
 debug_*.png
+
+# Secrets
+.env
 test-img_*_dots.png
 test-img_yolo*.png
 

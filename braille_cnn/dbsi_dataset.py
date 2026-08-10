@@ -19,6 +19,8 @@ import torch
 from PIL import Image
 from torch.utils.data import Dataset
 
+from .normalize import normalize_crop
+
 
 def _parse_split_file(split_path):
     entries = []
@@ -118,4 +120,5 @@ class DBSIDataset(Dataset):
         return len(self.labels)
 
     def __getitem__(self, idx):
-        return self.crops[idx].float() / 255.0, self.labels[idx]
+        arr = normalize_crop(self.crops[idx].squeeze(0).numpy())
+        return torch.from_numpy(arr).unsqueeze(0), self.labels[idx]

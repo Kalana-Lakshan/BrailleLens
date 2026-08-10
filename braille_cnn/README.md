@@ -5,6 +5,9 @@ dot patterns (2×3 grid, 6 bits) it is. Letter/language decoding is a separate l
 (`labels.py`), not baked into the model. This is the first sub-problem of the larger
 Braille-to-Sinhala transcription pipeline.
 
+For the full stage-by-stage walkthrough of what happens to an image at inference time (which
+file/function handles each step), see [`PIPELINE.md`](PIPELINE.md).
+
 ---
 
 ## Architecture Overview
@@ -55,6 +58,12 @@ Camera / Image
                     ▼
           Terminal / TTS output
 ```
+
+**Since this diagram was drawn**, `dot_detect.py`'s first stage gained an optional learned
+verification step (`DotPatchCNN`, via `--dot-classifier-checkpoint`) between dot detection and
+cell clustering, and a grid-fitting step (`fit_cell_grid`/`cluster_by_grid`) that replaces
+distance-based clustering when it succeeds — see Key findings 7-10 below for why, and the
+Quick start section for the full command.
 
 ### Why this split architecture?
 
@@ -147,8 +156,16 @@ python -m braille_cnn.finetune_dbsi
 # evaluate on DBSI
 python -m braille_cnn.eval_dbsi --checkpoint braille_cnn/checkpoints/braille_cnn_dbsi_finetuned.pt
 
+# train the dot verification classifier (DBSI ground truth)
+python -m braille_cnn.train_dot_classifier
+
 # infer on a real page photo (auto dot-detection, recommended)
 python -m braille_cnn.infer_page --image path/to/photo.jpg --auto --lang si --debug-out debug.png
+
+# full validated pipeline on a DBSI-style scan (see Key findings 7-10)
+python -m braille_cnn.infer_page --image path/to/scan.jpg --auto --lang si \
+    --dot-z-threshold 2.0 --dot-peak-y-offset 5.5 \
+    --dot-classifier-checkpoint braille_cnn/checkpoints/dot_classifier_best.pt --debug-out debug.png
 
 # verify the Sinhala label table (run after any edit to labels.py)
 python -m braille_cnn.check_labels
@@ -162,9 +179,15 @@ python -m braille_cnn.check_labels
 |---|---|---|---|
 | `braille_cnn_best.pt` | Synthetic renders only | Synthetic images (~100%) | Real photos (51.2% zero-shot on DBSI) |
 | `braille_cnn_dbsi_finetuned.pt` | Synthetic → fine-tuned on DBSI real scans | DBSI-style flatbed scans (98.44%) | Synthetic images (~14% — catastrophic forgetting) |
+| `braille_cnn_angelina_finetuned.pt` | `braille_cnn_dbsi_finetuned.pt` → fine-tuned on synthetic + DBSI + Angelina mixed every batch | All three domains at once: DBSI 98.88%, Angelina (ground-truth-box crops) 99.76-100%, synthetic 93.18% — fixes the earlier catastrophic forgetting as a side effect | Still needs the *right crop shape* at inference (see Key finding 12) or accuracy collapses despite the checkpoint itself being fine |
+| `dot_classifier_best.pt` | DBSI dot positions + own detector's false positives + mirrored verso bleed-through | Verifying candidate dots on DBSI-style scans (~99% precision, ~98.5% recall — see below) | Not confirmed on handheld phone photos (DBSI-only training data) |
+| `dot_classifier_mixed.pt` | Same as `dot_classifier_best.pt`, plus Angelina dot patches (anchored to the detector's own candidates, mirroring the DBSI approach) | Both domains: DBSI val F1 99.6%, Angelina val F1 98.9% | — |
 
-There is currently **no checkpoint good at both**, and neither is validated on handheld phone
-photos (see Known Issues).
+`braille_cnn_angelina_finetuned.pt` + `dot_classifier_mixed.pt` is now the best pair for real
+handheld phone photos, but end-to-end accuracy on that domain is still well below DBSI's (see Key
+finding 12-13 — grid-fit and crop-shape bugs specific to Angelina's scale/format were found and
+partially fixed this round, but ~57% of cells are still lost to a mix of missed clusters and
+residual per-cell misclassification).
 
 ---
 
@@ -180,6 +203,7 @@ photos (see Known Issues).
 | `render.py` | Procedural synthetic Braille cell image generator (Gaussian-bump shading, rotation, perspective warp, blur/noise augmentation). |
 | `dataset.py` | `SyntheticBrailleDataset` — infinite-variety train split, seeded reproducible test split. |
 | `dbsi_dataset.py` | `DBSIDataset` — loads real cells from `data DBSI/` using per-dot pixel ground truth. Eagerly caches all crops at construction. |
+| `angelina_dataset.py` | `AngelinaDataset` — loads real cells from `AngelinaDataset-master/books/` using its per-cell CSV boxes (`left;top;right;bottom;label`, same bit convention as this project's own `dots_to_code`, confirmed bit-identical — no conversion needed). Excludes label 63 (Angelina's illegible/crossed-out markout convention). |
 
 **Training**
 
@@ -187,6 +211,8 @@ photos (see Known Issues).
 |---|---|
 | `train.py` | Trains on synthetic data → `braille_cnn_best.pt`. Adam lr=1e-3, CrossEntropy, 15 epochs. |
 | `finetune_dbsi.py` | Fine-tunes on DBSI real train split → `braille_cnn_dbsi_finetuned.pt`. Adam lr=1e-4, 10 epochs. |
+| `finetune_angelina.py` | Fine-tunes `braille_cnn_dbsi_finetuned.pt` on synthetic + DBSI + Angelina mixed via `ConcatDataset` (every batch sees all three domains, avoiding the earlier catastrophic-forgetting pattern) → `braille_cnn_angelina_finetuned.pt`. Adam lr=1e-4, 10 epochs. |
+| `train_dot_classifier_v2.py` | Trains `DotPatchCNN` on DBSI + Angelina dot patches mixed → `dot_classifier_mixed.pt`. Tracks best checkpoint by averaged (DBSI F1 + Angelina F1)/2. |
 
 **Evaluation / diagnostics**
 
@@ -202,8 +228,12 @@ photos (see Known Issues).
 
 | File | What it does |
 |---|---|
-| `dot_detect.py` | Finds embossed-dot highlights in a raw photo via GaussianBlur difference + percentile threshold + non-max suppression + connected-component clustering. |
-| `infer_page.py` | End-to-end inference on a real page photo. `--auto` mode uses `dot_detect.py` (handles skew, variable line length). Fixed `--rows`/`--cols` grid mode for flat scans only. Always check `--debug-out`. |
+| `dot_detect.py` | Finds embossed-dot highlights in a raw photo (local z-score, not a global percentile — see Key findings), then either `cluster_by_grid` (preferred, needs `fit_cell_grid` to succeed) or `cluster_into_cells` (distance-based fallback) to group them into per-cell clusters. `fit_cell_grid`/`grid_cell_center` fit the page's regular cell grid from a clean point set and derive each cell's *true* center/pitch from the page-wide model instead of that cell's own (possibly incomplete/asymmetric) points. |
+| `dot_classifier.py` | `DotPatchCNN` — tiny binary CNN (32×32 patch → dot/not-dot), a learned replacement for brightness-threshold-only dot verification (mirrors the DSBI paper's own Haar+Adaboost approach). |
+| `dot_patch_dataset.py` | Builds `DotPatchCNN`'s training data from DBSI ground truth: positives anchored on the detector's own candidate peak (not the exact ground-truth pixel — matters, see Key findings) + jitter augmentation; negatives from the detector's real false positives plus explicit mirrored-verso bleed-through examples. |
+| `angelina_patch_dataset.py` | Same idea as `dot_patch_dataset.py`, but derives the 6 canonical dot slots from each Angelina cell box's geometry (corners/midpoints) + which bits are set in its code, then anchors each to the nearest real detected candidate — Angelina has no per-dot ground truth, only per-cell boxes. |
+| `train_dot_classifier.py` | Trains `DotPatchCNN` on DBSI only → `dot_classifier_best.pt`. |
+| `infer_page.py` | End-to-end inference on a real page photo. `--auto` mode uses `dot_detect.py` (handles skew, variable line length). Fixed `--rows`/`--cols` grid mode for flat scans only. Always check `--debug-out`. For DBSI-style flatbed scans: `--dot-classifier-checkpoint braille_cnn/checkpoints/dot_classifier_best.pt --dot-peak-y-offset 5.5` (DBSI-calibrated, see Key findings). For real handheld photos (Angelina-style): `--checkpoint braille_cnn/checkpoints/braille_cnn_angelina_finetuned.pt --dot-classifier-checkpoint braille_cnn/checkpoints/dot_classifier_mixed.pt --dot-z-threshold 1.5 --crop-shape angelina` — **`--crop-shape angelina` is required** for that checkpoint's crops to match what it was trained on (see Key finding 12); omitting it silently uses DBSI's crop geometry and costs ~33 accuracy points end-to-end even with an otherwise-correct grid fit. |
 
 ---
 
@@ -214,7 +244,18 @@ photos (see Known Issues).
 3. Fine-tuning on DBSI real train split fixes it: **98.44%** on full DBSI test set.
 4. Verso is slightly better than recto (98.65% vs 98.24%) — contradicts the papers' framing of verso as harder.
 5. Perspective/skew: synthetic-only checkpoint drops 99.97% → **87.47%** under a realistic homography warp. Not yet retrained to fix this.
-6. Real handheld phone photo: dot detection and cropping work visually, but neither checkpoint produces coherent letters — raking-light phone photos don't match either training domain. This is the primary remaining blocker.
+6. Real handheld phone photo: dot detection and cropping work visually, but neither checkpoint produces coherent letters — raking-light phone photos don't match either training domain. This remains the primary blocker for real deployment (see item 11).
+7. **A single global brightness threshold can't detect dots reliably across different photos** — settings tuned on one phone photo (~1000 real dots found) collapsed to ~140 (mostly false) on a differently-lit DBSI flatbed scan. Fixed with a *local* z-score instead of a global percentile (`dot_detect.detect_dot_centers`) — adapts per-region, no per-photo retuning.
+8. **No single detection threshold gets both good precision and good recall** — a sweep on held-out DBSI pages showed either ~44% precision/~86% recall or the reverse, never both. Fixed by adding `DotPatchCNN`, a learned dot/not-dot classifier (same strategy as the DSBI paper's Haar+Adaboost stage, modernized): **44-53% → ~99% precision at ~90%+ recall** on held-out pages.
+9. **Distance-based clustering silently merges adjacent real cells** whenever their combined dot count stays under the 6-dot limit (e.g. a 1-dot cell next to a 2-dot cell) — cost ~150 of 618 true cells their own cluster on a held-out page, invisibly (no merge-flag triggered). Fixed by `cluster_by_grid`: assign each point to its nearest *fitted grid slot* instead of clustering by geometric distance — matched-cell coverage went from 76% to 99% on that page.
+10. **This detector's peak lands a real, consistent ~2-6px ABOVE the true dot center** on DBSI scans (confirmed by averaging the z-field over 1000+ ground-truth dot positions on 5 different books — bright above center, cleanly negative below; a genuine asymmetric-lighting signature, not fixable by smarter peak-finding since the underlying signal itself is off-center). A calibrated `peak_y_offset=5.5` correction, combined with findings 8-9, took **end-to-end cell classification from 24.9% to 73.9-97.4%** across three held-out DBSI pages (see `infer_page.py`'s `--dot-peak-y-offset` flag). Confirmed via a controlled test that the *character CNN itself* is not the bottleneck: same cells, exact-vs-approximate crop only, 47.8% vs 96.2%.
+11. None of findings 7-10's specific calibrations (`peak_y_offset`, `DotPatchCNN`'s weights) are confirmed to transfer to real handheld phone photos — they were measured/trained on DBSI's specific scanner. Re-measure before assuming they apply to a different capture setup.
+12. **The Angelina domain (real handheld photos) needed its own grid-fitting fix, distinct from anything DBSI needed.** `fit_cell_grid`'s search ranges were tuned around DBSI's absolute pixel scale and failed outright on Angelina's different scale (0% end-to-end). Making the ranges scale-adaptive (derived from each photo's own nearest-neighbor distance) fixed the scale mismatch, but exposed a second, subtler bug: an unconstrained horizontal-pitch search picks up a real but *wrong* structural peak (the gap between adjacent cells' nearest dot columns, `Px - dx`) that can outvote the true intra-cell pitch — this pushed the fitted `dx` too high, which in turn shifted the derived `Px` search window past the true cell-pitch peak entirely, landing on its 2x harmonic instead (fitted `Px=65` vs a true, ground-truth-verified `Px=33`). Fixed by tightening the `dx` search window tightly around `dy` (`[0.75x, 1.35x]` instead of `[0.6x, 1.7x]`) — Braille dot spacing is physically ~isotropic (dx≈dy) on both DBSI and Angelina, so a tight window excludes the confound without needing per-dataset tuning. Verified no DBSI regression.
+13. **Even with a correct grid fit, using DBSI's crop-box *shape* on Angelina photos wrecked accuracy (~10%).** `AngelinaDataset`'s own cell boxes are ~2×dx wide by ~3×dy tall with a symmetric margin, not DBSI's dx-wide/2×dy-tall asymmetric-margin convention that `_grid_crop_box` implements — confirmed by directly measuring true box width/height against a fitted grid on a real photo (width/dx=1.98, height/dy=3.07). The DBSI-shaped crop starves the classifier of ~40% of the crop area it was actually trained on. Ground-truth-box crops classify at 100% with the *right* shape; using the wrong shape on auto-detected cells only reached ~10%. Added `_angelina_grid_crop_box` (matching Angelina's actual box convention) and a `--crop-shape {dbsi,angelina}` flag to `infer_page.py`. Combined with finding 12's grid fix, end-to-end accuracy on a held-out Angelina photo went from **~0-10% to 43.2%** (127/169 cells matched, 73 correct).
+14. **~25% of true cells (42/169) still get no detection/cluster at all** on that same Angelina photo even after findings 12-13 — not explained by the per-line minimum-point threshold in `fit_cell_grid` (tested lowering it 4→2, no change). Root cause not yet identified; candidates include real detector misses in low-contrast regions, or points landing in the wrong grid slot due to local pitch drift (real photo perspective/curvature) large enough to alias to a neighboring line/column. Not yet investigated further.
+15. **Of the cells that *do* get matched, ~43% still misclassify**, and these wrong predictions have a much larger residual centering error (mean 9.3px) than correct ones (mean 3.6px) — i.e. this looks like leftover per-cell centering noise (not a systematic bias, since the average offset per text line is small), not a classifier weakness. Likely the next lever for further Angelina accuracy gains, but not yet fixed.
+16. **A pre-existing column-swap ambiguity bug in `fit_cell_grid`'s per-line x-phase fit was silently costing DBSI ~67 accuracy points** (confirmed on a held-out page: 30.1% before this fix vs 97.4% after, vs 96.8% on the same page's ground-truth crops — i.e. this was the actual accuracy bottleneck, not the classifier). Root cause: a cell's two dot columns are exactly `dx` apart, so independently fitting each line's x-phase can lock onto "the right column is offset 0" instead of "the left column is offset 0" — indistinguishable from one line's x-positions alone. Confirmed directly: the fitted per-line phases on that DBSI page split into two clean clusters exactly `dx` apart (mod `Px`, residual <2.5px), not real indentation variation. Fixed with `_resolve_column_ambiguity`: instead of trusting each line's independent fit, chain-resolve each line's phase against its already-resolved *neighbor* in line order (of `{phase, phase±dx}`, keep whichever is closest to the neighbor, starting from the most-supported line). Chaining through neighbors (not one single global reference) matters — an earlier single-global-reference version fixed DBSI identically but *regressed* Angelina (43.2%→20.7%), because a handheld photo's per-line phase can genuinely drift smoothly line-to-line from perspective skew, and forcing every line back to one fixed reference fights that real drift instead of just fixing the binary ambiguity. Verified this version leaves Angelina exactly at 43.2% (no regression) while still fully fixing DBSI.
+17. **Real Braille pages can include decorative/structural divider lines between sections that aren't part of any cell but read as many real, closely-spaced raised dots to the detector** (spotted by inspection on a user-captured photo, `test-img3.jpeg`) — confirmed via a debug overlay showing a whole run of "merged" (overloaded) clusters exactly where a visible dashed horizontal rule crosses the page, since it has no natural cell gaps. Fixed with `filter_ruler_lines`: chain-link points within a tight vertical tolerance and a *small* horizontal gap (connected-components, same style as `cluster_into_cells`), then drop any resulting chain both long and wide enough to only plausibly be a deliberate line. The horizontal-gap threshold had to be tuned carefully: an initially looser version (gap ≈3.5x the overall point spacing) caught the divider line correctly but also **wrongly stripped real DBSI text wholesale (1202→791 points, 97.4%→60.4% accuracy)** — dense real text routinely has 14-25+ dots sharing one of only 3 possible sub-row heights across most of a line's width, which looks identical to a straight line under a loose gap/span check alone. Tightening the gap threshold to ~1.5x the point spacing (comfortably above the divider's own measured ~8-13px pitch, comfortably below any real cross-cell gap) resolved this: confirmed to remove 0 points on both the DBSI and Angelina test pages (zero accuracy impact, still 97.4%/43.2%) while still fully removing the divider line's ~48 points on `test-img3.jpeg`.
 
 ---
 
@@ -232,9 +273,11 @@ photos (see Known Issues).
 
 | Feature | Status |
 |---|---|
-| **Live camera feed** (Branch 2: `feat/camera-capture`) | Planned — `cv2.VideoCapture` loop with frame-stability check feeding into `run_auto` |
-| **Sinhala terminal output** (Branch 3: `feat/live-sinhala-output`) | Planned — in-place terminal refresh, confidence threshold, `decode_sequence()` integration |
-| **Handheld phone camera fine-tuning** | Blocked on collecting labeled real-camera crops |
+| **Live camera feed** (Branch 2: `feat/camera-capture`) | Done — see `camera_capture/` |
+| **Sinhala terminal output** (Branch 3: `feat/live-sinhala-output`) | Done — see `camera_capture/` |
+| **DBSI-domain detection + classification pipeline** | Done — 73.9-97.4% end-to-end on held-out DBSI pages (was ~25%), see Key findings 7-10 |
+| **Handheld phone camera fine-tuning** (character CNN *and* `DotPatchCNN`) | Done — both retrained on Angelina (real handheld photos), see checkpoints table |
+| **Angelina-domain detection + classification pipeline** | In progress — 43.2% end-to-end on a held-out Angelina photo (was ~0-10%), see Key findings 12-15. Grid-fit and crop-shape bugs fixed; ~25% of cells still undetected and ~43% of matched cells still misclassify, root cause not yet found for either. |
 | **Perspective/skew robustness** | Renderer supports it; model not yet retrained with it enabled |
 | **Finger occlusion handling** | Proposed: pre-scan page to build `(row,col)→char` table, then track fingertip per frame |
 | **Angelina dataset** | Deferred — needs full-page detection or object-detection architecture |

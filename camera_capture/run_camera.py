@@ -96,10 +96,10 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Max pixel distance between dots to link them into the same cell.",
     )
     p.add_argument(
-        "--dot-percentile",
+        "--dot-z-threshold",
         type=float,
-        default=99.3,
-        help="Brightness-difference percentile cutoff for a peak to count as a dot.",
+        default=3.0,
+        help="Local z-score cutoff for a peak to count as a dot (adapts per-region to lighting).",
     )
     p.add_argument(
         "--dot-footprint",

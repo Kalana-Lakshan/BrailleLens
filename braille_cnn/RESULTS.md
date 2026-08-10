@@ -112,3 +112,47 @@ Initial hypothesis was crop-margin bleed from the neighboring cell/line above (`
 - Retrain the synthetic-only model with perspective augmentation active from the start, then re-run this same comparison to see how much it recovers (this is the direct analogue of the DBSI fine-tuning experiment, but for perspective instead of real-vs-synthetic).
 - When next fine-tuning on DBSI (or later Angelina), mix in a slice of synthetic data to check whether that prevents the catastrophic forgetting seen here.
 - Keep perspective augmentation in mind as one more thing the eventual Angelina evaluation should be read against — a model that still fails on Angelina after this fix would point more clearly at texture/lighting differences rather than geometry.
+
+---
+
+## 2026-07-29 — First real handheld-photo test (own phone photos); `--auto` crash fix, adaptive dot-linking, and per-crop normalization
+
+**Question:** two own phone photos of a printed Braille page (`test-img.jpeg`, `test-img2.jpeg` — white paper, handheld, uneven room lighting) produced no usable transcription. Initial hypothesis (background *color*: DBSI's pages are tan/kraft paper, these are white) turned out to be mostly wrong once measured — logged here so the real causes aren't re-litigated later.
+
+**Bug found (unrelated to the color question):** `--auto` transcription mode crashed unconditionally on *any* image, including DBSI's own, via a `TypeError` in `_decode_line_with_confidence` (`infer_page.py`). The prior "confidence-aware transcription" refactor built `code_by_id` as `{id: code}` and a separate `conf_by_id`, but the decoder unpacked `code_by_id[id(c)]` as `(code, conf)`. Fixed by merging into one `{id: (code, conf)}` dict; `conf_by_id` removed as a dead parameter.
+
+**Background-color hypothesis, checked and mostly rejected:** everything is converted to grayscale before any processing (`Image.open(...).convert("L")`), and DBSI's tan paper vs. the photos' white paper land in a similar grayscale range once converted — hue isn't the operative variable. The DSBI paper (§4.3.1) does address "different Braille images background," but via grayscale + a *global per-page* gray-histogram normalization + adaptive threshold, for a classical (non-CNN) segmentation dot-detector — and it wouldn't fix a page with an internal brightness gradient like these photos have anyway.
+
+**Real cause #1 — dot pitch vs. a hardcoded pixel constant.** Measured nearest-neighbor dot spacing (`dot_detect.detect_dot_centers` output) on `test-img.jpeg` vs. `data DBSI/Math/math+1.jpg`:
+
+| | test-img.jpeg (888×1280 phone photo) | DBSI math+1.jpg (1700×2338, 200dpi scan) |
+|---|---|---|
+| 1st-NN median | 11.0 px | 14.0 px |
+| 2nd-NN median | 15.6 px | 18.5 px |
+| 3rd-NN median (next-cell jump) | 22.0 px (no clean gap) | 29.0 px (clear gap) |
+
+The old fixed `link_distance=15.0` in `cluster_into_cells` sat cleanly below DBSI's next-cell jump, but landed *inside* the phone photo's noisy zone with no comparable gap — fragmenting most 6-dot cells into 2-3-dot pieces before classification ever ran (visible in the debug overlay as undersized crop boxes and garbage codes like `#16`/`#18`/`#50`).
+
+**Fix:** `dot_detect.estimate_link_distance()` — auto-estimates the link distance per image from the median 1st-nearest-neighbor dot distance × 1.5 (covers same-cell diagonal pairs, ~√2), instead of assuming one fixed pixel value works for every photo resolution/distance-to-page. `cluster_into_cells(link_distance=None)` now calls this by default; `infer_page.py --link-distance` defaults to auto (explicit values still override). On `test-img.jpeg` this resolves to 16.6px.
+
+**Real cause #2 — no normalization anywhere in the CNN pipeline.** Confirmed by grep: `dataset.py`, `dbsi_dataset.py`, and `infer_page.py` all did nothing but `/ 255.0` before feeding crops to the network — raw absolute brightness, unbounded. Measured crop brightness across sources: DBSI crop raw mean 214.5 (std 56.0) vs. `test-img.jpeg` crops from the photo's bright vs. shadowed regions, raw mean 172.8 (std 14.8) and 148.1 (std 7.8) respectively — both a large absolute-brightness gap *and* a large contrast/dynamic-range gap between sources, and even between two spots on the *same* uneven photo.
+
+**Fix:** `normalize.py`'s `normalize_crop()` — subtracts each crop's own mean and divides by its own std (floored at 10.0, chosen empirically: synthetic blank/`space` cells measured raw std ≤4.8, populated cells typically 5.4-14.2+, so the floor sits between the two and stops blank cells' background noise from being amplified into fake contrast). Verified this closes the gap above: normalized means for DBSI/bright-photo-region/dark-photo-region landed at 0.52/0.51/0.50 respectively (vs. raw means 214.5/172.8/148.1). Wired into all three consumers (`dataset.py`, `dbsi_dataset.py`, `infer_page.py._classify`) so train/fine-tune/inference see the same representation.
+
+**Retrained from scratch with normalization active** (new checkpoints in `checkpoints_normalized/`, old `checkpoints/` left untouched for comparison):
+
+| | Synthetic test | DBSI test (full) | DBSI recto | DBSI verso |
+|---|---|---|---|---|
+| Previous (`checkpoints/`, no normalization) | 100% | 98.44% | 98.24% | 98.65% |
+| New (`checkpoints_normalized/`, with normalization) | 98.85% | **99.24%** | **99.33%** | **99.16%** |
+
+Normalization cost a little synthetic-test accuracy (100%→98.85% — expected: the model can no longer shortcut on absolute brightness, a slightly harder task) but *improved* real DBSI accuracy on every split, and the long-standing `#18→j/h` confusion dropped from 222 occurrences to 19 (`#18→h`). No regression; net improvement.
+
+**Applied to the actual phone photos — still not usable, but now for a clearly-isolated, different reason.** Re-ran `--auto` with the new checkpoint and auto-estimated `link_distance=16.6px`: still garbage transcription. This is not a normalization or classification failure — the debug overlay shows the fragmentation issue is only partly resolved (261 clusters vs. 433 before, but still many undersized/oversized boxes; some clusters now span almost a whole line, flagged merged). Real cause #1's fix (a smarter *global scalar* threshold) is a genuine improvement but can't fully solve this photo: real Braille geometry puts the worst-case same-cell diagonal distance and the next-cell gap only ~10% apart physically, and at this photo's resolution (~11px median pitch) that margin becomes noise-comparable. No single link-distance value, adaptive or not, can guarantee correct clustering here.
+
+**Interpretation:** three genuinely separate problems got tangled together in the original "background color" hypothesis. (1) a real crash bug, unconditional and unrelated to any of this — fixed. (2) illumination/contrast normalization — real, fixed, and independently validated as a net improvement on DBSI, but was never the dominant failure mode for these two specific photos. (3) dot-detection/clustering breaking down at low photo resolution — the actual dominant failure mode for these two photos, and the one still open.
+
+**Next steps to consider:**
+- For (3): replace naive distance-threshold clustering with a grid-aware approach that exploits the *known* 2-column/3-row cell topology (e.g., estimate row/column pitch separately and link only axis-aligned neighbors, or fit a local grid) rather than single-linkage over raw pairwise distances — the current approach is fundamentally unable to separate "worst-case same-cell diagonal" from "next-cell gap" when they're this close in real Braille geometry.
+- Alternatively/additionally: retake these test photos at higher resolution or closer distance-to-page (more pixels per cell gives the existing clustering more margin to work with) — a capture-workflow fix, not a code fix.
+- Once (3) is resolved enough to get correctly-cropped cells from a real handheld photo, re-check classification accuracy specifically — normalization was validated on DBSI (scanned) and via synthetic crop statistics, not yet on a real, correctly-cropped handheld-photo cell.
