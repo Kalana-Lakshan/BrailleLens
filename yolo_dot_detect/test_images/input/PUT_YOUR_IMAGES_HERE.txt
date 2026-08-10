@@ -1,0 +1,5 @@
+Drop .jpg / .jpeg / .png Braille photos in this folder, then run:
+  py -3.11 -m yolo_dot_detect.mark_folder
+
+Marked overlays appear in:
+  yolo_dot_detect\test_images\output\

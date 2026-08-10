@@ -18,3 +18,17 @@ debug_*.png
 
 # Secrets
 .env
+test-img_*_dots.png
+test-img_yolo*.png
+
+# YOLO local datasets / Colab upload blobs (regenerate or use Drive)
+yolo_dot_detect/datasets/
+yolo_dot_detect/runs/
+yolo_dot_detect/colab_upload/*.zip
+yolo_dot_detect/yolo26n.pt
+yolo_dot_detect/yolov8n.pt
+yolo_dot_detect/test_images/output/
+yolo_dot_detect/test_images/output_dotneuralnet/
+
+# Nested clone leftovers
+DotNeuralNet/.git/
