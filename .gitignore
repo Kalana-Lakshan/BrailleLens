@@ -32,3 +32,13 @@ yolo_dot_detect/test_images/output_dotneuralnet/
 
 # Nested clone leftovers
 DotNeuralNet/.git/
+
+# finger_cell_track local venv (MediaPipe isolated from system TF/protobuf)
+finger_cell_track/.venv/
+finger_cell_track/_*.png
+# Large tip datasets + training outputs (download locally / on Kaggle)
+finger_cell_track/datasets/
+finger_cell_track/runs/
+finger_cell_track/weights/
+finger_cell_track/**/*.pt
+finger_cell_track/**/*.zip
