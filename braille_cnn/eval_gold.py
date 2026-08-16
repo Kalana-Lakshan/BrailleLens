@@ -84,6 +84,17 @@ def main() -> None:
             total += labels.size(0)
     print(f"Gold {args.split}: {correct / max(total, 1):.4f}  ({correct}/{total})")
     print(ds.describe())
+    from .eval_report import write_eval_report
+
+    write_eval_report(
+        Path("reports/eval") / f"gold_{args.split}.md",
+        f"Gold {args.split} cell-CNN accuracy",
+        [
+            f"Checkpoint: `{ckpt}`",
+            f"Accuracy: **{correct / max(total, 1):.4f}** ({correct}/{total})",
+            ds.describe(),
+        ],
+    )
 
 
 if __name__ == "__main__":

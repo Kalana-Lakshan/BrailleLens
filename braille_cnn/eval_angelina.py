@@ -95,8 +95,25 @@ def main() -> None:
     ]
     recalls.sort(key=lambda x: x[1])
     print("\nworst 10 class recalls:")
+    worst_lines = []
     for label, rec, n in recalls[:10]:
-        print(f"  {label}: {rec:.3f} (n={n})")
+        line = f"  {label}: {rec:.3f} (n={n})"
+        print(line)
+        worst_lines.append(f"- `{label}`: {rec:.3f} (n={n})")
+
+    from .eval_report import write_eval_report
+
+    write_eval_report(
+        Path("reports/eval") / f"angelina_{args.split}.md",
+        f"Angelina {args.split} cell-CNN accuracy",
+        [
+            f"Checkpoint: `{ckpt}`",
+            f"Accuracy: **{acc:.4f}** ({correct}/{total})",
+            "",
+            "Worst 10 class recalls:",
+            *worst_lines,
+        ],
+    )
 
 
 if __name__ == "__main__":

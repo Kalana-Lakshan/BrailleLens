@@ -38,7 +38,7 @@ for the finger hit-test.
 | `configs/cells.yaml` | Hyperparams (`fliplr=0`, `flipud=0`, `max_det=800`) |
 | `detect_cells.py` | `CellDetector.detect_boxes(image)` |
 | `evaluate_detector.py` | Val metrics |
-| `COLAB_SETUP.md` | How to train on GPU (this PC is CPU-only) |
+| [`../colab_training.md`](../colab_training.md) | Job A: Colab GPU training (separate from CNN Job B) |
 
 ---
 

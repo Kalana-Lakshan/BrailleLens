@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+import numpy as np
 import torch
 from torch import nn, optim
 from torch.utils.data import DataLoader
@@ -58,13 +59,18 @@ def main() -> None:
                         help="Draw DSBI and Angelina at equal rate in each epoch")
     parser.add_argument("--sources", nargs="+", default=None,
                         help="Restrict to these sources (default: all in the npz)")
+    parser.add_argument("--max-train-samples", type=int, default=None,
+                        help="Subset the train split (for CPU smoke tests)")
     parser.add_argument("--smoke-test", action="store_true",
-                        help="1 epoch, tiny batch — checks the crop archives")
+                        help="1 epoch, 256 samples — checks the crop archives")
     args = parser.parse_args()
 
     if args.smoke_test:
         args.epochs = 1
         args.batch_size = 8
+        args.max_train_samples = args.max_train_samples or 256
+        if args.out_checkpoint == DEFAULT_OUT:
+            args.out_checkpoint = ROOT / "braille_cnn" / "checkpoints" / "braille_cnn_smoke.pt"
 
     device = torch.device(
         args.device or ("cuda" if torch.cuda.is_available() else "cpu")
@@ -78,6 +84,13 @@ def main() -> None:
         train_npz, augment=not args.no_augment, sources=args.sources
     )
     val_ds = CropDataset(val_npz, augment=False, sources=args.sources)
+    if args.max_train_samples and args.max_train_samples < len(train_ds):
+        n = args.max_train_samples
+        idx = np.random.default_rng(0).choice(len(train_ds), size=n, replace=False)
+        train_ds.crops = train_ds.crops[idx]
+        train_ds.codes = train_ds.codes[idx]
+        train_ds.sources = train_ds.sources[idx]
+        train_ds.page_groups = train_ds.page_groups[idx]
     print(f"device: {device}")
     print(f"train: {train_ds.describe()}")
     print(f"val  : {val_ds.describe()}")
@@ -90,7 +103,12 @@ def main() -> None:
         sampler=sampler,
         num_workers=0,
     )
-    val_loader = DataLoader(val_ds, batch_size=256, shuffle=False, num_workers=0)
+    val_for_eval = val_ds
+    if args.smoke_test and len(val_ds) > 512:
+        from torch.utils.data import Subset
+
+        val_for_eval = Subset(val_ds, list(range(512)))
+    val_loader = DataLoader(val_for_eval, batch_size=256, shuffle=False, num_workers=0)
 
     model = SimpleBrailleCNN(num_classes=NUM_CLASSES).to(device)
     if args.init_checkpoint:
@@ -117,7 +135,7 @@ def main() -> None:
             loss = criterion(model(images), labels)
             loss.backward()
             optimizer.step()
-            running += float(loss) * labels.size(0)
+            running += float(loss.item()) * labels.size(0)
             n += labels.size(0)
         acc = _evaluate(model, val_loader, device)
         print(f"epoch {epoch:02d}  loss={running / max(n, 1):.4f}  val_acc={acc:.4f}")

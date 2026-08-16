@@ -238,7 +238,9 @@ py -3.11 -m cell_detect.prepare_cell_dataset
 py -3.11 -m braille_cnn.train_classifier --smoke-test
 ```
 
-Real YOLO / CNN training needs a GPU (Colab). This PC is CPU-only. See `cell_detect/COLAB_SETUP.md`.
+Real YOLO / CNN training needs a GPU (Colab). This PC is CPU-only. Hand
+the other person **[`colab_training.md`](colab_training.md)** (Job A = cell
+detector, Job B = CNN). Progress vs the build plan: [`PLAN_STATUS.md`](PLAN_STATUS.md).
 
 ### Live camera (tuning)
 

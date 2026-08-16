@@ -125,6 +125,36 @@ class SkinContourTip:
         return None
 
 
+class FallbackTip:
+    """MediaPipe first; skin-contour if the palm is out of frame."""
+
+    def __init__(self, primary, fallback) -> None:
+        self.primary = primary
+        self.fallback = fallback
+        self.hand_visible = False
+        self.last_backend = "none"
+
+    def detect(self, frame_bgr: np.ndarray):
+        tip, box, conf = self.primary.detect(frame_bgr)
+        self.hand_visible = bool(getattr(self.primary, "hand_visible", tip is not None))
+        if tip is not None:
+            self.last_backend = "primary"
+            return tip, box, conf
+        if self.fallback is None:
+            self.last_backend = "none"
+            return None, None, 0.0
+        out = self.fallback.detect(frame_bgr)
+        fb_visible = bool(getattr(self.fallback, "hand_visible", out[0] is not None))
+        self.hand_visible = self.hand_visible or fb_visible
+        self.last_backend = "fallback" if out[0] is not None else "none"
+        return out
+
+    def close(self) -> None:
+        for det in (self.primary, self.fallback):
+            if det is not None and hasattr(det, "close"):
+                det.close()
+
+
 def index_tip_px(
     hand_landmarks,
     width: int,

@@ -9,12 +9,14 @@ is the fallback. TipYOLO stays as a baseline (`--tip-backend yolo`).
 **Page capture:** `--auto-scan` freezes a still, hand-free frame and prints
 `[PAGE] CAPTURED`. `R` is still a manual override.
 
-Prescan still uses DotNeuralNet until `recognize_page(backend="cells")` has
-trained cell-detector weights. That swap is `prescan.py` only.
+Prescan uses `recognize_page()` (cells if our YOLO exists, else dots).
+DotNeuralNet is a last-resort fallback.
 
 ## Setup
 
-Uses a **local venv**:
+Use **`finger_cell_track/.venv`** for Stage 5. MediaPipe is broken in the
+root env (`protobuf` / TensorFlow clash). That venv already imports
+mediapipe 0.10.14, torch, ultralytics and OpenCV together.
 
 ```powershell
 cd finger_cell_track

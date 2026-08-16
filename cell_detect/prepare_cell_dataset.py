@@ -124,7 +124,8 @@ def convert_split(frame, split: str, out_root: Path, copy_images: bool) -> dict:
 
 def write_data_yaml(out_root: Path, has_test: bool) -> Path:
     data = {
-        "path": str(out_root.resolve()),
+        # Relative so a zip of this folder trains on Colab without a Windows path.
+        "path": ".",
         "train": "images/train",
         "val": "images/val",
         "names": {CLASS_ID: CLASS_NAME},

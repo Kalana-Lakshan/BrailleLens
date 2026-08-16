@@ -11,5 +11,5 @@ Output rows: **157,559** (100.00% retained)
 | Duplicate cell annotations | 0 |  |
 | Implausible aspect ratio | 0 | kept 0.15 to 6.0 |
 | Decorative divider rows | 0 | 3,514 flagged but kept; pass --drop-rulers to remove |
-| Missing page image | 0 | skipped (--no-check-images) |
+| Missing page image | 0 |  |
 | dots / code disagreement | 0 |  |

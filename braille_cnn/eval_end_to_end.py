@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 from collections import defaultdict
+from pathlib import Path
 
 import numpy as np
 from PIL import Image
@@ -115,6 +116,19 @@ def main() -> None:
     print(f"  detection recall    : {rec:.4f}")
     print(f"  classification | IoU≥{args.iou} : {cls:.4f}")
     print(f"  exact cells         : {totals['tp_ok']} / {gt_n} gt")
+    from .eval_report import write_eval_report
+
+    write_eval_report(
+        Path("reports/eval") / f"end_to_end_{args.backend}_{args.split}.md",
+        f"End-to-end page eval ({args.backend}, {args.split})",
+        [
+            f"Pages: {len(pages)}",
+            f"Detection precision: **{prec:.4f}**",
+            f"Detection recall: **{rec:.4f}**",
+            f"Classification given IoU≥{args.iou}: **{cls:.4f}**",
+            f"Exact matched cells: {totals['tp_ok']} / {gt_n} gt",
+        ],
+    )
 
 
 if __name__ == "__main__":
