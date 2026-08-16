@@ -30,7 +30,7 @@ import cv2
 
 _HERE = Path(__file__).resolve().parent
 _ROOT = _HERE.parent
-_DNN = _ROOT / "DotNeuralNet"
+_DNN = _ROOT / "experiments" / "DotNeuralNet"
 for p in (_HERE, _ROOT, _DNN):
     s = str(p)
     if s not in sys.path:

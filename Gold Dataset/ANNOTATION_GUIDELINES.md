@@ -1,6 +1,6 @@
 # Annotation Guidelines — LabelMe
 
-How to hand-annotate the page photos in this folder (currently `Low quality dataset/pg-1.jpeg` … `pg-12.jpeg`) so they can feed straight into the existing Angelina-format pipeline (`DotNeuralNet/src/crop_bbox.py`, `dataset.py`). See the [project root README](../README.md) for pipeline context; this file only covers the annotation step.
+How to hand-annotate the page photos in this folder (currently `Low quality dataset/pg-1.jpeg` … `pg-12.jpeg`) so they can feed straight into the existing Angelina-format pipeline (`experiments/DotNeuralNet/src/crop_bbox.py`, `dataset.py`). See the [project root README](../README.md) for pipeline context; this file only covers the annotation step.
 
 ---
 
@@ -43,7 +43,7 @@ Type **the single Sinhala character this one cell represents on its own**, the s
 
 **Exception — cells with no standalone letter.** Some cells (e.g. Sinhala pillam / dependent-vowel-sign cells, which combine with the *preceding* cell to form one syllable — see `braille_cnn/labels.py`'s `CODE_TO_SINHALA` and the note in its comments) only make sense combined with the *preceding* cell and have no letter of their own. For those, don't guess a letter — type the raw dot pattern instead, wrapped the same way Angelina marks special/ambiguous symbols: **`~<dots>~`**, e.g. `~245~` for a cell with dots 2, 4, 5 raised (dot numbering: `1 4 / 2 5 / 3 6`, top-to-bottom, left-to-right, same convention as `DOT_OFFSETS` in `yolo_dot_detect/prepare_dataset.py`). This keeps every cell labeled with *something* even before Sinhala composition rules are finalized.
 
-**Consistency matters more than correctness right now** — the same dot pattern must always get the same label string across all 12 pages. Keep a running personal cheat-sheet as you go (glyph ↔ dot pattern) instead of re-deciding each time; this becomes the seed for a `alpha_map_SI` dict (same shape as `alpha_map_RU` in `DotNeuralNet/src/utils/angelina_utils.py`), which doesn't exist yet and is required before `transform_angelina_label()` will resolve Sinhala labels.
+**Consistency matters more than correctness right now** — the same dot pattern must always get the same label string across all 12 pages. Keep a running personal cheat-sheet as you go (glyph ↔ dot pattern) instead of re-deciding each time; this becomes the seed for a `alpha_map_SI` dict (same shape as `alpha_map_RU` in `experiments/DotNeuralNet/src/utils/angelina_utils.py`), which doesn't exist yet and is required before `transform_angelina_label()` will resolve Sinhala labels.
 
 ---
 
@@ -72,4 +72,4 @@ After each page, reopen it in LabelMe (or use a quick overlay script, same idea 
 
 ## 7. What happens after annotation (for context, not part of this step)
 
-Once labeled, `crop_angelina_bbox(img_path, bbox_path)` in `DotNeuralNet/src/crop_bbox.py` crops each box and encodes its label via `transform_angelina_label()` into a 6-bit dot pattern, saving `pg-N_<x1>_<y1>_<x2>_<y2>_<onehot>.jpg` crops that `BrailleDataset` in `dataset.py` picks up automatically. That step is blocked until the `alpha_map_SI` dict from §4 is added — annotate now, wire up the mapping table separately.
+Once labeled, `crop_angelina_bbox(img_path, bbox_path)` in `experiments/DotNeuralNet/src/crop_bbox.py` crops each box and encodes its label via `transform_angelina_label()` into a 6-bit dot pattern, saving `pg-N_<x1>_<y1>_<x2>_<y2>_<onehot>.jpg` crops that `BrailleDataset` in `dataset.py` picks up automatically. That step is blocked until the `alpha_map_SI` dict from §4 is added — annotate now, wire up the mapping table separately.

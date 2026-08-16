@@ -9,8 +9,14 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-# BrailleLens repo root (DotNeuralNet/ is one level under it)
-_ROOT = Path(__file__).resolve().parents[2]
+def _repo_root() -> Path:
+    for parent in Path(__file__).resolve().parents:
+        if (parent / "braille_cnn").is_dir():
+            return parent
+    raise RuntimeError("Could not find BrailleLens repo root (no braille_cnn/)")
+
+
+_ROOT = _repo_root()
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 

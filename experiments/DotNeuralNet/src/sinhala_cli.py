@@ -2,8 +2,8 @@
 
 Examples (from BrailleLens repo root):
 
-    py -3.11 -m DotNeuralNet.src.sinhala_cli --patterns 100000 101010 110110
-    py -3.11 -m DotNeuralNet.src.sinhala_cli --patterns 011000 100000 --lang en
+    py -3.11 experiments/DotNeuralNet/src/sinhala_cli.py --patterns 100000 101010 110110
+    py -3.11 experiments/DotNeuralNet/src/sinhala_cli.py --patterns 011000 100000 --lang en
 """
 
 from __future__ import annotations
@@ -12,7 +12,14 @@ import argparse
 import sys
 from pathlib import Path
 
-_ROOT = Path(__file__).resolve().parents[2]
+def _repo_root() -> Path:
+    for parent in Path(__file__).resolve().parents:
+        if (parent / "braille_cnn").is_dir():
+            return parent
+    raise RuntimeError("Could not find BrailleLens repo root (no braille_cnn/)")
+
+
+_ROOT = _repo_root()
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 

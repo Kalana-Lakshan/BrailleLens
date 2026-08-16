@@ -2,8 +2,8 @@
 
 Run from the BrailleLens project root (Python 3.11):
 
-    py -3.11 DotNeuralNet/live_camera.py
-    py -3.11 DotNeuralNet/live_camera.py --source http://192.168.8.126:8080/video
+    py -3.11 experiments/DotNeuralNet/live_camera.py
+    py -3.11 experiments/DotNeuralNet/live_camera.py --source http://192.168.8.126:8080/video
 
 Controls (preview window):
     Q       quit
@@ -24,7 +24,14 @@ import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-_ROOT = Path(__file__).resolve().parent.parent
+def _repo_root() -> Path:
+    for parent in Path(__file__).resolve().parents:
+        if (parent / "braille_cnn").is_dir():
+            return parent
+    raise RuntimeError("Could not find BrailleLens repo root (no braille_cnn/)")
+
+
+_ROOT = _repo_root()
 _DNN = Path(__file__).resolve().parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))

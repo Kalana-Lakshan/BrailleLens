@@ -108,6 +108,35 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Non-max-suppression window in pixels (~one dot diameter).",
     )
     p.add_argument(
+        "--dot-backend",
+        type=str,
+        default="classical",
+        choices=["classical", "yolo", "auto"],
+        help=(
+            "How to find raised dots. classical = braille_cnn peak detection (default); "
+            "yolo = yolo_dot_detect transfer learning; auto = classical first, YOLO if "
+            "too few dots are found."
+        ),
+    )
+    p.add_argument(
+        "--yolo-weights",
+        type=str,
+        default=None,
+        help="Optional YOLO checkpoint when --dot-backend is yolo or auto.",
+    )
+    p.add_argument(
+        "--yolo-conf",
+        type=float,
+        default=0.25,
+        help="YOLO confidence cutoff when --dot-backend is yolo or auto.",
+    )
+    p.add_argument(
+        "--yolo-tile",
+        type=int,
+        default=640,
+        help="YOLO inference tile size (0 disables tiling).",
+    )
+    p.add_argument(
         "--cell-margin-scale",
         type=float,
         default=0.8,

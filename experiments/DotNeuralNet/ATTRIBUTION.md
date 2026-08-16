@@ -12,11 +12,11 @@
 #   Braille Recognition in the Wild. 2023.
 #
 # Live preview (from BrailleLens repo root):
-#   py -3.11 DotNeuralNet/live_camera.py --source http://PHONE_IP:8080/video
+#   py -3.11 experiments/DotNeuralNet/live_camera.py --source http://PHONE_IP:8080/video
 #
 # Sinhala decode from cell patterns (Part 1):
-#   py -3.11 DotNeuralNet/decode_patterns.py --patterns 100000 101011 --lang si
+#   py -3.11 experiments/DotNeuralNet/decode_patterns.py --patterns 100000 101011 --lang si
 #
 # Image → lines/words → Sinhala (Part 2):
 #   $env:PYTHONIOENCODING = "utf-8"
-#   py -3.11 DotNeuralNet/transcribe_image.py --image path\to\page.jpg --lang si --save-overlay out.png
+#   py -3.11 experiments/DotNeuralNet/transcribe_image.py --image path\to\page.jpg --lang si --save-overlay out.png

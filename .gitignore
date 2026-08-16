@@ -1,6 +1,7 @@
 # Dataset (clone separately — see README)
 data DBSI/
 AngelinaDataset-master/
+data Angelina/
 
 # Trained model weights and eval artifacts
 braille_cnn/checkpoints/
@@ -31,7 +32,7 @@ yolo_dot_detect/test_images/output/
 yolo_dot_detect/test_images/output_dotneuralnet/
 
 # Nested clone leftovers
-DotNeuralNet/.git/
+experiments/DotNeuralNet/.git/
 
 # finger_cell_track local venv (MediaPipe isolated from system TF/protobuf)
 finger_cell_track/.venv/

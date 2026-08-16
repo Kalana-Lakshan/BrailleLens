@@ -19,7 +19,7 @@ cd ..
 
 Needed weights:
 
-- Braille cells: `DotNeuralNet/weights/yolov8_braille.pt`
+- Braille cells: `experiments/DotNeuralNet/weights/yolov8_braille.pt`
 - Fingertip: `finger_cell_track/weights/yolo26n_fingertip_best.pt` (from Colab)
 
 ## Quick start
