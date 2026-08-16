@@ -376,6 +376,61 @@ def verify_dots(points, image, dot_model, device, patch_size=32, threshold=0.5):
     return points[keep_idx]
 
 
+MIN_DOTS_FOR_AUTO_FALLBACK = 12
+
+
+def _yolo_device(device) -> str:
+    if device is None:
+        return "cpu"
+    if isinstance(device, torch.device):
+        return "0" if device.type == "cuda" else "cpu"
+    return str(device)
+
+
+def _yolo_dot_centers(image, args, device):
+    """Peak-finding via transfer-learned YOLO; same (N, 2) shape as detect_dot_centers."""
+    from yolo_dot_detect.detect_dots import YoloDotDetector
+
+    weights = getattr(args, "yolo_weights", None) or None
+    conf = getattr(args, "yolo_conf", 0.25)
+    tile = getattr(args, "yolo_tile", 640)
+    if not tile:
+        tile = None
+    detector = YoloDotDetector(
+        weights=weights, conf=conf, device=_yolo_device(device), tile=tile
+    )
+    return detector.detect(image)
+
+
+def _classical_dot_centers(gray, image, args, dot_model, device):
+    points = detect_dot_centers(
+        gray,
+        z_threshold=args.dot_z_threshold,
+        footprint=args.dot_footprint,
+        peak_y_offset=getattr(args, "dot_peak_y_offset", 0.0),
+    )
+    if dot_model is not None:
+        points = verify_dots(
+            points, image, dot_model, device,
+            threshold=getattr(args, "dot_classifier_threshold", 0.5),
+        )
+    return points
+
+
+def _detect_dot_points(gray, image, args, dot_model, device):
+    """classical (default), yolo, or auto (classical first, YOLO if too few dots)."""
+    backend = getattr(args, "dot_backend", "classical")
+    if backend == "yolo":
+        return _yolo_dot_centers(image, args, device)
+
+    points = _classical_dot_centers(gray, image, args, dot_model, device)
+    if backend == "auto" and len(points) < MIN_DOTS_FOR_AUTO_FALLBACK:
+        yolo_points = _yolo_dot_centers(image, args, device)
+        if len(yolo_points) > len(points):
+            return yolo_points
+    return points
+
+
 def run_auto_transcribe(image, args, model=None, device=None, dot_model=None):
     """Detect, classify, and return structured transcription data (no printing)."""
     if device is None:
@@ -390,11 +445,7 @@ def run_auto_transcribe(image, args, model=None, device=None, dot_model=None):
     conf_threshold = getattr(args, "conf_threshold", 0.0)
 
     gray = np.asarray(image, dtype=np.float32)
-    points = detect_dot_centers(gray, z_threshold=args.dot_z_threshold, footprint=args.dot_footprint,
-                                 peak_y_offset=getattr(args, "dot_peak_y_offset", 0.0))
-    if dot_model is not None:
-        points = verify_dots(points, image, dot_model, device,
-                              threshold=getattr(args, "dot_classifier_threshold", 0.5))
+    points = _detect_dot_points(gray, image, args, dot_model, device)
 
     if getattr(args, "filter_ruler_lines", True):
         points = filter_ruler_lines(points)
@@ -567,6 +618,18 @@ def main():
                               "default (unset) auto-estimates this per-image from the photo's own dot "
                               "spacing instead of assuming one fixed pixel value (see "
                               "dot_detect.estimate_link_distance)")
+    parser.add_argument("--dot-backend", type=str, default="classical",
+                         choices=["classical", "yolo", "auto"],
+                         help="[auto] how to find raised dots. 'classical' uses braille_cnn.dot_detect "
+                              "(default). 'yolo' uses yolo_dot_detect transfer learning. 'auto' tries "
+                              "classical first and falls back to YOLO if fewer than "
+                              f"{MIN_DOTS_FOR_AUTO_FALLBACK} dots remain.")
+    parser.add_argument("--yolo-weights", type=str, default=None,
+                         help="[auto] optional YOLO checkpoint; default is yolo_dot_detect/runs/.../best.pt")
+    parser.add_argument("--yolo-conf", type=float, default=0.25,
+                         help="[auto] YOLO confidence cutoff when --dot-backend is yolo or auto")
+    parser.add_argument("--yolo-tile", type=int, default=640,
+                         help="[auto] YOLO inference tile size (0 disables tiling)")
     parser.add_argument("--dot-z-threshold", type=float, default=3.0,
                          help="[auto] local z-score cutoff for a peak to count as a dot (see dot_detect.py); "
                               "adapts per-region instead of one global brightness percentile, so it transfers "

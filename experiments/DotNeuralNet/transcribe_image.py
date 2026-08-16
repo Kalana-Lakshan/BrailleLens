@@ -5,9 +5,9 @@ Pipeline:
 
 From BrailleLens repo root:
 
-    py -3.11 DotNeuralNet/transcribe_image.py --image path/to/page.jpg
-    py -3.11 DotNeuralNet/transcribe_image.py --image path/to/page.jpg --lang en --conf 0.2
-    py -3.11 DotNeuralNet/transcribe_image.py --image path/to/page.jpg --save-overlay out.png
+    py -3.11 experiments/DotNeuralNet/transcribe_image.py --image path/to/page.jpg
+    py -3.11 experiments/DotNeuralNet/transcribe_image.py --image path/to/page.jpg --lang en --conf 0.2
+    py -3.11 experiments/DotNeuralNet/transcribe_image.py --image path/to/page.jpg --save-overlay out.png
 """
 
 from __future__ import annotations
@@ -18,7 +18,14 @@ from pathlib import Path
 
 import cv2
 
-_ROOT = Path(__file__).resolve().parent.parent
+def _repo_root() -> Path:
+    for parent in Path(__file__).resolve().parents:
+        if (parent / "braille_cnn").is_dir():
+            return parent
+    raise RuntimeError("Could not find BrailleLens repo root (no braille_cnn/)")
+
+
+_ROOT = _repo_root()
 _DNN = Path(__file__).resolve().parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))

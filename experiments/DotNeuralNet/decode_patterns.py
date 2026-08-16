@@ -2,8 +2,8 @@
 
 From BrailleLens repo root:
 
-    py -3.11 DotNeuralNet/decode_patterns.py --patterns 100000 101011 110110
-    py -3.11 DotNeuralNet/decode_patterns.py --patterns 100000 101000 --lang en
+    py -3.11 experiments/DotNeuralNet/decode_patterns.py --patterns 100000 101011 110110
+    py -3.11 experiments/DotNeuralNet/decode_patterns.py --patterns 100000 101000 --lang en
 """
 
 from __future__ import annotations
@@ -12,7 +12,14 @@ import argparse
 import sys
 from pathlib import Path
 
-_ROOT = Path(__file__).resolve().parent.parent
+def _repo_root() -> Path:
+    for parent in Path(__file__).resolve().parents:
+        if (parent / "braille_cnn").is_dir():
+            return parent
+    raise RuntimeError("Could not find BrailleLens repo root (no braille_cnn/)")
+
+
+_ROOT = _repo_root()
 _DNN = Path(__file__).resolve().parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))

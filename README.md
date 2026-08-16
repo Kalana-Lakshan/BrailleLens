@@ -45,6 +45,12 @@ py -3.11 -m braille_cnn.infer_page --auto --image test-img.jpeg --lang si
 
 Add `--debug-out debug.png` to save an overlay showing detected dot clusters and crop boxes.
 
+If classical dot finding is weak, retry with YOLO transfer learning (same CNN):
+
+```bash
+py -3.11 -m braille_cnn.infer_page --auto --image test-img.jpeg --lang si --dot-backend auto
+```
+
 ---
 
 ## Prerequisites
@@ -72,27 +78,24 @@ Training reads from `--dbsi-root "data DBSI/data"` because page images live unde
 
 ```
 BrailleLens/
-├── camera_capture/          <- Live camera pipeline (Branch 2 + 3)
-│   ├── camera.py              Motion gate, preview HUD, terminal output
-│   ├── run_camera.py          CLI entry point
-│   └── README.md              Detailed camera module documentation
-├── braille_cnn/               <- Core ML / CV pipeline
-│   ├── cnn.py                 SimpleBrailleCNN (64-class cell classifier)
-│   ├── dot_detect.py          Dot peak detection + cell clustering
-│   ├── infer_page.py          Static + camera inference, run_auto_transcribe()
-│   ├── labels.py              English/Sinhala decode tables + indicator pairs
-│   ├── train.py               Synthetic pretraining
-│   ├── finetune_dbsi.py       Real-data fine-tuning / scratch training
-│   ├── dbsi_dataset.py        DBSI page -> cell crop loader
-│   ├── check_labels.py        Sinhala label sanity checker
-│   ├── RESULTS.md             Experiment log (accuracy, domain gap)
-│   └── README.md              CNN architecture deep-dive
-├── braille_lens_flutter/      <- Mobile app (ONNX classifier, separate stack)
-├── braille_app_pipeline/      <- Early prototype (TTS / learning mode)
+├── braille_cnn/               <- 64-class CNN, classical dot detect, Sinhala decode
+├── camera_capture/            <- Live webcam / IP Webcam demo of that CNN
+├── yolo_dot_detect/           <- Transfer-learned dots (use if classical accuracy is low)
+├── finger_cell_track/         <- Fingertip tracking + cell hit-test (learning/testing)
+├── braille_lens_flutter/      <- Mobile app (ONNX, separate stack)
+├── braille_app_pipeline/      <- ONNX / TTS helper for the app
 ├── docs/                      <- Papers and project proposal PDFs
-├── test-img.jpeg              Sample images for static inference tests
-└── IMPLEMENTATION_PLAN.md     Original branch plan (historical reference)
+├── data DBSI/                 <- DSBI scanner dataset (gitignored; clone separately)
+├── data Angelina/             <- Angelina handheld-photo dataset (gitignored)
+├── Gold Dataset/              <- Project Sinhala page photos
+├── experiments/               <- Not the deployment path
+│   ├── braille_detector/      <- Single-stage cell-detector POC
+│   ├── DotNeuralNet/          <- Third-party cell YOLO (used by finger_cell_track)
+│   └── IMPLEMENTATION_PLAN.md <- Historical three-branch plan
+└── test-img.jpeg              <- Sample images for static inference tests
 ```
+
+Dot finding defaults to classical peaks in `braille_cnn/dot_detect.py`. Pass `--dot-backend yolo` or `--dot-backend auto` to use `yolo_dot_detect/` instead (or as a fallback when too few dots are found). The cell CNN does not change.
 
 ---
 
@@ -177,7 +180,7 @@ flowchart TB
 | Medium | Integrate live pipeline into Flutter app | Python camera module and Flutter ONNX stack are separate today |
 | Medium | Text-to-speech for decoded Sinhala | `braille_app_pipeline/audio_engine.py` exists as early prototype |
 | Low | Perspective-robust retraining | `eval_perspective.py` shows ~13 pt drop under synthetic skew |
-| Low | Update `IMPLEMENTATION_PLAN.md` | Still lists Branch 2/3 as pending |
+| Low | Update `experiments/IMPLEMENTATION_PLAN.md` | Still lists Branch 2/3 as pending |
 
 ---
 
@@ -241,7 +244,7 @@ py -3.11 camera_capture/run_camera.py --source http://192.168.x.x:8080/video --v
 - [`camera_capture/README.md`](camera_capture/README.md) — Full camera module technical reference
 - [`braille_cnn/README.md`](braille_cnn/README.md) — CNN architecture and Sinhala decoder details
 - [`braille_cnn/RESULTS.md`](braille_cnn/RESULTS.md) — Experiment log and known domain gaps
-- [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) — Original three-branch development plan
+- [`experiments/IMPLEMENTATION_PLAN.md`](experiments/IMPLEMENTATION_PLAN.md) — Original three-branch development plan
 
 ---
 

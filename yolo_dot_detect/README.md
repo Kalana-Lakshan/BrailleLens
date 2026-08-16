@@ -189,6 +189,20 @@ clusters = cluster_into_cells(centers, link_distance=15.0)
 
 ## Relation to the rest of BrailleLens
 
-This folder is self-contained. The Flutter app and `camera_capture/` still use
-classical detection until you wire `YoloDotDetector` into `infer_page.py`
-(optional follow-up).
+This folder improves only the *where are the dots?* stage. The 64-class CNN
+and Sinhala decoder stay in `braille_cnn/`.
+
+From the repo root:
+
+```bash
+# classical peaks (default)
+py -3.11 -m braille_cnn.infer_page --auto --image test-img.jpeg --lang si
+
+# YOLO dots + same CNN
+py -3.11 -m braille_cnn.infer_page --auto --image test-img.jpeg --lang si --dot-backend yolo
+
+# classical first, YOLO if fewer than 12 dots
+py -3.11 -m braille_cnn.infer_page --auto --image test-img.jpeg --lang si --dot-backend auto
+```
+
+`camera_capture/run_camera.py` accepts the same `--dot-backend` flag.
