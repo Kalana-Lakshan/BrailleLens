@@ -3,9 +3,9 @@ data DBSI/
 AngelinaDataset-master/
 data Angelina/
 
-# Trained model weights and eval artifacts
-braille_cnn/checkpoints/
-*.npy
+# Archive older CNN checkpoints (keep checkpoints/ as the only live folder)
+# Duplicate .pt files that were un-tracked leftover copies.
+braille_cnn/checkpoints/archive/
 
 # Python cache
 __pycache__/
@@ -26,10 +26,24 @@ test-img_yolo*.png
 yolo_dot_detect/datasets/
 yolo_dot_detect/runs/
 yolo_dot_detect/colab_upload/*.zip
-yolo_dot_detect/yolo26n.pt
-yolo_dot_detect/yolov8n.pt
+yolo26n.pt
+yolov8n.pt
 yolo_dot_detect/test_images/output/
 yolo_dot_detect/test_images/output_dotneuralnet/
+
+# Stage 2–4 generated data (rebuild with the data_pipeline / cell_detect CLIs)
+data_pipeline/crops/
+data_pipeline/manifests/
+cell_detect/datasets/
+cell_detect/runs/
+cell_detect/weights/*.pt
+cell_detect/**/*.pt
+cell_detect/**/*.zip
+colab_upload/
+
+# Trained CNN weights (large; send back from Colab, do not commit)
+braille_cnn/checkpoints/*.pt
+braille_cnn/checkpoints/*.npy
 
 # Nested clone leftovers
 experiments/DotNeuralNet/.git/

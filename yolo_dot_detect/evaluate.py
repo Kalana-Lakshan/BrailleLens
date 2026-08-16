@@ -16,11 +16,15 @@ from pathlib import Path
 
 def _default_weights() -> Path:
     here = Path(__file__).resolve().parent / "runs" / "detect"
-    for name in ("braille_dot_yolo26", "braille_dot_yolov8"):
+    for name in (
+        "braille_dot_yolo26_tiled",
+        "braille_dot_yolo26",
+        "braille_dot_yolov8",
+    ):
         cand = here / name / "weights" / "best.pt"
         if cand.exists():
             return cand
-    return here / "braille_dot_yolo26" / "weights" / "best.pt"
+    return here / "braille_dot_yolo26_tiled" / "weights" / "best.pt"
 
 
 def main():

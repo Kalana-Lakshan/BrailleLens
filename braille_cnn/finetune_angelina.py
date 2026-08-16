@@ -43,7 +43,7 @@ def evaluate(model, loader, device):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dbsi-root", type=str, default="data DBSI")
-    parser.add_argument("--angelina-root", type=str, default="AngelinaDataset-master/books")
+    parser.add_argument("--angelina-root", type=str, default="data Angelina/books")
     parser.add_argument("--init-checkpoint", type=str,
                          default="braille_cnn/checkpoints/braille_cnn_dbsi_finetuned.pt")
     parser.add_argument("--out-checkpoint", type=str,

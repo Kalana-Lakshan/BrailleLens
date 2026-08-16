@@ -1,13 +1,22 @@
-# finger_cell_track
+# Stage 5 — finger_cell_track
 
-PC prototype: **YOLO26 fingertip** tracking + DotNeuralNet cell pre-scan →
-hit-test which Braille cell the finger covers (Learning / Testing).
+Live learning app: prescanned CellMap + fingertip hit-test → one character
+per dwell in the terminal.
 
-Works with tip-only / no-palm views (unlike MediaPipe). Phone / glasses later.
+**Tip detector:** MediaPipe Hands is primary (`MediaPipeTip`). Skin-contour
+is the fallback. TipYOLO stays as a baseline (`--tip-backend yolo`).
+
+**Page capture:** `--auto-scan` freezes a still, hand-free frame and prints
+`[PAGE] CAPTURED`. `R` is still a manual override.
+
+Prescan uses `recognize_page()` (cells if our YOLO exists, else dots).
+DotNeuralNet is a last-resort fallback.
 
 ## Setup
 
-Uses a **local venv**:
+Use **`finger_cell_track/.venv`** for Stage 5. MediaPipe is broken in the
+root env (`protobuf` / TensorFlow clash). That venv already imports
+mediapipe 0.10.14, torch, ultralytics and OpenCV together.
 
 ```powershell
 cd finger_cell_track
@@ -32,7 +41,10 @@ $py = "finger_cell_track\.venv\Scripts\python.exe"
 & $py finger_cell_track/tip_track.py --source http://PHONE_IP:8080/video
 
 # Full CellMap + tip → Learning/Testing
-& $py finger_cell_track/live_app.py --source 0 --mode learning --lang en
+& $py finger_cell_track/live_app.py --source 0 --mode learning --lang si --auto-scan
+
+# Measure tip backends on recorded footage
+& $py finger_cell_track/eval_tip.py
 
 # Auto-label tip-on-Braille photos (then correct in Roboflow + fine-tune)
 & $py finger_cell_track/auto_label_tips.py --images path\to\photos
@@ -52,9 +64,10 @@ Train tip model on Colab T4: `BrailleLens_Fingertip_YOLO26_Colab.ipynb` (see `CO
 
 | File | Role |
 |------|------|
-| `tip_yolo.py` | Load tip weights, detect tip center |
-| `tip_track.py` | Live tip YOLO overlay |
+| `autoscan.py` | `PageWatcher` — auto page capture, no R required |
+| `hand_track.py` | `MediaPipeTip` + `SkinContourTip` |
+| `eval_tip.py` | Measure MediaPipe vs contour vs YOLO on video |
+| `tip_yolo.py` | Old tip YOLO (baseline only) |
 | `live_app.py` | Tip + CellMap Learning/Testing |
-| `auto_label_tips.py` | Pseudo-label photos for domain fine-tune |
-| `hand_track.py` | Legacy MediaPipe tip (palm required) |
 | `cell_map.py` / `prescan.py` / `modes.py` | CellMap + modes |
+| `registration.py` | ORB+RANSAC; `status` is OK / LOST |

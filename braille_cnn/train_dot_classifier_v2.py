@@ -65,7 +65,7 @@ def to_dataset(patches, labels, patch_size):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--angelina-root", type=str, default="AngelinaDataset-master/books")
+    parser.add_argument("--angelina-root", type=str, default="data Angelina/books")
     parser.add_argument("--epochs", type=int, default=12)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--lr", type=float, default=1e-3)

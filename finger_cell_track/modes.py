@@ -27,7 +27,10 @@ class LearningMode:
         ch = cell.char or "?"
         return ModeEvent(
             kind="announce",
-            message=f"[LEARN] cell {cell.id} → {ch}",
+            message=(
+                f"[LEARN] cell {cell.id}  code={cell.code}  "
+                f"char={ch}  conf={cell.conf:.2f}"
+            ),
             cell=cell,
         )
 
