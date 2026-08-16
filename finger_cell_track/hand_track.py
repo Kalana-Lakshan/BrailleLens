@@ -18,8 +18,9 @@ import cv2
 import mediapipe as mp
 import numpy as np
 
-# MediaPipe Hands landmark index for index fingertip
+# MediaPipe Hands landmark index for index fingertip / MCP
 INDEX_FINGERTIP = 8
+INDEX_MCP = 5
 
 _mp_hands = mp.solutions.hands
 _mp_draw = mp.solutions.drawing_utils
@@ -38,6 +39,90 @@ def open_source(source: str) -> cv2.VideoCapture:
             "Use --source 0 for PC webcam or http://PHONE_IP:8080/video for IP Webcam."
         )
     return cap
+
+
+class MediaPipeTip:
+    """Reusable index-finger tip. Landmark 8, optionally pulled back toward MCP 5."""
+
+    def __init__(
+        self,
+        max_hands: int = 1,
+        detection_conf: float = 0.6,
+        tracking_conf: float = 0.5,
+        contact_offset: float = 0.18,
+    ) -> None:
+        self.contact_offset = contact_offset
+        self._hands = _mp_hands.Hands(
+            static_image_mode=False,
+            max_num_hands=max_hands,
+            model_complexity=1,
+            min_detection_confidence=detection_conf,
+            min_tracking_confidence=tracking_conf,
+        )
+        self.hand_visible = False
+
+    def detect(self, frame_bgr: np.ndarray):
+        """Return ((x, y), None, 1.0) or (None, None, 0.0). Same shape as TipYOLO."""
+        h, w = frame_bgr.shape[:2]
+        rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+        rgb.flags.writeable = False
+        result = self._hands.process(rgb)
+        rgb.flags.writeable = True
+        if not result.multi_hand_landmarks:
+            self.hand_visible = False
+            return None, None, 0.0
+        self.hand_visible = True
+        lm = result.multi_hand_landmarks[0].landmark
+        tip = np.array([lm[INDEX_FINGERTIP].x * w, lm[INDEX_FINGERTIP].y * h], dtype=np.float32)
+        mcp = np.array([lm[INDEX_MCP].x * w, lm[INDEX_MCP].y * h], dtype=np.float32)
+        contact = tip - self.contact_offset * (tip - mcp)
+        xy = (int(round(contact[0])), int(round(contact[1])))
+        return xy, None, 1.0
+
+    def close(self) -> None:
+        self._hands.close()
+
+
+class SkinContourTip:
+    """Classical fallback: largest skin blob, tip = point farthest from the wrist edge."""
+
+    def __init__(self, min_area: int = 800) -> None:
+        self.min_area = min_area
+        self.hand_visible = False
+
+    def detect(self, frame_bgr: np.ndarray):
+        ycrcb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2YCrCb)
+        mask = cv2.inRange(ycrcb, (0, 133, 77), (255, 173, 127))
+        mask = cv2.medianBlur(mask, 5)
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            self.hand_visible = False
+            return None, None, 0.0
+        contour = max(contours, key=cv2.contourArea)
+        if cv2.contourArea(contour) < self.min_area:
+            self.hand_visible = False
+            return None, None, 0.0
+        self.hand_visible = True
+        pts = contour.reshape(-1, 2)
+        # Wrist is the side of the blob closest to a frame border.
+        h, w = frame_bgr.shape[:2]
+        border = np.array(
+            [
+                pts[:, 0],
+                w - 1 - pts[:, 0],
+                pts[:, 1],
+                h - 1 - pts[:, 1],
+            ]
+        ).min(axis=0)
+        wrist = pts[int(np.argmin(border))]
+        tip = pts[int(np.argmax(np.sum((pts - wrist) ** 2, axis=1)))]
+        xy = (int(tip[0]), int(tip[1]))
+        x0, y0 = pts.min(axis=0)
+        x1, y1 = pts.max(axis=0)
+        return xy, (int(x0), int(y0), int(x1), int(y1)), 1.0
+
+    def close(self) -> None:
+        return None
 
 
 def index_tip_px(

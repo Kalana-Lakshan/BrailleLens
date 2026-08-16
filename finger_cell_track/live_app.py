@@ -38,12 +38,12 @@ for p in (_HERE, _ROOT, _DNN):
 
 import numpy as np  # noqa: E402
 
+from autoscan import PageWatcher  # noqa: E402
 from cell_map import Cell, CellMap, DwellFilter, TipEMA, hit_test  # noqa: E402
-from hand_track import open_source  # noqa: E402
+from hand_track import MediaPipeTip, SkinContourTip, open_source  # noqa: E402
 from modes import LearningMode, TestingMode  # noqa: E402
 from prescan import draw_cellmap, prescan_bgr  # noqa: E402
 from registration import FrameRegistration  # noqa: E402
-from tip_yolo import TipYOLO  # noqa: E402
 
 _DEFAULT_CELL_WEIGHTS = _DNN / "weights" / "yolov8_braille.pt"
 
@@ -91,6 +91,17 @@ def main() -> None:
     p.add_argument("--source", default="0")
     p.add_argument("--weights", type=Path, default=_DEFAULT_CELL_WEIGHTS, help="Braille cell YOLO")
     p.add_argument("--tip-weights", type=Path, default=None, help="Fingertip YOLO (default: weights/)")
+    p.add_argument(
+        "--tip-backend",
+        choices=("mediapipe", "yolo", "skin"),
+        default="mediapipe",
+        help="Fingertip detector. mediapipe is primary; yolo is the old baseline.",
+    )
+    p.add_argument(
+        "--auto-scan",
+        action="store_true",
+        help="Capture the page automatically when the camera is still and no hand is visible. R stays as override.",
+    )
     p.add_argument("--mode", choices=("learning", "testing"), default="learning")
     p.add_argument("--lang", choices=("en", "si"), default="en")
     p.add_argument("--conf", type=float, default=0.25, help="Cell YOLO conf")
@@ -109,14 +120,23 @@ def main() -> None:
 
     print(f"Loading cell YOLO {args.weights} ...", flush=True)
     yolo = YOLO(str(args.weights))
-    print("Loading tip YOLO ...", flush=True)
-    tipper = TipYOLO(
-        weights=args.tip_weights,
-        conf=args.tip_conf,
-        imgsz=args.imgsz,
-        device=args.device,
-    )
-    print(f"Tip weights: {tipper.weights}", flush=True)
+    if args.tip_backend == "yolo":
+        from tip_yolo import TipYOLO
+
+        print("Loading tip YOLO ...", flush=True)
+        tipper = TipYOLO(
+            weights=args.tip_weights,
+            conf=args.tip_conf,
+            imgsz=args.imgsz,
+            device=args.device,
+        )
+        print(f"Tip weights: {tipper.weights}", flush=True)
+    elif args.tip_backend == "skin":
+        print("Using SkinContourTip ...", flush=True)
+        tipper = SkinContourTip()
+    else:
+        print("Using MediaPipeTip ...", flush=True)
+        tipper = MediaPipeTip()
     print(f"Opening {args.source!r} ...", flush=True)
     cap = open_source(args.source)
 
@@ -128,7 +148,19 @@ def main() -> None:
     mode = args.mode
     last_frame = None
     highlight_id = None
-    status = "Press R to scan page"
+    status = "Hold still over the page" if args.auto_scan else "Press R to scan page"
+
+    def _do_scan(frame):
+        return prescan_bgr(
+            frame,
+            yolo,
+            conf=args.conf,
+            lang=args.lang,
+            imgsz=args.imgsz,
+            device=args.device,
+        )
+
+    watcher = PageWatcher(scan_fn=_do_scan) if args.auto_scan else None
     # Reference-frame registration: maps each live frame's tip position
     # back onto the coordinate frame the CellMap was scanned in, so the
     # map stays valid as the page/camera drifts instead of needing a
@@ -137,10 +169,10 @@ def main() -> None:
 
     win = "finger_cell_track — Live (Q quit, R rescan, L/T mode)"
     cv2.namedWindow(win, cv2.WINDOW_NORMAL)
-    print(
-        f"Mode={mode}. Press R over a Braille page to build CellMap. Q quit.",
-        flush=True,
-    )
+    if args.auto_scan:
+        print(f"Mode={mode}. Auto-scan on. Hold still, hand off the page. R = force rescan. Q quit.", flush=True)
+    else:
+        print(f"Mode={mode}. Press R over a Braille page to build CellMap. Q quit.", flush=True)
 
     try:
         while True:
@@ -153,6 +185,24 @@ def main() -> None:
 
             tip_raw, tip_box, tip_conf = tipper.detect(frame)
             tip = ema.update(tip_raw)
+            hand_visible = bool(getattr(tipper, "hand_visible", tip_raw is not None))
+
+            if watcher is not None and (cell_map is None or len(cell_map) == 0 or watcher.state != "TRACKING"):
+                ev = watcher.update(
+                    frame,
+                    hand_visible=hand_visible,
+                    registration_lost=False,
+                )
+                if ev:
+                    print(ev.message, flush=True)
+                    status = ev.message
+                if ev and ev.kind == "captured" and watcher.cell_map is not None:
+                    cell_map = watcher.cell_map
+                    registration = FrameRegistration(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY))
+                    dwell.reset()
+                    ema.reset()
+                    learn = LearningMode()
+                    test = TestingMode()
 
             # Track the live<->reference homography once per frame (used
             # both to map the tip for hit-testing, and to re-project the
@@ -165,6 +215,17 @@ def main() -> None:
                 live_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                 live_h = registration.homography_or_last(live_gray)
                 reg_inliers = registration.last_inliers
+                if watcher is not None:
+                    lost_ev = watcher.update(
+                        frame,
+                        hand_visible=hand_visible,
+                        registration_lost=registration.status == "LOST",
+                    )
+                    if lost_ev and lost_ev.kind == "lost":
+                        print(lost_ev.message, flush=True)
+                        status = lost_ev.message
+                        cell_map = CellMap()
+                        registration = None
 
             ref_tip = registration.transform_point(tip, live_h) if (tip is not None and live_h is not None) else None
             hit = hit_test(ref_tip, cell_map, margin_frac=args.margin) if ref_tip else None
@@ -197,9 +258,13 @@ def main() -> None:
             if tip is not None:
                 cv2.circle(out, (int(tip[0]), int(tip[1])), 10, (0, 255, 255), -1)
 
-            reg_status = "-" if registration is None else (f"OK({reg_inliers})" if live_h is not None else "LOST")
+            if registration is None:
+                reg_status = "-"
+            else:
+                reg_status = f"{registration.status}({reg_inliers})"
+            page_state = watcher.state if watcher is not None else "manual"
             hud1 = (
-                f"mode={mode}  cells={len(cell_map)}  reg={reg_status}  "
+                f"mode={mode}  cells={len(cell_map)}  page={page_state}  reg={reg_status}  "
                 f"hit={hit.char if hit else '-'}  tip={'Y' if tip else 'N'}"
                 + (f" {tip_conf:.2f}" if tip_raw else "")
             )
@@ -250,7 +315,11 @@ def main() -> None:
                 learn = LearningMode()
                 test = TestingMode()
                 status = f"Scanned {len(cell_map)} cells"
-                print(status, flush=True)
+                print(f"[PAGE] CAPTURED - {len(cell_map)} cells (manual R)", flush=True)
+                if watcher is not None:
+                    watcher.cell_map = cell_map
+                    watcher.state = "TRACKING"
+                    watcher._last_capture_t = time.time()
             if key in (ord("l"), ord("L")):
                 mode = "learning"
                 status = "Learning mode"

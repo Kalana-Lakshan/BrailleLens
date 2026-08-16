@@ -1,0 +1,54 @@
+# Stage 4a - single-class Braille *cell* detector.
+#
+# These values differ from yolo_dot_detect/configs/default.yaml on purpose: a
+# cell is roughly 6x the area of a single dot and there are ~6x fewer of them
+# per page, which changes the resolution, detection cap and augmentation that
+# make sense.
+
+# --- model (transfer learning) ---
+model: yolo26n.pt          # COCO pretrained; yolo26s.pt if the GPU allows
+imgsz: 1280                # measured: a cell is ~36x58 px on a 1704x2340 DSBI
+                           # page, so at 640 it shrinks to ~14 px and detection
+                           # suffers. 1280 keeps it near 27 px. Cells do not
+                           # need the tiling that dots did.
+epochs: 80
+batch: 4                   # 1280 imgsz on a Colab T4; raise on better GPUs
+device: 0                  # GPU. Local torch here is CPU-only, so train remotely.
+workers: 2
+patience: 15
+optimizer: auto
+lr0: 0.01
+lrf: 0.01
+weight_decay: 0.0005
+warmup_epochs: 3.0
+seed: 42
+max_det: 800               # measured: max 623 cells/page, 95th pct 566.
+                           # Leaves headroom without bloating NMS memory.
+save_period: 5             # checkpoint periodically in case Colab disconnects
+
+# --- augmentation ---
+# Photometric jitter is generous because the domain gap is mostly lighting and
+# capture device. Geometric jitter is small: labels are axis-aligned boxes, and
+# rotating them forces Ultralytics to take the enclosing box, which inflates
+# every box and blurs the boundary between adjacent cells.
+hsv_h: 0.015
+hsv_s: 0.50
+hsv_v: 0.40                # exposure - scanner vs phone vs glasses camera
+degrees: 3.0               # page tilt only
+translate: 0.10
+scale: 0.30                # dot/cell size variation across capture distance
+shear: 1.0
+perspective: 0.0005        # mild; handheld and glasses cameras are not flat-on
+flipud: 0.0                # never flip - Braille is not mirror symmetric
+fliplr: 0.0                # dots 1-3 vs 4-6 would swap, changing the label
+mosaic: 0.5                # helps small objects, but 4 dense pages per mosaic
+                           # is a lot of targets, so lower than the dot config
+mixup: 0.0                 # blending two dense dot fields creates false cells
+copy_paste: 0.0
+erasing: 0.2               # simulates a finger or shadow covering cells
+close_mosaic: 10
+
+# --- paths ---
+data: datasets/braille_cells/data.yaml
+project: runs/detect
+name: braille_cell_yolo26

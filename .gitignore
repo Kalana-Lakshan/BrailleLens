@@ -31,6 +31,14 @@ yolo_dot_detect/yolov8n.pt
 yolo_dot_detect/test_images/output/
 yolo_dot_detect/test_images/output_dotneuralnet/
 
+# Stage 2–4 generated data (rebuild with the data_pipeline / cell_detect CLIs)
+data_pipeline/crops/
+data_pipeline/manifests/
+cell_detect/datasets/
+cell_detect/runs/
+cell_detect/weights/*.pt
+cell_detect/**/*.pt
+
 # Nested clone leftovers
 experiments/DotNeuralNet/.git/
 

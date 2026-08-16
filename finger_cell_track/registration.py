@@ -43,6 +43,7 @@ class FrameRegistration:
 
         self._last_homography: Optional[np.ndarray] = None
         self.last_inliers: int = 0
+        self.consecutive_failures: int = 0
 
     def estimate_homography(self, live_gray: np.ndarray) -> Optional[np.ndarray]:
         """Returns the 3x3 homography mapping live-frame points -> reference-
@@ -51,29 +52,46 @@ class FrameRegistration:
         via `homography_or_last`, rather than treat a single bad frame as
         "lost" -- momentary motion blur/glare on one frame is common)."""
         if self.ref_descriptors is None:
+            self.consecutive_failures += 1
             return None
         live_kp, live_desc = self._orb.detectAndCompute(live_gray, None)
         if live_desc is None or len(live_kp) < self.min_matches:
+            self.consecutive_failures += 1
             return None
 
         raw_matches = self._matcher.knnMatch(live_desc, self.ref_descriptors, k=2)
         good = [m for m, n in raw_matches if len(raw_matches) and m.distance < self.match_ratio * n.distance]
         if len(good) < self.min_matches:
+            self.consecutive_failures += 1
             return None
 
         src_pts = np.float32([live_kp[m.queryIdx].pt for m in good]).reshape(-1, 1, 2)
         dst_pts = np.float32([self.ref_keypoints[m.trainIdx].pt for m in good]).reshape(-1, 1, 2)
         H, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, self.ransac_reproj_threshold)
         if H is None:
+            self.consecutive_failures += 1
             return None
 
         inliers = int(mask.sum()) if mask is not None else 0
         if inliers < self.min_matches:
+            self.consecutive_failures += 1
             return None
 
         self._last_homography = H
         self.last_inliers = inliers
+        self.consecutive_failures = 0
         return H
+
+    @property
+    def status(self) -> str:
+        """OK / LOST / INIT — single source of truth for the HUD and PageWatcher."""
+        if self._last_homography is None and self.consecutive_failures == 0:
+            return "INIT"
+        if self.consecutive_failures > 0 and self._last_homography is None:
+            return "LOST"
+        if self.consecutive_failures >= 8:
+            return "LOST"
+        return "OK"
 
     def homography_or_last(self, live_gray: np.ndarray) -> Optional[np.ndarray]:
         """Like estimate_homography, but falls back to the last known-good

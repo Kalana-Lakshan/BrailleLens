@@ -74,28 +74,47 @@ Training reads from `--dbsi-root "data DBSI/data"` because page images live unde
 
 ---
 
-## Project Structure
+## Project stages
+
+Train on **DSBI + Angelina** first. Label Gold and fine-tune last.
+
+| Stage | Folder | What it does |
+|---|---|---|
+| 1 Collection | `data DBSI/`, `data Angelina/`, `Gold Dataset/` | Already on disk. Gold labels come later. |
+| 2a Integrate | [`data_pipeline/integrate.py`](data_pipeline/integrate.py) | Three formats → one cell CSV |
+| 2b Clean | [`data_pipeline/clean.py`](data_pipeline/clean.py) | Drop bad boxes; write `reports/cleaning_log.md` |
+| 2c Reduce | [`data_pipeline/reduce.py`](data_pipeline/reduce.py) | 64×64 crop archives |
+| 2d Transform | [`data_pipeline/transform.py`](data_pipeline/transform.py) | Normalize + augment at load time |
+| 3 EDA | [`data_pipeline/analyze.py`](data_pipeline/analyze.py) | `reports/eda/` |
+| 4a Detect cells | [`cell_detect/`](cell_detect) | Single-class YOLO (train on Colab) |
+| 4b Classify cells | [`braille_cnn/train_classifier.py`](braille_cnn/train_classifier.py) | 64-class CNN on the crop archives |
+| 4e Recognise page | [`braille_cnn/recognize.py`](braille_cnn/recognize.py) | `recognize_page(image, backend="cells"\|"dots")` |
+| 5 Live app | [`finger_cell_track/`](finger_cell_track) | Auto-scan + fingertip → one character |
+| 6 Evaluate | `braille_cnn/eval_*.py`, `cell_detect/evaluate_detector.py` | Accuracy / mAP / end-to-end |
+
+Handoff between data and models: `data_pipeline/manifests/manifest_clean.csv`.
 
 ```
 BrailleLens/
-├── braille_cnn/               <- 64-class CNN, classical dot detect, Sinhala decode
-├── camera_capture/            <- Live webcam / IP Webcam demo of that CNN
-├── yolo_dot_detect/           <- Transfer-learned dots (use if classical accuracy is low)
-├── finger_cell_track/         <- Fingertip tracking + cell hit-test (learning/testing)
-├── braille_lens_flutter/      <- Mobile app (ONNX, separate stack)
-├── braille_app_pipeline/      <- ONNX / TTS helper for the app
-├── docs/                      <- Papers and project proposal PDFs
-├── data DBSI/                 <- DSBI scanner dataset (gitignored; clone separately)
-├── data Angelina/             <- Angelina handheld-photo dataset (gitignored)
-├── Gold Dataset/              <- Project Sinhala page photos
-├── experiments/               <- Not the deployment path
-│   ├── braille_detector/      <- Single-stage cell-detector POC
-│   ├── DotNeuralNet/          <- Third-party cell YOLO (used by finger_cell_track)
-│   └── IMPLEMENTATION_PLAN.md <- Historical three-branch plan
-└── test-img.jpeg              <- Sample images for static inference tests
+├── data_pipeline/             <- Stages 1–3 (manifest, crops, EDA)
+├── cell_detect/               <- Stage 4a cell YOLO (not dots)
+├── braille_cnn/               <- Stage 4b/4e 64-class CNN + recognize_page
+├── yolo_dot_detect/           <- Dot YOLO fallback / baseline
+├── camera_capture/            <- Live page demo of the CNN
+├── finger_cell_track/         <- Stage 5 fingertip learning app
+├── reports/                   <- Stage 3 + 6 artefacts
+├── data DBSI/                 <- Scanner dataset (gitignored)
+├── data Angelina/             <- Handheld dataset (gitignored)
+├── Gold Dataset/              <- Sinhala pages; label later (Stage 1b)
+├── braille_lens_flutter/      <- Mobile app (untouched)
+├── braille_app_pipeline/      <- App helper (untouched)
+├── docs/
+└── experiments/               <- Not the deployment path
 ```
 
-Dot finding defaults to classical peaks in `braille_cnn/dot_detect.py`. Pass `--dot-backend yolo` or `--dot-backend auto` to use `yolo_dot_detect/` instead (or as a fallback when too few dots are found). The cell CNN does not change.
+Read [`data_pipeline/README.md`](data_pipeline/README.md) and [`cell_detect/README.md`](cell_detect/README.md) before training.
+
+Dot finding in the old page CLI still defaults to classical peaks. Pass `--dot-backend yolo` or `auto` on `braille_cnn.infer_page`. The new path is cell boxes + CNN via `recognize_page`.
 
 ---
 
@@ -203,8 +222,23 @@ py -3.11 -m braille_cnn.finetune_dbsi --dbsi-root "data DBSI/data" --init-checkp
 
 ```bash
 py -3.11 -m braille_cnn.eval_dbsi
+py -3.11 -m braille_cnn.eval_angelina
+py -3.11 -m braille_cnn.eval_gold          # no-op until Gold is labelled
 py -3.11 -m braille_cnn.check_labels
 ```
+
+### Current training path (DSBI + Angelina)
+
+```bash
+py -3.11 -m data_pipeline.integrate --sources dbsi angelina --split-mode rebalance
+py -3.11 -m data_pipeline.clean
+py -3.11 -m data_pipeline.analyze
+py -3.11 -m data_pipeline.reduce
+py -3.11 -m cell_detect.prepare_cell_dataset
+py -3.11 -m braille_cnn.train_classifier --smoke-test
+```
+
+Real YOLO / CNN training needs a GPU (Colab). This PC is CPU-only. See `cell_detect/COLAB_SETUP.md`.
 
 ### Live camera (tuning)
 

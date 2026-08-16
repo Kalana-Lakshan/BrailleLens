@@ -8,6 +8,18 @@ Braille-to-Sinhala transcription pipeline.
 For the full stage-by-stage walkthrough of what happens to an image at inference time (which
 file/function handles each step), see [`PIPELINE.md`](PIPELINE.md).
 
+**Current training path (Stage 4b):** crops come from `data_pipeline/`, not from
+`DBSIDataset` / `AngelinaDataset` directly.
+
+```bash
+py -3.11 -m braille_cnn.train_classifier --smoke-test
+py -3.11 -m braille_cnn.eval_angelina
+py -3.11 -m braille_cnn.recognize --image test-img.jpeg --backend dots
+```
+
+`recognize.py` is the Stage 4e API. `backend=cells` needs `cell_detect/weights/braille_cell_best.pt`.
+`backend=dots` uses the existing `infer_page` pipeline as the baseline.
+
 ---
 
 ## Architecture Overview

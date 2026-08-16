@@ -2,3 +2,6 @@ mediapipe==0.10.14
 opencv-python>=4.8,<4.13
 numpy>=1.24,<2.3
 protobuf>=4.25.3,<5
+ultralytics>=8.4.0
+# torch: install the CPU wheel separately, same as the README
+#   python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
