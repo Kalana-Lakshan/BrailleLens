@@ -3,8 +3,9 @@
 Live learning app: prescanned CellMap + fingertip hit-test → one character
 per dwell in the terminal.
 
-**Tip detector:** MediaPipe Hands is primary (`MediaPipeTip`). Skin-contour
-is the fallback. TipYOLO stays as a baseline (`--tip-backend yolo`).
+**Tip detector:** `SkinContourTip` is the default (`--tip-backend skin`).
+MediaPipe is optional (`--tip-backend mediapipe` or `auto`). TipYOLO is a
+baseline only (`--tip-backend yolo`).
 
 **Page capture:** `--auto-scan` freezes a still, hand-free frame and prints
 `[PAGE] CAPTURED`. `R` is still a manual override.
@@ -41,7 +42,10 @@ $py = "finger_cell_track\.venv\Scripts\python.exe"
 & $py finger_cell_track/tip_track.py --source http://PHONE_IP:8080/video
 
 # Full CellMap + tip → Learning/Testing
-& $py finger_cell_track/live_app.py --source 0 --mode learning --lang si --auto-scan
+& $py finger_cell_track/live_app.py --source 0 --mode learning --lang si --tip-backend skin --scan-backend cells
+
+# Replay a recording in the terminal (no window)
+& $py finger_cell_track/live_app.py --source path\to.mp4 --no-window --force-scan --tip-backend skin --scan-backend cells --lang si
 
 # Measure tip backends on recorded footage
 & $py finger_cell_track/eval_tip.py

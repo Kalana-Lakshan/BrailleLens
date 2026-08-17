@@ -86,15 +86,15 @@ def main() -> None:
     p.add_argument(
         "--scan-backend",
         choices=("auto", "cells", "dots", "dnn"),
-        default="auto",
-        help="auto = our cell detector if weights exist, else dots, else DotNeuralNet",
+        default="cells",
+        help="cells = our YOLO cell detector + CNN (default once weights exist)",
     )
     p.add_argument("--tip-weights", type=Path, default=None, help="Fingertip YOLO (baseline only)")
     p.add_argument(
         "--tip-backend",
         choices=("auto", "mediapipe", "yolo", "skin"),
-        default="auto",
-        help="auto = MediaPipe with skin-contour fallback",
+        default="skin",
+        help="skin = SkinContourTip (default; MediaPipe is ~0%% on over-page footage)",
     )
     p.add_argument(
         "--auto-scan",
@@ -108,9 +108,20 @@ def main() -> None:
     p.add_argument("--tip-conf", type=float, default=0.25, help="Tip YOLO conf")
     p.add_argument("--dwell-ms", type=float, default=400.0)
     p.add_argument("--margin", type=float, default=0.15)
-    p.add_argument("--imgsz", type=int, default=640)
+    p.add_argument("--imgsz", type=int, default=1280)
     p.add_argument("--device", default="cpu")
     p.add_argument("--display-width", type=int, default=960)
+    p.add_argument(
+        "--no-window",
+        action="store_true",
+        help="No OpenCV window (use with a video file for a terminal-only run)",
+    )
+    p.add_argument("--max-frames", type=int, default=0, help="Stop after N frames (0 = unlimited)")
+    p.add_argument(
+        "--force-scan",
+        action="store_true",
+        help="Prescan the first frame immediately (skip waiting for a hand-free still)",
+    )
     args = p.parse_args()
 
     if args.scan_backend == "dnn":
@@ -147,6 +158,7 @@ def main() -> None:
         tipper = FallbackTip(MediaPipeTip(), SkinContourTip())
     print(f"Opening {args.source!r} ...", flush=True)
     cap = open_source(args.source)
+    source_is_file = Path(str(args.source)).is_file()
 
     cell_map = CellMap()
     ema = TipEMA(0.35)
@@ -156,6 +168,9 @@ def main() -> None:
     mode = args.mode
     last_frame = None
     highlight_id = None
+    last_cell_announce_id = None
+    n_frames = 0
+    pending_force_scan = bool(args.force_scan)
     status = "Hold still over the page" if args.auto_scan else "Press R to scan page"
 
     def _do_scan(frame):
@@ -171,7 +186,9 @@ def main() -> None:
             cnn_checkpoint=args.checkpoint,
         )
 
-    watcher = PageWatcher(scan_fn=_do_scan) if args.auto_scan else None
+    # Force-scan owns capture; the watcher would otherwise drop the map
+    # as soon as the finger (and camera motion) appears.
+    watcher = PageWatcher(scan_fn=_do_scan) if (args.auto_scan and not args.force_scan) else None
     # Reference-frame registration: maps each live frame's tip position
     # back onto the coordinate frame the CellMap was scanned in, so the
     # map stays valid as the page/camera drifts instead of needing a
@@ -179,9 +196,12 @@ def main() -> None:
     registration: FrameRegistration | None = None
 
     win = "finger_cell_track — Live (Q quit, R rescan, L/T mode)"
-    cv2.namedWindow(win, cv2.WINDOW_NORMAL)
-    if args.auto_scan:
+    if not args.no_window:
+        cv2.namedWindow(win, cv2.WINDOW_NORMAL)
+    if args.auto_scan and not pending_force_scan:
         print(f"Mode={mode}. Auto-scan on. Hold still, hand off the page. R = force rescan. Q quit.", flush=True)
+    elif pending_force_scan:
+        print(f"Mode={mode}. Force-scan on first frame. SkinContourTip → cell char on the terminal.", flush=True)
     else:
         print(f"Mode={mode}. Press R over a Braille page to build CellMap. Q quit.", flush=True)
 
@@ -189,10 +209,39 @@ def main() -> None:
         while True:
             ok, frame = cap.read()
             if not ok or frame is None:
+                if source_is_file:
+                    print("End of video.", flush=True)
+                    break
                 print("Frame grab failed.", flush=True)
                 time.sleep(0.2)
                 continue
             last_frame = frame
+            n_frames += 1
+            if args.max_frames and n_frames > args.max_frames:
+                print(f"Reached --max-frames {args.max_frames}.", flush=True)
+                break
+
+            if pending_force_scan:
+                print("Scanning page (first frame)...", flush=True)
+                cell_map = _do_scan(frame)
+                registration = FrameRegistration(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY))
+                registration.assume_identity()
+                dwell.reset()
+                ema.reset()
+                learn = LearningMode()
+                test = TestingMode()
+                last_cell_announce_id = None
+                status = f"Scanned {len(cell_map)} cells"
+                print(f"[PAGE] CAPTURED - {len(cell_map)} cells (force-scan)", flush=True)
+                if watcher is not None:
+                    watcher.cell_map = cell_map
+                    watcher.state = "TRACKING"
+                    watcher._last_capture_t = time.time()
+                    watcher._lost_since = None
+                    watcher._tracking_since = time.time()
+                    watcher._prev_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                    watcher._last_kind = "captured"
+                pending_force_scan = False
 
             tip_raw, tip_box, tip_conf = tipper.detect(frame)
             tip = ema.update(tip_raw)
@@ -210,10 +259,12 @@ def main() -> None:
                 if ev and ev.kind == "captured" and watcher.cell_map is not None:
                     cell_map = watcher.cell_map
                     registration = FrameRegistration(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY))
+                    registration.assume_identity()
                     dwell.reset()
                     ema.reset()
                     learn = LearningMode()
                     test = TestingMode()
+                    last_cell_announce_id = None
 
             # Track the live<->reference homography once per frame (used
             # both to map the tip for hit-testing, and to re-project the
@@ -237,8 +288,14 @@ def main() -> None:
                         status = lost_ev.message
                         cell_map = CellMap()
                         registration = None
+                        last_cell_announce_id = None
 
-            ref_tip = registration.transform_point(tip, live_h) if (tip is not None and live_h is not None) else None
+            ref_tip = None
+            if tip is not None:
+                if registration is not None and live_h is not None:
+                    ref_tip = FrameRegistration.transform_point(tip, live_h)
+                elif registration is not None:
+                    ref_tip = (float(tip[0]), float(tip[1]))
             hit = hit_test(ref_tip, cell_map, margin_frac=args.margin) if ref_tip else None
             highlight_id = hit.id if hit else None
 
@@ -248,7 +305,15 @@ def main() -> None:
                 else:
                     test.on_leave()
                 dwell.update(None)
+                last_cell_announce_id = None
             else:
+                if hit.id != last_cell_announce_id:
+                    print(
+                        f"[CELL] id={hit.id}  L{hit.line}C{hit.col}  "
+                        f"code={hit.code}  char={hit.char!r}  conf={hit.conf:.2f}",
+                        flush=True,
+                    )
+                    last_cell_announce_id = hit.id
                 fired = dwell.update(hit)
                 if fired is not None:
                     if mode == "learning":
@@ -258,6 +323,9 @@ def main() -> None:
                     if ev:
                         print(ev.message, flush=True)
                         status = ev.message
+
+            if args.no_window:
+                continue
 
             out = frame.copy()
             if tip_box is not None:
@@ -314,6 +382,7 @@ def main() -> None:
                 # CellMap keeps working as the page/camera drifts instead
                 # of needing another manual rescan.
                 registration = FrameRegistration(cv2.cvtColor(last_frame, cv2.COLOR_BGR2GRAY))
+                registration.assume_identity()
                 dwell.reset()
                 ema.reset()
                 learn = LearningMode()
