@@ -44,7 +44,7 @@ Then baby rabbit went to giraffe and asked,
 Giraffe looked at the baby rabbit and said,
 "No, no. I am going to make my lantern
 as tall as myself.
-S I need all the bamboo sticks I have".
+So I need all the bamboo sticks I have".
 sadly left the baby rabbit.
 .....................................................
 
@@ -54,7 +54,7 @@ Then baby rabbit went to snake and asked,
 Snake looked at the baby rabbit and said,
 "No, no. I am going to make my lantern
 as long as myself.
-So I need all the string I have".
+S I need all the string I have".
 Sadly left the baby rabbit.
 .....................................................
 
@@ -92,7 +92,7 @@ colourful Wesak lanterns.
 
 
 Elephant's lantern was as big as the elephant.
-Giraffe's lantern touched the tree tops.
+Giraffe's lantern was touching the tree tops.
 Deer's lantern has dots all over it.
 Hedgehog's lantern was full of spikes.
 Crocodile's lantern was wide open as his mouth.
