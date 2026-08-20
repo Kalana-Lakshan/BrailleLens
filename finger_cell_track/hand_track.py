@@ -250,16 +250,33 @@ class SkinContourTip:
             )
             wrist = pts[int(np.argmin(edge_dist))]
 
-        # Contact = deepest into the page (far from frame edges), not nail tip.
-        # Score blends inward depth with distance from the entry (wrist).
-        inward = np.minimum.reduce(
-            [pts[:, 0], w - 1 - pts[:, 0], pts[:, 1], h - 1 - pts[:, 1]]
-        )
+        # Distal pad: only consider the far end of the finger (away from wrist),
+        # then pick the deepest point there — avoids locking onto the knuckle.
         from_wrist = np.linalg.norm(pts - wrist.reshape(1, 2), axis=1)
-        pad_score = 0.65 * inward + 0.35 * from_wrist
-        tip = pts[int(np.argmax(pad_score))]
+        far_cut = float(np.percentile(from_wrist, 80.0))
+        far_mask = from_wrist >= far_cut
+        if not np.any(far_mask):
+            far_mask = from_wrist >= from_wrist.max() * 0.85
+        far_pts = pts[far_mask]
+        inward_far = np.minimum.reduce(
+            [
+                far_pts[:, 0],
+                w - 1 - far_pts[:, 0],
+                far_pts[:, 1],
+                h - 1 - far_pts[:, 1],
+            ]
+        )
+        tip = far_pts[int(np.argmax(inward_far))]
         contact = tip - self.contact_offset * (tip - wrist)
         xy = (int(round(float(contact[0]))), int(round(float(contact[1]))))
+
+        # Contact must also sit meaningfully into the page from the entry.
+        reach_from_border = float(
+            np.min([xy[0], w - 1 - xy[0], xy[1], h - 1 - xy[1]])
+        )
+        if reach_from_border < self.min_reach_frac * 0.5 * min(w, h) and best_area < self.corner_min_area:
+            self.hand_visible = False
+            return None, None, 0.0
 
         # Corner ghost: tip near two edges unless the blob is large enough.
         c = self.corner_reject_px
