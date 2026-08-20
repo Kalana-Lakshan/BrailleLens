@@ -3,8 +3,11 @@
 Live learning app: prescanned CellMap + fingertip hit-test → one character
 per dwell in the terminal.
 
-**Tip detector:** MediaPipe Hands is primary (`MediaPipeTip`). Skin-contour
-is the fallback. TipYOLO stays as a baseline (`--tip-backend yolo`).
+**Tip detector:** `SkinContourTip` is the default (`--tip-backend skin`).
+Contact is the pad deepest into the page (not the nail). Thin edge/corner
+ghosts are rejected; `TipEMA` also ignores teleport jumps.
+MediaPipe is optional (`--tip-backend mediapipe` or `auto`). TipYOLO is a
+baseline only (`--tip-backend yolo`).
 
 **Page capture:** `--auto-scan` freezes a still, hand-free frame and prints
 `[PAGE] CAPTURED`. `R` is still a manual override.
@@ -36,12 +39,18 @@ Needed weights:
 ```powershell
 $py = "finger_cell_track\.venv\Scripts\python.exe"
 
-# Tip YOLO only (webcam or IP Webcam)
-& $py finger_cell_track/tip_track.py --source 0
-& $py finger_cell_track/tip_track.py --source http://PHONE_IP:8080/video
+# Tip-only check (no Braille book) — yellow dot on fingertip
+& $py finger_cell_track/tip_dot_test.py --source http://PHONE_IP:8080/video
+& $py finger_cell_track/tip_dot_test.py --source 0 --show-mask
 
-# Full CellMap + tip → Learning/Testing
-& $py finger_cell_track/live_app.py --source 0 --mode learning --lang si --auto-scan
+# Full CellMap + tip → Learning/Testing (3 s dwell before cell print)
+& $py finger_cell_track/live_app.py --source 0 --mode learning --lang si --tip-backend skin --scan-backend cells --dwell-ms 3000
+
+# IP Webcam on phone (replace IP)
+& $py finger_cell_track/live_app.py --source http://PHONE_IP:8080/video --mode learning --lang si --tip-backend skin --scan-backend cells --dwell-ms 3000
+
+# Replay a recording in the terminal (no window)
+& $py finger_cell_track/live_app.py --source path\to.mp4 --no-window --force-scan --tip-backend skin --scan-backend cells --lang si --dwell-ms 3000
 
 # Measure tip backends on recorded footage
 & $py finger_cell_track/eval_tip.py

@@ -39,10 +39,14 @@ def _decode_char(code: int, lang: str) -> str:
     return code_to_label(code, lang="si")
 
 
+def _code_to_dot_string(code: int) -> str:
+    if int(code) == 0:
+        return "0"
+    return "".join(str(i + 1) for i in range(6) if (int(code) >> i) & 1)
+
+
 def cellmap_from_recognize(cells: list[dict], lang: str = "si") -> CellMap:
     """Stage 4e dicts -> CellMap. line/col already assigned by recognize_page."""
-    from data_pipeline.contracts import code_to_dot_string
-
     out: list[Cell] = []
     for cid, c in enumerate(cells):
         code = int(c["code"])
@@ -52,7 +56,7 @@ def cellmap_from_recognize(cells: list[dict], lang: str = "si") -> CellMap:
                 id=cid,
                 xyxy=tuple(float(v) for v in c["xyxy"]),
                 char=str(char),
-                pattern=code_to_dot_string(code),
+                pattern=_code_to_dot_string(code),
                 code=code,
                 conf=float(c.get("conf", 1.0)),
                 line=int(c.get("line", 0)),

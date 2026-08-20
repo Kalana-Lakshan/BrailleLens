@@ -72,26 +72,53 @@ def hit_test(
 
 
 class TipEMA:
-    """Exponential moving average for fingertip coordinates."""
+    """Exponential moving average for fingertip coordinates.
 
-    def __init__(self, alpha: float = 0.35):
+    Also rejects teleport jumps (false tip locks on a distant edge blob).
+    After ``jump_grace`` consecutive huge jumps, the new tip is accepted as a
+    fresh track (real fast motion / re-entry).
+    """
+
+    def __init__(
+        self,
+        alpha: float = 0.35,
+        max_jump_px: float = 180.0,
+        jump_grace: int = 3,
+    ):
         self.alpha = alpha
+        self.max_jump_px = max_jump_px
+        self.jump_grace = jump_grace
         self._xy: Optional[tuple[float, float]] = None
+        self._jump_streak = 0
 
     def reset(self) -> None:
         self._xy = None
+        self._jump_streak = 0
 
     def update(self, tip: Optional[tuple[float, float]]) -> Optional[tuple[float, float]]:
         if tip is None:
             self._xy = None
+            self._jump_streak = 0
             return None
+        x, y = float(tip[0]), float(tip[1])
+        if self._xy is not None:
+            dx = x - self._xy[0]
+            dy = y - self._xy[1]
+            dist = (dx * dx + dy * dy) ** 0.5
+            if dist > self.max_jump_px:
+                self._jump_streak += 1
+                if self._jump_streak < self.jump_grace:
+                    # Hold last good tip; ignore teleport.
+                    return self._xy
+                # Accept as a new track after repeated far detections.
+            self._jump_streak = 0
         if self._xy is None:
-            self._xy = (float(tip[0]), float(tip[1]))
+            self._xy = (x, y)
         else:
             a = self.alpha
             self._xy = (
-                a * tip[0] + (1 - a) * self._xy[0],
-                a * tip[1] + (1 - a) * self._xy[1],
+                a * x + (1 - a) * self._xy[0],
+                a * y + (1 - a) * self._xy[1],
             )
         return self._xy
 

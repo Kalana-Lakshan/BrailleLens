@@ -26,8 +26,9 @@ from .normalize import normalize_crop
 
 NUM_CLASSES = 64
 IMG_SIZE = 64
-DEFAULT_CNN = Path("braille_cnn/checkpoints/braille_cnn_angelina_finetuned.pt")
-ALT_CNN = Path("braille_cnn/checkpoints/braille_cnn_dbsi_finetuned.pt")
+DEFAULT_CNN = Path("braille_cnn/checkpoints/braille_cnn_mixed.pt")
+ALT_CNN = Path("braille_cnn/checkpoints/braille_cnn_angelina_finetuned.pt")
+DBSI_CNN = Path("braille_cnn/checkpoints/braille_cnn_dbsi_finetuned.pt")
 
 
 def group_into_lines(cells: list[dict], gap_factor: float = 0.7) -> list[list[dict]]:
@@ -69,10 +70,9 @@ def _assign_line_col(cells: list[dict]) -> list[dict]:
 def _resolve_cnn(path: str | Path | None) -> Path:
     if path:
         return Path(path)
-    if DEFAULT_CNN.exists():
-        return DEFAULT_CNN
-    if ALT_CNN.exists():
-        return ALT_CNN
+    for cand in (DEFAULT_CNN, ALT_CNN, DBSI_CNN):
+        if cand.exists():
+            return cand
     return DEFAULT_CNN
 
 

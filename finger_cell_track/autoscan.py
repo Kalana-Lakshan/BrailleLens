@@ -73,6 +73,7 @@ class PageWatcher:
         self._no_hand_streak = 0
         self._last_capture_t = 0.0
         self._lost_since: Optional[float] = None
+        self._tracking_since: Optional[float] = None
         self._last_kind: Optional[str] = None
         self.cell_map = None
 
@@ -81,6 +82,7 @@ class PageWatcher:
         self._still_streak = 0
         self._no_hand_streak = 0
         self._lost_since = None
+        self._tracking_since = None
         self.cell_map = None
 
     def _emit(self, kind: str, message: str, **kwargs) -> Optional[PageEvent]:
@@ -112,6 +114,8 @@ class PageWatcher:
             self._still_streak = 0
 
         if self.state == TRACKING:
+            if self._tracking_since is None:
+                self._tracking_since = now
             if registration_lost:
                 if self._lost_since is None:
                     self._lost_since = now
@@ -120,7 +124,9 @@ class PageWatcher:
                     return self._emit("lost", "[PAGE] lost - searching for the page again")
             else:
                 self._lost_since = None
-            if motion > 3.0 * self.motion_threshold:
+            # Don't dump the CellMap the moment the finger enters (motion).
+            grace = (now - self._tracking_since) < 2.0
+            if not grace and motion > 6.0 * self.motion_threshold:
                 self.reset_to_search()
                 return self._emit("lost", "[PAGE] lost - searching for the page again")
             return None
@@ -140,7 +146,10 @@ class PageWatcher:
 
         self.state = CAPTURING
         started = time.time()
-        capturing = self._emit("capturing", "[PAGE] capturing...")
+        # Always notify immediately — live_app only receives one event per update,
+        # and the final CAPTURED event would otherwise hide this line.
+        print("[PAGE] capturing...", flush=True)
+        self._emit("capturing", "[PAGE] capturing...")
         result = self.scan_fn(frame_bgr)
         elapsed = time.time() - started
         self._last_capture_t = now
@@ -165,11 +174,13 @@ class PageWatcher:
         self.cell_map = result
         self.state = TRACKING
         self._lost_since = None
-        captured = self._emit(
+        self._tracking_since = now
+        # Force a fresh "captured" notify even if the last kind was also captured.
+        self._last_kind = None
+        return self._emit(
             "captured",
             f"[PAGE] CAPTURED - {n} cells, mean conf {mean_conf:.2f} ({elapsed:.1f}s)",
             cell_count=n,
             mean_conf=mean_conf,
             elapsed_s=elapsed,
         )
-        return captured or capturing

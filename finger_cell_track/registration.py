@@ -45,6 +45,12 @@ class FrameRegistration:
         self.last_inliers: int = 0
         self.consecutive_failures: int = 0
 
+    def assume_identity(self) -> None:
+        """The current live frame *is* the reference (just after a prescan)."""
+        self._last_homography = np.eye(3, dtype=np.float32)
+        self.last_inliers = 10**9
+        self.consecutive_failures = 0
+
     def estimate_homography(self, live_gray: np.ndarray) -> Optional[np.ndarray]:
         """Returns the 3x3 homography mapping live-frame points -> reference-
         frame points, or None if not enough confident matches were found
