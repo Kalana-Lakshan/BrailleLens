@@ -191,7 +191,7 @@ def main() -> None:
         "Point finger into the frame. Yellow/red = tip. Q = quit.",
         flush=True,
     )
-    ema = TipEMA(alpha=0.35, max_jump_px=180.0, jump_grace=3)
+    ema = TipEMA(alpha=0.35, max_jump_px=180.0, lost_frames_to_retarget=8, coast_frames=5)
     t0 = time.time()
     n = 0
     hits = 0

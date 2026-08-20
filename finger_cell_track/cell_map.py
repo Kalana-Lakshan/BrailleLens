@@ -74,44 +74,51 @@ def hit_test(
 class TipEMA:
     """Exponential moving average for fingertip coordinates.
 
-    Also rejects teleport jumps (false tip locks on a distant edge blob).
-    After ``jump_grace`` consecutive huge jumps, the new tip is accepted as a
-    fresh track (real fast motion / re-entry).
+    Teleports to a distant false tip are ignored while a track is alive.
+    A new far tip is allowed only after the tip has been missing for
+    ``lost_frames_to_retarget`` updates (finger left, then re-entered).
+    Brief gaps coast on the last tip so dwell does not flicker.
     """
 
     def __init__(
         self,
         alpha: float = 0.35,
         max_jump_px: float = 180.0,
-        jump_grace: int = 3,
+        lost_frames_to_retarget: int = 8,
+        coast_frames: int = 5,
     ):
         self.alpha = alpha
         self.max_jump_px = max_jump_px
-        self.jump_grace = jump_grace
+        self.lost_frames_to_retarget = lost_frames_to_retarget
+        self.coast_frames = coast_frames
         self._xy: Optional[tuple[float, float]] = None
-        self._jump_streak = 0
+        self._miss_streak = 0
 
     def reset(self) -> None:
         self._xy = None
-        self._jump_streak = 0
+        self._miss_streak = 0
 
     def update(self, tip: Optional[tuple[float, float]]) -> Optional[tuple[float, float]]:
         if tip is None:
-            self._xy = None
-            self._jump_streak = 0
+            self._miss_streak += 1
+            if self._xy is None:
+                return None
+            if self._miss_streak <= self.coast_frames:
+                return self._xy
+            if self._miss_streak >= self.lost_frames_to_retarget:
+                self._xy = None
             return None
+
         x, y = float(tip[0]), float(tip[1])
         if self._xy is not None:
             dx = x - self._xy[0]
             dy = y - self._xy[1]
             dist = (dx * dx + dy * dy) ** 0.5
             if dist > self.max_jump_px:
-                self._jump_streak += 1
-                if self._jump_streak < self.jump_grace:
-                    # Hold last good tip; ignore teleport.
-                    return self._xy
-                # Accept as a new track after repeated far detections.
-            self._jump_streak = 0
+                # Keep the existing track; only retarget after a real tip loss.
+                return self._xy
+
+        self._miss_streak = 0
         if self._xy is None:
             self._xy = (x, y)
         else:
