@@ -111,9 +111,8 @@ class SkinContourTip:
     Used as the live-app default. MediaPipe fails on top-down Braille footage
     (palm cropped); this path does not need the palm.
 
-    Rejects page-coloured blobs, thin edge strips, and corner ghosts.
-    Contact is the point deepest into the page (away from the entry border),
-    pulled slightly back toward the wrist so it sits on the pad, not the nail.
+    Rejects page-coloured blobs, thin edge strips, decorative border columns,
+    and corner ghosts. Contact is near the distal pad (not the knuckle).
     """
 
     def __init__(
@@ -127,6 +126,8 @@ class SkinContourTip:
         min_solidity: float = 0.35,
         corner_reject_px: int = 48,
         corner_min_area: int = 5000,
+        min_reach_frac: float = 0.10,
+        max_edge_aspect: float = 4.0,
     ) -> None:
         self.min_area = min_area
         self.max_area_frac = max_area_frac
@@ -137,6 +138,8 @@ class SkinContourTip:
         self.min_solidity = min_solidity
         self.corner_reject_px = corner_reject_px
         self.corner_min_area = corner_min_area
+        self.min_reach_frac = min_reach_frac
+        self.max_edge_aspect = max_edge_aspect
         self.hand_visible = False
 
     def _mask(self, frame_bgr: np.ndarray) -> np.ndarray:
@@ -149,26 +152,47 @@ class SkinContourTip:
         return mask
 
     def _reject_blob(self, contour, area: float, x: int, y: int, bw: int, bh: int, w: int, h: int) -> bool:
-        """True = reject. Thin edge strips and tiny corner ghosts."""
+        """True = reject. Thin edge strips, page-ornament columns, shallow ghosts."""
         if min(bw, bh) < self.min_thickness:
             return True
         hull = cv2.convexHull(contour)
         hull_area = float(cv2.contourArea(hull))
         if hull_area > 1.0 and (area / hull_area) < self.min_solidity:
             return True
-        # A strip glued to one edge with almost no depth into the page.
+
         b = self.border_px
         on_left = x <= b
         on_right = (x + bw) >= (w - b)
         on_top = y <= b
         on_bottom = (y + bh) >= (h - b)
         edge_count = int(on_left) + int(on_right) + int(on_top) + int(on_bottom)
-        if edge_count == 1:
-            if on_left or on_right:
-                depth = bw
-            else:
-                depth = bh
-            if depth < self.min_thickness * 2 and area < self.corner_min_area:
+
+        # How far the blob reaches into the page from its entry edge(s).
+        if on_left and not on_right:
+            reach = bw
+        elif on_right and not on_left:
+            reach = bw
+        elif on_top and not on_bottom:
+            reach = bh
+        elif on_bottom and not on_top:
+            reach = bh
+        else:
+            reach = max(bw, bh)
+
+        min_reach = self.min_reach_frac * float(min(w, h))
+        if reach < min_reach and area < self.corner_min_area:
+            return True
+
+        # Tall thin column on one side = decorative border / margin ghost.
+        if edge_count == 1 and (on_left or on_right):
+            aspect = bh / max(bw, 1)
+            if aspect >= self.max_edge_aspect and bw < 0.22 * w:
+                return True
+            if bw < self.min_thickness * 2.5 and area < self.corner_min_area:
+                return True
+        if edge_count == 1 and (on_top or on_bottom):
+            aspect = bw / max(bh, 1)
+            if aspect >= self.max_edge_aspect and bh < 0.22 * h:
                 return True
         return False
 
