@@ -146,7 +146,10 @@ class PageWatcher:
 
         self.state = CAPTURING
         started = time.time()
-        capturing = self._emit("capturing", "[PAGE] capturing...")
+        # Always notify immediately — live_app only receives one event per update,
+        # and the final CAPTURED event would otherwise hide this line.
+        print("[PAGE] capturing...", flush=True)
+        self._emit("capturing", "[PAGE] capturing...")
         result = self.scan_fn(frame_bgr)
         elapsed = time.time() - started
         self._last_capture_t = now
@@ -172,11 +175,12 @@ class PageWatcher:
         self.state = TRACKING
         self._lost_since = None
         self._tracking_since = now
-        captured = self._emit(
+        # Force a fresh "captured" notify even if the last kind was also captured.
+        self._last_kind = None
+        return self._emit(
             "captured",
             f"[PAGE] CAPTURED - {n} cells, mean conf {mean_conf:.2f} ({elapsed:.1f}s)",
             cell_count=n,
             mean_conf=mean_conf,
             elapsed_s=elapsed,
         )
-        return captured or capturing

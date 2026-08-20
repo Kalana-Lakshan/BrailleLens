@@ -106,7 +106,12 @@ def main() -> None:
     p.add_argument("--lang", choices=("en", "si"), default="si")
     p.add_argument("--conf", type=float, default=0.25, help="Cell YOLO conf")
     p.add_argument("--tip-conf", type=float, default=0.25, help="Tip YOLO conf")
-    p.add_argument("--dwell-ms", type=float, default=400.0)
+    p.add_argument(
+        "--dwell-ms",
+        type=float,
+        default=3000.0,
+        help="Hold the same cell this many ms before printing it (default 3000 = 3 s)",
+    )
     p.add_argument("--margin", type=float, default=0.15)
     p.add_argument("--imgsz", type=int, default=1280)
     p.add_argument("--device", default="cpu")
@@ -168,10 +173,13 @@ def main() -> None:
     mode = args.mode
     last_frame = None
     highlight_id = None
-    last_cell_announce_id = None
     n_frames = 0
     pending_force_scan = bool(args.force_scan)
     status = "Hold still over the page" if args.auto_scan else "Press R to scan page"
+    print(
+        f"Dwell={args.dwell_ms:.0f} ms — cell is printed only after holding that long.",
+        flush=True,
+    )
 
     def _do_scan(frame):
         return prescan_bgr(
@@ -230,9 +238,16 @@ def main() -> None:
                 ema.reset()
                 learn = LearningMode()
                 test = TestingMode()
-                last_cell_announce_id = None
                 status = f"Scanned {len(cell_map)} cells"
-                print(f"[PAGE] CAPTURED - {len(cell_map)} cells (force-scan)", flush=True)
+                print("", flush=True)
+                print("=" * 56, flush=True)
+                print(f"[PAGE] CAPTURED OK — {len(cell_map)} cells (force-scan)", flush=True)
+                print(
+                    f"Hold finger on a cell for {args.dwell_ms / 1000:.0f}s to print it.",
+                    flush=True,
+                )
+                print("=" * 56, flush=True)
+                print("", flush=True)
                 if watcher is not None:
                     watcher.cell_map = cell_map
                     watcher.state = "TRACKING"
@@ -264,7 +279,19 @@ def main() -> None:
                     ema.reset()
                     learn = LearningMode()
                     test = TestingMode()
-                    last_cell_announce_id = None
+                    print("", flush=True)
+                    print("=" * 56, flush=True)
+                    print(
+                        f"[PAGE] AUTO-CAPTURE OK — {len(cell_map)} cells ready",
+                        flush=True,
+                    )
+                    print(
+                        f"Hold finger on a cell for {args.dwell_ms / 1000:.0f}s to print it.",
+                        flush=True,
+                    )
+                    print("=" * 56, flush=True)
+                    print("", flush=True)
+                    status = f"Page captured ({len(cell_map)} cells) — place finger"
 
             # Track the live<->reference homography once per frame (used
             # both to map the tip for hit-testing, and to re-project the
@@ -288,7 +315,6 @@ def main() -> None:
                         status = lost_ev.message
                         cell_map = CellMap()
                         registration = None
-                        last_cell_announce_id = None
 
             ref_tip = None
             if tip is not None:
@@ -305,17 +331,15 @@ def main() -> None:
                 else:
                     test.on_leave()
                 dwell.update(None)
-                last_cell_announce_id = None
             else:
-                if hit.id != last_cell_announce_id:
-                    print(
-                        f"[CELL] id={hit.id}  L{hit.line}C{hit.col}  "
-                        f"code={hit.code}  char={hit.char!r}  conf={hit.conf:.2f}",
-                        flush=True,
-                    )
-                    last_cell_announce_id = hit.id
+                # Print only after the finger stays on the same cell for dwell_ms.
                 fired = dwell.update(hit)
                 if fired is not None:
+                    print(
+                        f"[CELL] id={fired.id}  L{fired.line}C{fired.col}  "
+                        f"code={fired.code}  char={fired.char!r}  conf={fired.conf:.2f}",
+                        flush=True,
+                    )
                     if mode == "learning":
                         ev = learn.on_dwell(fired)
                     else:
@@ -388,7 +412,15 @@ def main() -> None:
                 learn = LearningMode()
                 test = TestingMode()
                 status = f"Scanned {len(cell_map)} cells"
-                print(f"[PAGE] CAPTURED - {len(cell_map)} cells (manual R)", flush=True)
+                print("", flush=True)
+                print("=" * 56, flush=True)
+                print(f"[PAGE] CAPTURED OK — {len(cell_map)} cells (manual R)", flush=True)
+                print(
+                    f"Hold finger on a cell for {args.dwell_ms / 1000:.0f}s to print it.",
+                    flush=True,
+                )
+                print("=" * 56, flush=True)
+                print("", flush=True)
                 if watcher is not None:
                     watcher.cell_map = cell_map
                     watcher.state = "TRACKING"

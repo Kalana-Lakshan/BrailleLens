@@ -37,15 +37,18 @@ Needed weights:
 ```powershell
 $py = "finger_cell_track\.venv\Scripts\python.exe"
 
-# Tip YOLO only (webcam or IP Webcam)
-& $py finger_cell_track/tip_track.py --source 0
-& $py finger_cell_track/tip_track.py --source http://PHONE_IP:8080/video
+# Tip-only check (no Braille book) — yellow dot on fingertip
+& $py finger_cell_track/tip_dot_test.py --source http://PHONE_IP:8080/video
+& $py finger_cell_track/tip_dot_test.py --source 0 --show-mask
 
-# Full CellMap + tip → Learning/Testing
-& $py finger_cell_track/live_app.py --source 0 --mode learning --lang si --tip-backend skin --scan-backend cells
+# Full CellMap + tip → Learning/Testing (3 s dwell before cell print)
+& $py finger_cell_track/live_app.py --source 0 --mode learning --lang si --tip-backend skin --scan-backend cells --dwell-ms 3000
+
+# IP Webcam on phone (replace IP)
+& $py finger_cell_track/live_app.py --source http://PHONE_IP:8080/video --mode learning --lang si --tip-backend skin --scan-backend cells --dwell-ms 3000
 
 # Replay a recording in the terminal (no window)
-& $py finger_cell_track/live_app.py --source path\to.mp4 --no-window --force-scan --tip-backend skin --scan-backend cells --lang si
+& $py finger_cell_track/live_app.py --source path\to.mp4 --no-window --force-scan --tip-backend skin --scan-backend cells --lang si --dwell-ms 3000
 
 # Measure tip backends on recorded footage
 & $py finger_cell_track/eval_tip.py
