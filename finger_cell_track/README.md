@@ -4,6 +4,8 @@ Live learning app: prescanned CellMap + fingertip hit-test → one character
 per dwell in the terminal.
 
 **Tip detector:** `SkinContourTip` is the default (`--tip-backend skin`).
+Contact is the pad deepest into the page (not the nail). Thin edge/corner
+ghosts are rejected; `TipEMA` also ignores teleport jumps.
 MediaPipe is optional (`--tip-backend mediapipe` or `auto`). TipYOLO is a
 baseline only (`--tip-backend yolo`).
 

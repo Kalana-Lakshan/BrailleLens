@@ -166,7 +166,7 @@ def main() -> None:
     source_is_file = Path(str(args.source)).is_file()
 
     cell_map = CellMap()
-    ema = TipEMA(0.35)
+    ema = TipEMA(alpha=0.35, max_jump_px=180.0, jump_grace=3)
     dwell = DwellFilter(args.dwell_ms)
     learn = LearningMode()
     test = TestingMode()

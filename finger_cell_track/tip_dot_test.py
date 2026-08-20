@@ -27,6 +27,7 @@ if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
 from hand_track import FallbackTip, MediaPipeTip, SkinContourTip  # noqa: E402
+from cell_map import TipEMA  # noqa: E402
 
 
 def _is_http(source: str) -> bool:
@@ -190,6 +191,7 @@ def main() -> None:
         "Point finger into the frame. Yellow/red = tip. Q = quit.",
         flush=True,
     )
+    ema = TipEMA(alpha=0.35, max_jump_px=180.0, jump_grace=3)
     t0 = time.time()
     n = 0
     hits = 0
@@ -197,12 +199,13 @@ def main() -> None:
 
     try:
         for frame in frame_iter:
-            tip, box, conf = tipper.detect(frame)
+            tip_raw, box, conf = tipper.detect(frame)
+            tip = ema.update(tip_raw)
             out = frame.copy()
             n += 1
             if tip is not None:
                 hits += 1
-                x, y = int(tip[0]), int(tip[1])
+                x, y = int(round(tip[0])), int(round(tip[1]))
                 cv2.circle(out, (x, y), 14, (0, 255, 255), -1)
                 cv2.circle(out, (x, y), 24, (0, 128, 255), 3)
                 cv2.circle(out, (x, y), 5, (0, 0, 255), -1)
@@ -223,7 +226,7 @@ def main() -> None:
                 status = "NO TIP"
                 cv2.putText(
                     out,
-                    "NO TIP — move finger into frame (from bottom/edge)",
+                    "NO TIP — move finger into frame (from any edge)",
                     (20, 48),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     1.0,
