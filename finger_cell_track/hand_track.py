@@ -106,28 +106,37 @@ class MediaPipeTip:
 
 
 class SkinContourTip:
-    """Index-ish contact point from the largest skin blob that enters the frame.
+    """Contact point from the largest skin blob that enters the frame.
 
     Used as the live-app default. MediaPipe fails on top-down Braille footage
     (palm cropped); this path does not need the palm.
 
-    Rejects page-coloured blobs (too large / too bright / not touching a border).
-    Contact is the far point of the blob pulled back along the wrist→tip axis.
+    Rejects page-coloured blobs, thin edge strips, and corner ghosts.
+    Contact is the point deepest into the page (away from the entry border),
+    pulled slightly back toward the wrist so it sits on the pad, not the nail.
     """
 
     def __init__(
         self,
-        min_area: int = 800,
+        min_area: int = 1200,
         max_area_frac: float = 0.22,
-        contact_offset: float = 0.18,
+        contact_offset: float = 0.22,
         y_max: int = 200,
         border_px: int = 12,
+        min_thickness: int = 28,
+        min_solidity: float = 0.35,
+        corner_reject_px: int = 48,
+        corner_min_area: int = 5000,
     ) -> None:
         self.min_area = min_area
         self.max_area_frac = max_area_frac
         self.contact_offset = contact_offset
         self.y_max = y_max
         self.border_px = border_px
+        self.min_thickness = min_thickness
+        self.min_solidity = min_solidity
+        self.corner_reject_px = corner_reject_px
+        self.corner_min_area = corner_min_area
         self.hand_visible = False
 
     def _mask(self, frame_bgr: np.ndarray) -> np.ndarray:
@@ -139,6 +148,30 @@ class SkinContourTip:
         mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, k, iterations=2)
         return mask
 
+    def _reject_blob(self, contour, area: float, x: int, y: int, bw: int, bh: int, w: int, h: int) -> bool:
+        """True = reject. Thin edge strips and tiny corner ghosts."""
+        if min(bw, bh) < self.min_thickness:
+            return True
+        hull = cv2.convexHull(contour)
+        hull_area = float(cv2.contourArea(hull))
+        if hull_area > 1.0 and (area / hull_area) < self.min_solidity:
+            return True
+        # A strip glued to one edge with almost no depth into the page.
+        b = self.border_px
+        on_left = x <= b
+        on_right = (x + bw) >= (w - b)
+        on_top = y <= b
+        on_bottom = (y + bh) >= (h - b)
+        edge_count = int(on_left) + int(on_right) + int(on_top) + int(on_bottom)
+        if edge_count == 1:
+            if on_left or on_right:
+                depth = bw
+            else:
+                depth = bh
+            if depth < self.min_thickness * 2 and area < self.corner_min_area:
+                return True
+        return False
+
     def detect(self, frame_bgr: np.ndarray):
         h, w = frame_bgr.shape[:2]
         mask = self._mask(frame_bgr)
@@ -146,6 +179,7 @@ class SkinContourTip:
         max_area = self.max_area_frac * w * h
         best = None
         best_score = -1.0
+        best_area = 0.0
         for contour in contours:
             area = float(cv2.contourArea(contour))
             if area < self.min_area or area > max_area:
@@ -155,12 +189,17 @@ class SkinContourTip:
             touches = x <= b or y <= b or (x + bw) >= (w - b) or (y + bh) >= (h - b)
             if not touches:
                 continue
-            # Prefer a blob that enters from the bottom (glasses / over-page view).
+            if self._reject_blob(contour, area, x, y, bw, bh, w, h):
+                continue
+            # Prefer larger blobs that reach deeper into the frame (any border).
+            cx = x + 0.5 * bw
             cy = y + 0.5 * bh
-            score = area * (1.0 + cy / max(h, 1))
+            depth = min(cx, w - 1 - cx, cy, h - 1 - cy)
+            score = area * (1.0 + depth / max(min(w, h), 1))
             if score > best_score:
                 best_score = score
                 best = contour
+                best_area = area
 
         if best is None:
             self.hand_visible = False
@@ -171,6 +210,7 @@ class SkinContourTip:
         if pts.shape[0] < 5:
             self.hand_visible = False
             return None, None, 0.0
+
         b = self.border_px
         on_border = (
             (pts[:, 0] <= b)
@@ -178,19 +218,35 @@ class SkinContourTip:
             | (pts[:, 0] >= (w - 1 - b))
             | (pts[:, 1] >= (h - 1 - b))
         )
-        wrist = pts[on_border].mean(axis=0) if on_border.any() else pts[np.argmin(
-            np.minimum.reduce(
+        if on_border.any():
+            wrist = pts[on_border].mean(axis=0)
+        else:
+            edge_dist = np.minimum.reduce(
                 [pts[:, 0], w - 1 - pts[:, 0], pts[:, 1], h - 1 - pts[:, 1]]
             )
-        )]
-        mean = pts.mean(axis=0, keepdims=True)
-        _eig, axes = cv2.PCACompute(pts, mean)
-        axis = axes[0]
-        if np.dot(axis, mean.reshape(-1) - wrist) < 0:
-            axis = -axis
-        tip = pts[int(np.argmax(pts @ axis))]
+            wrist = pts[int(np.argmin(edge_dist))]
+
+        # Contact = deepest into the page (far from frame edges), not nail tip.
+        # Score blends inward depth with distance from the entry (wrist).
+        inward = np.minimum.reduce(
+            [pts[:, 0], w - 1 - pts[:, 0], pts[:, 1], h - 1 - pts[:, 1]]
+        )
+        from_wrist = np.linalg.norm(pts - wrist.reshape(1, 2), axis=1)
+        pad_score = 0.65 * inward + 0.35 * from_wrist
+        tip = pts[int(np.argmax(pad_score))]
         contact = tip - self.contact_offset * (tip - wrist)
         xy = (int(round(float(contact[0]))), int(round(float(contact[1]))))
+
+        # Corner ghost: tip near two edges unless the blob is large enough.
+        c = self.corner_reject_px
+        near_corner = (
+            (xy[0] <= c or xy[0] >= w - 1 - c)
+            and (xy[1] <= c or xy[1] >= h - 1 - c)
+        )
+        if near_corner and best_area < self.corner_min_area:
+            self.hand_visible = False
+            return None, None, 0.0
+
         x0, y0 = pts.min(axis=0)
         x1, y1 = pts.max(axis=0)
         return xy, (int(x0), int(y0), int(x1), int(y1)), 1.0
