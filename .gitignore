@@ -40,10 +40,18 @@ cell_detect/weights/*.pt
 cell_detect/**/*.pt
 cell_detect/**/*.zip
 colab_upload/
+# Validated Stage 4a checkpoint (mAP50 0.7607) -- tracked
+!cell_detect/weights/braille_cell_best.pt
+# Gold-page fine-tuned Stage 4a checkpoint (mAP50 0.6526 on held-out gold pg-10/11) -- tracked
+!cell_detect/weights/braille_cell_gold.pt
 
 # Trained CNN weights (large; send back from Colab, do not commit)
 braille_cnn/checkpoints/*.pt
 braille_cnn/checkpoints/*.npy
+# Validated Stage 4b checkpoint (99.56% Angelina val acc) -- tracked
+!braille_cnn/checkpoints/braille_cnn_mixed.pt
+# Gold-page fine-tuned Stage 4b checkpoint (95.93% held-out gold pg-10/11 acc) -- tracked
+!braille_cnn/checkpoints/braille_cnn_gold_finetuned.pt
 
 # Nested clone leftovers
 experiments/DotNeuralNet/.git/

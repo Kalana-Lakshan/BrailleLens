@@ -59,12 +59,60 @@ def group_into_lines(cells: list[dict], gap_factor: float = 0.7) -> list[list[di
     return lines
 
 
-def _assign_line_col(cells: list[dict]) -> list[dict]:
-    for line_i, line in enumerate(group_into_lines(cells)):
-        for col_i, cell in enumerate(line):
+def _insert_word_gaps(
+    line: list[dict], pitch: float, lang: str, gap_factor: float = 1.6, max_spaces: int = 5
+) -> list[dict]:
+    """Synthesize blank-cell ("space") entries at within-line x-gaps that are
+    wide relative to the page's normal cell-to-cell pitch.
+
+    The cell detector (YOLO, or the dot-grid path) only ever proposes a box
+    where it sees raised dots -- an all-blank word-gap cell has nothing to
+    detect, so it is structurally invisible to both backends. This recovers
+    it after the fact from geometry: a word space is ~1 extra blank cell
+    width beyond the normal letter-to-letter pitch, so a gap of ~2x pitch
+    implies one missing blank cell, ~3x implies two, etc.
+    """
+    if len(line) < 2 or pitch <= 0:
+        return line
+    centers = [(c["xyxy"][0] + c["xyxy"][2]) / 2.0 for c in line]
+    y0 = min(c["xyxy"][1] for c in line)
+    y1 = max(c["xyxy"][3] for c in line)
+    out = [line[0]]
+    for i in range(len(line) - 1):
+        delta = centers[i + 1] - centers[i]
+        ratio = delta / pitch
+        if ratio > gap_factor:
+            n_spaces = max(1, min(round(ratio) - 1, max_spaces))
+            for k in range(1, n_spaces + 1):
+                cx = centers[i] + delta * k / (n_spaces + 1)
+                out.append(
+                    {
+                        "xyxy": (cx - pitch * 0.3, y0, cx + pitch * 0.3, y1),
+                        "code": 0,
+                        "char": code_to_label(0, lang=lang),
+                        "conf": 1.0,
+                    }
+                )
+        out.append(line[i + 1])
+    return out
+
+
+def _assign_line_col(cells: list[dict], lang: str = "en") -> list[dict]:
+    lines = group_into_lines(cells)
+    all_deltas = []
+    for line in lines:
+        centers = [(c["xyxy"][0] + c["xyxy"][2]) / 2.0 for c in line]
+        all_deltas.extend(centers[i + 1] - centers[i] for i in range(len(centers) - 1))
+    pitch = float(np.median(all_deltas)) if all_deltas else 0.0
+
+    out = []
+    for line_i, line in enumerate(lines):
+        augmented = _insert_word_gaps(line, pitch, lang)
+        for col_i, cell in enumerate(augmented):
             cell["line"] = line_i
             cell["col"] = col_i
-    return cells
+        out.extend(augmented)
+    return out
 
 
 def _resolve_cnn(path: str | Path | None) -> Path:
@@ -158,7 +206,7 @@ def recognize_page(
                     "col": 0,
                 }
             )
-        return _assign_line_col(cells)
+        return _assign_line_col(cells, lang=lang)
 
     if backend != "cells":
         raise ValueError(f"Unknown backend {backend!r}; use 'cells' or 'dots'")
@@ -193,7 +241,7 @@ def recognize_page(
                 "col": 0,
             }
         )
-    return _assign_line_col(cells)
+    return _assign_line_col(cells, lang=lang)
 
 
 def main() -> None:
