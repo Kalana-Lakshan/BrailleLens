@@ -142,6 +142,10 @@ def main() -> None:
     parser.add_argument("--batch", type=int, default=3)
     parser.add_argument("--lr0", type=float, default=0.001, help="Low LR -- fine-tuning from a trained checkpoint on very few images")
     parser.add_argument("--mosaic", type=float, default=0.0, help="0.0 = off (default: too few train images for mosaic to help, not hurt -- per this script's docstring)")
+    parser.add_argument("--shear", type=float, default=1.0,
+                         help="Matches cell_detect/configs/cells.yaml's full-scale Job A value (was silently 0.0 -- ultralytics' own default -- before)")
+    parser.add_argument("--perspective", type=float, default=0.0005,
+                         help="Matches cell_detect/configs/cells.yaml's full-scale Job A value; real photos have real perspective distortion (see braille_cnn/PIPELINE.md's ~13-point measured drop)")
     parser.add_argument("--no-low-quality", action="store_true",
                          help="Don't add low-quality-lighting variants of --train-pages as extra training images, even if labelled")
     parser.add_argument("--device", type=str, default="cpu")
@@ -180,12 +184,16 @@ def main() -> None:
         patience=args.patience,
         lr0=args.lr0,
         amp=args.amp,
-        fliplr=0.0,
-        flipud=0.0,
+        fliplr=0.0,  # tried 0.5 (safe in principle: nc=1, no dot patterns here)
+        flipud=0.0,  # but on 12 train images it hurt badly (val mAP50 0.81->0.32,
+                     # see reports/eval/gold_cell_detector_finetune.md) -- too much
+                     # augmentation variance for this little real data to absorb
         mosaic=args.mosaic,
         degrees=3.0,
         translate=0.10,
         scale=0.20,
+        shear=args.shear,
+        perspective=args.perspective,
         project=str(ROOT / "cell_detect" / "runs"),
         name="gold_finetune",
         exist_ok=True,
