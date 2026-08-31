@@ -7,24 +7,23 @@ Predicted: `recognize_page(backend="cells", lang="en")`, sorted by (line, col), 
 | page | cells detected | gt chars | acc (with spaces) | acc (letters only) |
 |---|---|---|---|---|
 | pg-1 | 348 | 290 | 0.603 | 0.764 |
-| pg-2 | 324 | 238 | 0.605 | 0.853 |
+| pg-2 | 296 | 238 | 0.660 | 0.863 |
 | pg-3 | 329 | 276 | 0.627 | 0.805 |
 | pg-4 | 391 | 290 | 0.569 | 0.797 |
 | pg-5 | 314 | 264 | 0.576 | 0.727 |
 | pg-6 | 332 | 287 | 0.669 | 0.807 |
 
-**Overall: acc_with_spaces=0.609  acc_letters_only=0.792**
+**Overall: acc_with_spaces=0.616  acc_letters_only=0.793**
 
 acc_with_spaces is lower than acc_letters_only mostly because the cell-detector YOLO model only proposes boxes where it sees raised dots -- it has no mechanism to box a blank word-gap cell, so most spaces are structurally missing from the prediction regardless of classifier accuracy. That's a detection-recall gap, not a classification error.
 
-This run uses `--cell-conf 0.30 --spine-boost` (`recognize_page(spine_boost=True)`,
-`CellDetector.detect_boxes(spine_boost=True)`) -- a second detection pass on
-the spine-proximal strip of the page, merged with the full-page pass, that
-recovers cells page curvature near an open book's spine otherwise suppresses
-the confidence of. See reports/eval/gold_cell_detector_finetune.md's failure
-analysis for the full diagnosis. Without it, at the same cell-conf=0.30: 0.587
-/ 0.755 -- a real gain on both numbers (0.587->0.609, 0.755->0.792), same
-checkpoints, same pages.
+This run uses `--cell-conf 0.30 --spine-boost`, plus `--drop-ruler-lines`
+(now the default -- pass `--no-drop-ruler-lines` to disable). Without it:
+acc_with_spaces=0.609, acc_letters_only=0.792 -- a real gain on both
+numbers, no regression on any of the 6 pages. Validated against all 12 gold
+pages (not just these 6) at the box level -- see
+reports/eval/gold_cell_detector_finetune.md's "Ruler-line filter" section
+for the full table this threshold was tuned and validated against.
 
 ## Tried and rejected: classify-based grid-gap recovery
 

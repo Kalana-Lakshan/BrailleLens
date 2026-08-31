@@ -122,6 +122,8 @@ def main() -> None:
     parser.add_argument("--checkpoint", default=None, help="CNN classifier checkpoint (default: recognize.py's own resolution order)")
     parser.add_argument("--cell-weights", default=None, help="YOLO cell-detector weights (default: cell_detect/weights/braille_cell_best.pt)")
     parser.add_argument("--spine-boost", action="store_true", help="Re-detect the spine-proximal strip at higher resolution and merge (see CellDetector.detect_boxes)")
+    parser.add_argument("--drop-ruler-lines", action=argparse.BooleanOptionalAction, default=True,
+                         help="Remove decorative divider/ruler rows the detector mistakes for cells (see recognize._drop_ruler_lines). On by default; pass --no-drop-ruler-lines to disable")
     args = parser.parse_args()
 
     pages = sorted(TEXT_DIR.glob("pg-*.txt"), key=lambda p: int(re.search(r"\d+", p.stem).group()))
@@ -143,7 +145,7 @@ def main() -> None:
         cells = recognize_page(
             str(img_path), backend="cells", lang=args.lang, cell_conf=args.cell_conf,
             cnn_checkpoint=args.checkpoint, cell_weights=args.cell_weights,
-            spine_boost=args.spine_boost,
+            spine_boost=args.spine_boost, drop_ruler_lines=args.drop_ruler_lines,
         )
         pred = _decode_prediction(cells)
 

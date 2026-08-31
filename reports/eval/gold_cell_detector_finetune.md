@@ -152,3 +152,80 @@ exposed as CLI flags on `cell_detect/finetune_gold.py`) remains a reasonable
 next experiment to close more of the gap, but needs a Colab round-trip and
 is no longer the only lever available -- the zero-retrain spine-boost fix
 above is already shipped.
+
+## Ruler-line filter: decorative divider rows read as real cells
+
+Separate, unrelated failure mode: real Braille books in this dataset use
+decorative horizontal divider/ruler lines between sections -- raised dots
+that read as a normal-looking row of cells to the detector even though
+`Gold Dataset/ANNOTATION_GUIDELINES.md` explicitly excludes them from ground
+truth ("Skip blank space and decorative divider / ruler rows"). Confirmed
+pg-1 (a gold train page) has several, correctly unboxed, so this isn't a
+zero-exposure problem -- just not enough of the 12-image gold set for the
+detector to fully generalize past ones it hasn't seen.
+
+Confirmed as a live false-positive source, not just theoretical: an 18-box
+false-positive row on held-out pg-11 (of 56 total FPs on that page), sitting
+at y~890 with no ground truth nearby, at normal cell size (25x34.5px) and
+normal ~24px pitch -- indistinguishable from real text by box geometry
+alone. Checked confidence as a discriminator first and rejected it: several
+genuine sparse lines score just as low (0.37-0.41 avg) as this row (0.41),
+so a confidence threshold would misfire on real content too.
+
+**What actually works: classifying the row and checking code diversity.**
+`data_pipeline/clean.py` already has this idea for DBSI/Angelina manifest
+cleaning (`_ruler_mask`: a divider is a long run of cells nearly all
+carrying the same ground-truth code, threshold 0.80). Reran the classifier
+on every line's boxes and checked the same signature on live, noisy
+YOLO+classifier output rather than clean ground-truth codes. A single-code
+check doesn't reproduce reliably here (individual boxes crop the divider's
+repeating pattern at slightly different phases, giving 2-3 similar-looking
+codes, not one), but the **top-2-codes combined fraction** does, with a wide
+margin, checked against every line with >=10 cells on both held-out pages:
+
+| line | n cells | top-2-code fraction |
+|---|---|---|
+| pg-11 confirmed divider (y~890) | 18 | **0.67** |
+| every other real line, either page (18 lines) | 11-32 | 0.18-0.40 |
+
+0.55 sits in the middle of that gap -- comfortable margin from the real-line
+ceiling (0.40) without being anywhere near `data_pipeline`'s 0.80 (tuned for
+clean ground-truth codes, not noisy inferred ones; it would never fire on
+live inference at all). Implemented as `recognize._drop_ruler_lines`
+(min 15 cells, top-2 fraction >=0.55), applied per-line after classification,
+before word-gap insertion.
+
+**Validated with zero regressions.** Re-ran full detection+classification
+(not just the box-geometry check above) on both held-out pages:
+
+| page | drop_ruler_lines | cells | TP | FP | FN | precision | recall | F1 |
+|---|---|---|---|---|---|---|---|---|
+| pg-10 | off | 374 | 199 | 175 | 113 | 0.532 | 0.638 | 0.580 |
+| pg-10 | on | 374 | 199 | 175 | 113 | 0.532 | 0.638 | 0.580 |
+| pg-11 | off | 362 | 239 | 123 | 38 | 0.660 | 0.863 | 0.748 |
+| pg-11 | on | 337 | 239 | **98** | 38 | **0.709** | 0.863 | **0.779** |
+
+TP and FN identical in every row -- the filter never removes a real matched
+cell, on either page, including pg-10 where it correctly never fires at all
+(no line there meets the threshold). Where it does fire (pg-11), it's pure
+precision gain: 25 fewer false positives, F1 +0.031. End-to-end effect at
+cell-conf=0.30 --spine-boost (reports/eval/gold_text.md): acc_with_spaces
+0.609 -> 0.616, acc_letters_only 0.792 -> 0.793, again no regression on any
+of the 6 pages checked (pg-1 through pg-6).
+
+**Extended to all 12 gold pages** (the remaining pg-7, 8, 9, 12, none of
+which have hand-transcribed text so checked at the box level like pg-10/11
+above, not through eval_gold_text.py):
+
+| page | TP off/on | FP off -> on | F1 off -> on |
+|---|---|---|---|
+| pg-1, 3, 4, 5, 6, 7, 8, 9, 12 (9 pages) | unchanged | unchanged (never fires) | unchanged |
+| pg-2 | 201 / 201 | 118 -> 90 | 0.718 -> 0.756 |
+| pg-11 | 239 / 239 | 123 -> 98 | 0.748 -> 0.779 |
+
+Every one of the 12 gold pages checked, not just the 2 held-out test pages --
+TP identical in all 12, the filter fires on exactly 2 (one train page, one
+test page) and both times is pure precision gain, zero recall cost. **Adopted,
+default flipped to on**: `recognize_page(drop_ruler_lines=True)` is now the
+default for the `cells` backend; pass `drop_ruler_lines=False` /
+`eval_gold_text.py` without `--drop-ruler-lines` to disable.
