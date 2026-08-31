@@ -69,7 +69,18 @@ letters.
 **Expected time on a T4:** a few hours for 80 epochs. Checkpoints land on
 Drive every 5 epochs, so a disconnect is recoverable.
 
-**Do not** turn on `fliplr` or `flipud`. Braille is not mirror-symmetric.
+`fliplr`/`flipud` are geometrically safe here even though Braille itself is
+not mirror-symmetric: this detector is single-class (`nc=1`, "is there a
+cell here") and never looks at dot patterns, so a flip can't change its
+label. That mirror-symmetry concern is real for the CNN *classifier* stage
+(`braille_cnn/`) — don't carry `fliplr`/`flipud` > 0 into that job's config.
+That said, turning both on at 0.5/0.5 on the small (12-image) gold fine-tune
+set made things much worse (val mAP50 0.81 -> 0.32) -- likely too much
+augmentation variance for that little data, not a flaw in the geometric
+reasoning. Untested at this job's much larger (400+ page) scale, where there
+may be enough real data to absorb it -- if you try it, treat it as a
+deliberate A/B (keep the `fliplr=0.0/flipud=0.0` run's weights until the
+flipped run is confirmed as good or better), not a silent default change.
 
 **If GPU memory runs out:** drop `--batch` to `2`, or `--imgsz` to `960`.
 Do **not** tile the page (that is the *dot* detector's trick).

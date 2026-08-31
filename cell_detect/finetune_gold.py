@@ -186,8 +186,10 @@ def main() -> None:
         patience=args.patience,
         lr0=args.lr0,
         amp=args.amp,
-        fliplr=0.0,
-        flipud=0.0,
+        fliplr=0.0,  # tried 0.5 (safe in principle: nc=1, no dot patterns here)
+        flipud=0.0,  # but on 12 train images it hurt badly (val mAP50 0.81->0.32,
+                     # see reports/eval/gold_cell_detector_finetune.md) -- too much
+                     # augmentation variance for this little real data to absorb
         mosaic=args.mosaic,
         degrees=3.0,
         translate=0.10,
