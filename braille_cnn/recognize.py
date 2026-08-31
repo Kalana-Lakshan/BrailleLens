@@ -165,11 +165,21 @@ def recognize_page(
     cell_conf: float = 0.25,
     img_size: int = IMG_SIZE,
     model=None,
+    spine_boost: bool = False,
 ) -> list[dict]:
     """Detect cells on a page and classify each one.
 
     Returns a list of dicts:
         xyxy, code, char, conf, line, col
+
+    spine_boost (backend="cells" only) re-detects the spine-proximal strip
+    of the page at higher effective resolution and merges the result --
+    recovers cells the open-book page curvature near the spine otherwise
+    suppresses the confidence of (see CellDetector.detect_boxes's docstring
+    and reports/eval/gold_cell_detector_finetune.md's failure analysis).
+    Default off: it's a real, validated win on genuine open-book-spread
+    photos, but adds a second inference pass and is untested on flat
+    scans/single loose pages, where there's no spine effect to recover from.
     """
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -223,7 +233,7 @@ def recognize_page(
         model = load_model(str(ckpt), device)
 
     detector = CellDetector(weights=cell_weights, conf=cell_conf, device=str(device))
-    detections = detector.detect_boxes(image)
+    detections = detector.detect_boxes(image, spine_boost=spine_boost)
     boxes = [d["xyxy"] for d in detections]
     det_confs = [d["conf"] for d in detections]
     preds, cnn_confs = _classify_boxes(pil, boxes, model, device, img_size)
@@ -252,6 +262,8 @@ def main() -> None:
     parser.add_argument("--checkpoint", default=None)
     parser.add_argument("--cell-weights", default=None)
     parser.add_argument("--device", default=None)
+    parser.add_argument("--spine-boost", action="store_true",
+                         help="Re-detect the spine-proximal strip at higher resolution and merge -- for genuine open-book-spread photos (see CellDetector.detect_boxes)")
     args = parser.parse_args()
 
     device = torch.device(args.device or ("cuda" if torch.cuda.is_available() else "cpu"))
@@ -262,6 +274,7 @@ def main() -> None:
         device=device,
         cnn_checkpoint=args.checkpoint,
         cell_weights=args.cell_weights,
+        spine_boost=args.spine_boost,
     )
     print(f"{len(cells)} cells  backend={args.backend}")
     current_line = -1
