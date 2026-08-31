@@ -146,6 +146,8 @@ def main() -> None:
                          help="Matches cell_detect/configs/cells.yaml's full-scale Job A value (was silently 0.0 -- ultralytics' own default -- before)")
     parser.add_argument("--perspective", type=float, default=0.0005,
                          help="Matches cell_detect/configs/cells.yaml's full-scale Job A value; real photos have real perspective distortion (see braille_cnn/PIPELINE.md's ~13-point measured drop)")
+    parser.add_argument("--scale", type=float, default=0.20,
+                         help="Failure analysis in reports/eval/gold_cell_detector_finetune.md found missed cells run ~6-7%% smaller than detected ones (perspective foreshortening near a book's spine) -- worth trying higher than the current default to see if it closes more of that gap")
     parser.add_argument("--no-low-quality", action="store_true",
                          help="Don't add low-quality-lighting variants of --train-pages as extra training images, even if labelled")
     parser.add_argument("--device", type=str, default="cpu")
@@ -191,7 +193,7 @@ def main() -> None:
         mosaic=args.mosaic,
         degrees=3.0,
         translate=0.10,
-        scale=0.20,
+        scale=args.scale,
         shear=args.shear,
         perspective=args.perspective,
         project=str(ROOT / "cell_detect" / "runs"),

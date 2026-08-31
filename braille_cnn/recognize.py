@@ -13,6 +13,7 @@ DotNeuralNet does not lose reading order.
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -97,6 +98,50 @@ def _insert_word_gaps(
     return out
 
 
+def _drop_ruler_lines(cells: list[dict], min_cells: int = 15, top2_fraction: float = 0.55) -> list[dict]:
+    """Drop cells belonging to a decorative divider/ruler row -- a long,
+    dense horizontal line some Braille pages use between sections, which
+    reads as a row of raised dots to the detector even though it is not a
+    real cell. Gold Dataset/ANNOTATION_GUIDELINES.md explicitly excludes
+    these from ground truth ("Skip blank space and decorative divider /
+    ruler rows"), and pages 1-8 (the gold train pages) do contain some,
+    correctly unboxed -- so the detector has *some* negative exposure, but
+    not enough of the 12-image gold set for it to fully generalize (same
+    root constraint behind most of this session's findings), and it still
+    fires on ones it hasn't seen before (confirmed: an 18-box false-positive
+    row on held-out pg-11, see "Ruler-line filter" in
+    reports/eval/gold_cell_detector_finetune.md).
+
+    Requires backend="cells" (needs the classifier's predicted codes, cells
+    (backend="dots") already has its own point-level equivalent,
+    dot_detect.filter_ruler_lines). This is the classify-then-check-code-
+    uniformity idea data_pipeline/clean.py already uses for DBSI/Angelina
+    manifest cleaning (_ruler_mask, RULER_SAME_CODE_FRACTION=0.80 on known
+    ground-truth codes), ported to live inference with a looser threshold:
+    a single-dominant-code check does not reproduce reliably here, because
+    individual YOLO boxes crop the divider's repeating pattern at slightly
+    different phases, producing 2-3 similar-looking predicted codes rather
+    than collapsing to exactly one. The top-2-codes combined fraction is
+    what actually separates a divider from real text at this noise level --
+    validated directly against every line with >=10 cells on both held-out
+    gold pages: the one confirmed real divider came out to 0.67, every real
+    line 0.18-0.40 (see the same report section for the full table). 0.55
+    leaves real margin on both sides of that gap without being anywhere
+    near data_pipeline's 0.80 (tuned for clean ground-truth codes, not noisy
+    inferred ones -- it would never fire here).
+    """
+    lines = group_into_lines(cells)
+    keep = []
+    for line in lines:
+        if len(line) >= min_cells:
+            counts = Counter(c["code"] for c in line)
+            top2 = sum(n for _, n in counts.most_common(2))
+            if top2 / len(line) >= top2_fraction:
+                continue  # flagged as a ruler/divider row -- drop the whole line
+        keep.extend(line)
+    return keep
+
+
 def _assign_line_col(cells: list[dict], lang: str = "en") -> list[dict]:
     lines = group_into_lines(cells)
     all_deltas = []
@@ -165,11 +210,29 @@ def recognize_page(
     cell_conf: float = 0.25,
     img_size: int = IMG_SIZE,
     model=None,
+    spine_boost: bool = False,
+    drop_ruler_lines: bool = True,
 ) -> list[dict]:
     """Detect cells on a page and classify each one.
 
     Returns a list of dicts:
         xyxy, code, char, conf, line, col
+
+    spine_boost (backend="cells" only) re-detects the spine-proximal strip
+    of the page at higher effective resolution and merges the result --
+    recovers cells the open-book page curvature near the spine otherwise
+    suppresses the confidence of (see CellDetector.detect_boxes's docstring
+    and reports/eval/gold_cell_detector_finetune.md's failure analysis).
+    Default off: it's a real, validated win on genuine open-book-spread
+    photos, but adds a second inference pass and is untested on flat
+    scans/single loose pages, where there's no spine effect to recover from.
+
+    drop_ruler_lines (backend="cells" only) removes decorative divider/ruler
+    rows the detector mistakes for real cells (see _drop_ruler_lines).
+    Default on: validated against all 12 gold pages, not just the two
+    held-out ones it was tuned against -- fires on exactly 2, both times
+    with zero change to true positives (see "Ruler-line filter" in
+    reports/eval/gold_cell_detector_finetune.md). Pass False to disable.
     """
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -223,7 +286,7 @@ def recognize_page(
         model = load_model(str(ckpt), device)
 
     detector = CellDetector(weights=cell_weights, conf=cell_conf, device=str(device))
-    detections = detector.detect_boxes(image)
+    detections = detector.detect_boxes(image, spine_boost=spine_boost)
     boxes = [d["xyxy"] for d in detections]
     det_confs = [d["conf"] for d in detections]
     preds, cnn_confs = _classify_boxes(pil, boxes, model, device, img_size)
@@ -241,6 +304,8 @@ def recognize_page(
                 "col": 0,
             }
         )
+    if drop_ruler_lines:
+        cells = _drop_ruler_lines(cells)
     return _assign_line_col(cells, lang=lang)
 
 
@@ -252,6 +317,10 @@ def main() -> None:
     parser.add_argument("--checkpoint", default=None)
     parser.add_argument("--cell-weights", default=None)
     parser.add_argument("--device", default=None)
+    parser.add_argument("--spine-boost", action="store_true",
+                         help="Re-detect the spine-proximal strip at higher resolution and merge -- for genuine open-book-spread photos (see CellDetector.detect_boxes)")
+    parser.add_argument("--drop-ruler-lines", action=argparse.BooleanOptionalAction, default=True,
+                         help="Remove decorative divider/ruler rows the detector mistakes for cells (see _drop_ruler_lines). On by default; pass --no-drop-ruler-lines to disable")
     args = parser.parse_args()
 
     device = torch.device(args.device or ("cuda" if torch.cuda.is_available() else "cpu"))
@@ -262,6 +331,8 @@ def main() -> None:
         device=device,
         cnn_checkpoint=args.checkpoint,
         cell_weights=args.cell_weights,
+        spine_boost=args.spine_boost,
+        drop_ruler_lines=args.drop_ruler_lines,
     )
     print(f"{len(cells)} cells  backend={args.backend}")
     current_line = -1
