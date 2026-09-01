@@ -212,6 +212,9 @@ def recognize_page(
     model=None,
     spine_boost: bool = False,
     drop_ruler_lines: bool = True,
+    apply_clahe: bool = True,
+    clahe_clip_limit: float = 2.5,
+    deskew: bool = True,
 ) -> list[dict]:
     """Detect cells on a page and classify each one.
 
@@ -233,6 +236,14 @@ def recognize_page(
     held-out ones it was tuned against -- fires on exactly 2, both times
     with zero change to true positives (see "Ruler-line filter" in
     reports/eval/gold_cell_detector_finetune.md). Pass False to disable.
+
+    apply_clahe / clahe_clip_limit / deskew (backend="cells" only) are
+    forwarded to CellDetector -- see cell_detect/preprocess.py for what each
+    does. Both default ON for live phone testing. CAUTION: apply_clahe was
+    directly measured to make cell detection WORSE (not better) on one real
+    phone photo, monotonically with clip strength -- being on by default
+    here is so it can be checked against more real phone photos, not a
+    reversal of that finding. Pass apply_clahe=False if it hurts on yours.
     """
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -285,7 +296,14 @@ def recognize_page(
             )
         model = load_model(str(ckpt), device)
 
-    detector = CellDetector(weights=cell_weights, conf=cell_conf, device=str(device))
+    detector = CellDetector(
+        weights=cell_weights,
+        conf=cell_conf,
+        device=str(device),
+        apply_clahe=apply_clahe,
+        clahe_clip_limit=clahe_clip_limit,
+        deskew=deskew,
+    )
     detections = detector.detect_boxes(image, spine_boost=spine_boost)
     boxes = [d["xyxy"] for d in detections]
     det_confs = [d["conf"] for d in detections]
@@ -321,6 +339,12 @@ def main() -> None:
                          help="Re-detect the spine-proximal strip at higher resolution and merge -- for genuine open-book-spread photos (see CellDetector.detect_boxes)")
     parser.add_argument("--drop-ruler-lines", action=argparse.BooleanOptionalAction, default=True,
                          help="Remove decorative divider/ruler rows the detector mistakes for cells (see _drop_ruler_lines). On by default; pass --no-drop-ruler-lines to disable")
+    parser.add_argument("--clahe", action=argparse.BooleanOptionalAction, default=True,
+                         help="CLAHE contrast correction before cell detection (see cell_detect/preprocess.py). On by default -- CAUTION: measured to HURT detection on one real phone photo; pass --no-clahe if it hurts on yours")
+    parser.add_argument("--clahe-clip-limit", type=float, default=2.5,
+                         help="CLAHE clip limit -- higher pushes more local contrast, at more noise-amplification risk on blank regions")
+    parser.add_argument("--deskew", action=argparse.BooleanOptionalAction, default=True,
+                         help="Best-effort perspective deskew before cell detection (see cell_detect/preprocess.py::deskew_page). On by default; safe no-op when no confident page quad is found. Pass --no-deskew to disable")
     args = parser.parse_args()
 
     device = torch.device(args.device or ("cuda" if torch.cuda.is_available() else "cpu"))
@@ -333,6 +357,9 @@ def main() -> None:
         cell_weights=args.cell_weights,
         spine_boost=args.spine_boost,
         drop_ruler_lines=args.drop_ruler_lines,
+        apply_clahe=args.clahe,
+        clahe_clip_limit=args.clahe_clip_limit,
+        deskew=args.deskew,
     )
     print(f"{len(cells)} cells  backend={args.backend}")
     current_line = -1
