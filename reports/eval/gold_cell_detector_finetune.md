@@ -229,3 +229,101 @@ test page) and both times is pure precision gain, zero recall cost. **Adopted,
 default flipped to on**: `recognize_page(drop_ruler_lines=True)` is now the
 default for the `cells` backend; pass `drop_ruler_lines=False` /
 `eval_gold_text.py` without `--drop-ruler-lines` to disable.
+
+## All 12 low-quality pages annotated: val/test now include both lighting variants
+
+Once every low-quality page had a LabelMe annotation, extended
+`cell_detect/finetune_gold.py`'s `build_dataset` to add a page's low-quality
+image alongside its high-quality one in *whichever* split it's already
+assigned to (previously only did this for `--train-pages`; val/test stayed
+high-quality-only). Both lighting variants of a physical page always share
+one split (`data_pipeline/integrate.py`'s own invariant) -- this isn't a new
+split decision, just filling in the same one with more images now that the
+annotations exist. Train grew from 12 to 16 images (2161->4255 boxes), val
+from 2 to 4 (422->856 boxes), test from 2 to 4 (589->1183 boxes) -- directly
+addresses the small-held-out-set noise concern raised earlier (pg-10 vs
+pg-11's large F1 gap partly traced back to n=2 being too few to trust a
+single run's number).
+
+**Re-evaluated the current best checkpoint (`braille_cell_gold.pt`,
+unchanged, trained on the old 12-image set) against this new, larger test
+set** for an updated, more reliable baseline number:
+
+| model | mAP50 | precision | recall |
+|---|---|---|---|
+| `braille_cell_gold.pt` on new 4-image/1183-box test set | **0.8082** | 0.7527 | 0.7949 |
+
+Higher than the 0.7954 measured on the old 2-image test set -- this
+checkpoint already generalizes well to the low-quality lighting variant it
+was never directly tested against before, it just hadn't been measured.
+
+**Retrained on the new 16-image train set (same hyperparameters:
+scale=0.20, perspective=0.0005, shear=1.0 -- the validated-good values, not
+the two rejected stronger-augmentation attempts above) -- regressed.** Val
+mAP50 peaked at epoch 2 and never improved again (early-stopped at epoch
+17). Evaluated the resulting checkpoint against the same new test set
+described above, head to head with the current one:
+
+| model | mAP50 | precision | recall |
+|---|---|---|---|
+| current (`braille_cell_gold.pt`, trained on 12 images) | **0.8082** | **0.7527** | **0.7949** |
+| retrained on 16 images (rejected) | 0.5995 | 0.7224 | 0.6511 |
+
+Not adopted -- deleted the retrained weights, kept `braille_cell_gold.pt`
+unchanged. This is the third retraining attempt this session to regress
+(after both stronger-perspective/scale attempts above), a consistent
+pattern that this fine-tune is fragile and doesn't reliably improve with
+more data or stronger augmentation alone on a dataset this small. The
+dataset-splitting code change itself (val/test gaining low-quality variants)
+is kept regardless -- it's what surfaced this result reliably in the first
+place, independent of any one training run's outcome.
+
+## Tried and rejected: base-checkpoint ensemble (a lesson in validation sample size)
+
+Idea: supplement `braille_cell_gold.pt`'s detections with high-confidence-only
+detections from `braille_cell_best.pt` (the non-gold-finetuned base
+checkpoint, trained on ~30x more images) wherever the gold model found
+nothing -- on the theory that the base model's very-high-confidence output
+stays reliable even on gold photos even though its full output doesn't
+(confirmed: naively merging *all* of its detections was much worse, F1
+0.777 -> 0.703, pure domain-mismatch noise).
+
+**Initial sweep on 4 images (pg-10/pg-11, both lighting variants) looked
+like a real win**: F1 0.777 -> 0.793 at a confidence threshold of 0.65, a
+broad plateau (0.60-0.75 all scored ~0.79) rather than a narrow spike --
+exactly the kind of result the earlier `_recover_grid_gaps`/size-adaptive-
+threshold rejections taught us to distrust when it's *not* broad and stable.
+This one looked stable. It wasn't broad enough.
+
+**Validated against all 12 gold pages, both lighting variants (24 images,
+matching the ruler-line filter's validation bar) -- reversed the
+conclusion**: F1 0.656 -> 0.653, a regression, confirmed with and without
+`spine_boost` active so it isn't a confound between the two features. TP did
+increase (recovering some real missed cells, as intended) but FP increased
+by more than double that amount, net negative. The 4-image sample that
+looked so clean was itself an unrepresentative subset of the full 12-page
+set -- not a bug in the idea's logic, just too small a sample to trust.
+
+Not adopted -- fully reverted (`CellDetector.detect_boxes`'s `base_ensemble`
+parameter, and its plumbing through `recognize_page`/`eval_gold_text.py`,
+removed entirely rather than left in as a disabled option, matching how the
+grid-gap-recovery idea was handled). The concrete lesson for any future
+candidate: validate against all 12 gold pages before trusting a result, not
+just the 2 pages the current test split holds out -- a result that looks
+strong on 4 images is not yet a result.
+
+## Other ideas tried this round, briefly
+
+**Ultralytics built-in test-time augmentation** (`model.predict(augment=True)`,
+multi-scale/flip TTA): not supported by the YOLO26n architecture -- silently
+falls back to single-scale, zero effect. Not applicable.
+
+**Weighted Box Fusion instead of NMS** for the `spine_boost` merge (average
+overlapping boxes' coordinates weighted by confidence, instead of keeping
+only the highest-confidence one) -- on the theory that the full-page pass
+and the upscaled-strip pass can each mis-position the same real cell
+slightly differently, and averaging might land closer to ground truth.
+Validated across all 12 gold pages, both variants: F1 0.7509 -> 0.7520, a
+real but negligible effect, well below the noise floor of every other result
+in this document. Not adopted -- not worth the added complexity for this
+little gain.

@@ -5,6 +5,14 @@ boxes (not dot centres). Used by braille_cnn.recognize.recognize_page().
 
     from cell_detect import CellDetector
     boxes = CellDetector().detect_boxes(image)   # list[{xyxy, conf, center}]
+
+detect_boxes() preprocesses the image (see preprocess.py) before handing it
+to the YOLO model -- CLAHE contrast correction and best-effort perspective
+deskew are both ON by default. CAUTION: CLAHE was measured to hurt, not
+help, detection on one real phone photo (see preprocess.py's docstring) --
+on by default here so it can be checked against more real phone photos, not
+because that measurement stopped applying. Pass apply_clahe=False /
+--no-clahe if it hurts on yours too.
 """
 
 from __future__ import annotations
@@ -12,6 +20,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+
+from .preprocess import apply_clahe, deskew_page, remap_boxes
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_WEIGHTS = HERE / "weights" / "braille_cell_best.pt"
@@ -88,6 +98,11 @@ class CellDetector:
         imgsz: int = 1280,
         device: str = "cpu",
         max_det: int = 800,
+        apply_clahe: bool = True,
+        clahe_clip_limit: float = 2.5,
+        clahe_tile_grid: tuple[int, int] = (8, 8),
+        deskew: bool = True,
+        deskew_min_area_frac: float = 0.25,
     ) -> None:
         self.weights = Path(weights) if weights else _default_weights()
         self.conf = conf
@@ -95,6 +110,20 @@ class CellDetector:
         self.imgsz = imgsz
         self.device = device
         self.max_det = max_det
+        # Both on by default, per explicit request to test live against a
+        # phone -- see preprocess.py's module docstring. NOTE: apply_clahe
+        # was measured (test-img3.jpeg, a real phone photo) to make
+        # detection WORSE, monotonically with clip strength -- 183 boxes at
+        # baseline down to 5-65 across clip_limit 1.0-3.0. Enabling it here
+        # does not undo that measurement; if it also hurts on your phone
+        # shots, pass apply_clahe=False (or --no-clahe on the CLI). deskew
+        # is a safe no-op whenever it can't find a confident page
+        # quadrilateral, which was every real photo tried so far.
+        self.apply_clahe = apply_clahe
+        self.clahe_clip_limit = clahe_clip_limit
+        self.clahe_tile_grid = clahe_tile_grid
+        self.deskew = deskew
+        self.deskew_min_area_frac = deskew_min_area_frac
         self._model = None
 
     def _ensure_model(self):
@@ -161,7 +190,17 @@ class CellDetector:
         a flat scan or single loose page.
         """
         bgr = _to_bgr(image)
-        base = self._predict_raw(bgr)
+
+        # Preprocessing (see preprocess.py) -- deskew first so CLAHE's tile
+        # grid sees the page right-side-up, and so it operates on whatever
+        # frame detection actually runs on (deskewed, if that ran).
+        inverse_matrix = None
+        if self.deskew:
+            bgr, inverse_matrix = deskew_page(bgr, min_area_frac=self.deskew_min_area_frac)
+        if self.apply_clahe:
+            bgr = apply_clahe(bgr, clip_limit=self.clahe_clip_limit, tile_grid=self.clahe_tile_grid)
+
+        dets = self._predict_raw(bgr)
         if spine_boost:
             h, w = bgr.shape[:2]
             strip_w = max(int(w * spine_strip_frac), 1)
@@ -175,10 +214,21 @@ class CellDetector:
                 for d in strip_dets:
                     x0, y0, x1, y1 = d["xyxy"]
                     d["xyxy"] = (x0 / spine_upscale, y0 / spine_upscale, x1 / spine_upscale, y1 / spine_upscale)
-                base = _merge_detections(base + strip_dets)
+                dets = _merge_detections(dets + strip_dets)
+
+        # If deskew_page() warped the frame, every box above is in THAT
+        # frame's coordinates -- map back to the original image's frame
+        # before returning, since every caller (CellDetector.detect(),
+        # recognize_page()'s crop step, live_reading's pre-scan) expects
+        # boxes in original-image pixel coordinates.
+        if inverse_matrix is not None:
+            boxes = remap_boxes([d["xyxy"] for d in dets], inverse_matrix)
+            for d, box in zip(dets, boxes):
+                d["xyxy"] = box
+
         return [
             {**d, "center": ((d["xyxy"][0] + d["xyxy"][2]) / 2.0, (d["xyxy"][1] + d["xyxy"][3]) / 2.0)}
-            for d in base
+            for d in dets
         ]
 
     def detect(self, image) -> np.ndarray:

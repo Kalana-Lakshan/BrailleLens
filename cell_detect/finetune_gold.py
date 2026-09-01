@@ -19,10 +19,15 @@ Ultralytics' own best.pt / early-stopping bookkeeping during fine-tuning;
 Low-quality (different lighting) variants of the same 12 physical pages live
 in "Gold Dataset/Low quality dataset/" and get annotated separately (not via
 data_pipeline.transfer_gold_labels' homography transfer -- these are hand
-labelled). Any low-quality page whose number is already in --train-pages is
-automatically added as an *extra* training image for that page (more images
-of the same physical page's train/val/test assignment, not a new split
-decision) -- pass --no-low-quality to disable.
+labelled). Any low-quality page whose number is already in --train-pages,
+--val-page, or --test-page is automatically added as an *extra* image
+alongside its high-quality counterpart, in that same split (more images of
+the same physical page's existing train/val/test assignment, never a new
+split decision -- both lighting variants of a page always stay together)
+-- pass --no-low-quality to disable. Doubling val/test this way isn't just
+more data: with only ~2 images per split otherwise, held-out metrics are
+noisy enough that a single page's quirks can swing the number -- see
+reports/eval/gold_cell_detector_finetune.md's pg-10-vs-pg-11 discussion.
 """
 
 from __future__ import annotations
@@ -98,23 +103,29 @@ def _convert_page(n: int, split: str, out_root: Path, variant: str = "high") -> 
     return len(lines)
 
 
-def build_dataset(train_pages, val_pages, test_pages, out_root: Path, low_quality_pages=()) -> tuple[Path, list[int]]:
+def build_dataset(train_pages, val_pages, test_pages, out_root: Path, low_quality_pages=()) -> tuple[Path, dict[str, list[int]]]:
     if out_root.exists():
         shutil.rmtree(out_root)
     counts = {"train": 0, "val": 0, "test": 0}
+    split_for_page: dict[int, str] = {}
     for split, pages in (("train", train_pages), ("val", val_pages), ("test", test_pages)):
         for n in pages:
             counts[split] += _convert_page(n, split, out_root, variant="high")
-    low_used = []
+            split_for_page[n] = split
+
+    low_used: dict[str, list[int]] = {"train": [], "val": [], "test": []}
     for n in low_quality_pages:
-        if n not in train_pages:
-            continue  # only ever added alongside the page's existing train assignment
-        counts["train"] += _convert_page(n, "train", out_root, variant="low")
-        low_used.append(n)
-    print(f"Gold fine-tune dataset: train pg-{train_pages} + low-quality pg-{low_used} "
+        split = split_for_page.get(n)
+        if split is None:
+            continue  # page isn't in any split at all -- nothing to add it alongside
+        counts[split] += _convert_page(n, split, out_root, variant="low")
+        low_used[split].append(n)
+
+    print(f"Gold fine-tune dataset: train pg-{train_pages} + low pg-{low_used['train']} "
           f"({counts['train']} boxes), "
-          f"val pg-{val_pages} ({counts['val']} boxes), "
-          f"test pg-{test_pages} ({counts['test']} boxes) -- held out, never trained/monitored on")
+          f"val pg-{val_pages} + low pg-{low_used['val']} ({counts['val']} boxes), "
+          f"test pg-{test_pages} + low pg-{low_used['test']} ({counts['test']} boxes) "
+          f"-- held out, never trained/monitored on")
 
     data = {
         "path": str(out_root),
@@ -149,7 +160,7 @@ def main() -> None:
     parser.add_argument("--scale", type=float, default=0.20,
                          help="Failure analysis in reports/eval/gold_cell_detector_finetune.md found missed cells run ~6-7%% smaller than detected ones (perspective foreshortening near a book's spine) -- worth trying higher than the current default to see if it closes more of that gap")
     parser.add_argument("--no-low-quality", action="store_true",
-                         help="Don't add low-quality-lighting variants of --train-pages as extra training images, even if labelled")
+                         help="Don't add low-quality-lighting variants of any split's pages as extra images, even if labelled")
     parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--amp", action=argparse.BooleanOptionalAction, default=False,
                          help="Automatic mixed precision -- off by default, it's a CUDA feature and unreliable on CPU")
@@ -224,11 +235,13 @@ def main() -> None:
 
     from braille_cnn.eval_report import write_eval_report
 
+    def _pages_desc(pages, low):
+        return f"pg-{pages}" + (f" + low-quality-lighting pg-{low}" if low else "")
+
     lines = [
-        f"Train pages: pg-{args.train_pages}"
-        + (f" + low-quality-lighting pg-{low_used}" if low_used else "")
-        + f" | val (checkpoint selection only): pg-{args.val_page} | "
-        f"**test (held out, never trained/monitored on): pg-{args.test_page}**",
+        f"Train pages: {_pages_desc(args.train_pages, low_used['train'])} | "
+        f"val (checkpoint selection only): {_pages_desc(args.val_page, low_used['val'])} | "
+        f"**test (held out, never trained/monitored on): {_pages_desc(args.test_page, low_used['test'])}**",
         "",
         "| model | mAP50 | precision | recall |",
         "|---|---|---|---|",
