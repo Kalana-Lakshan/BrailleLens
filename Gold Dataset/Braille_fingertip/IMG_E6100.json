@@ -1,0 +1,28 @@
+{
+  "version": "6.3.1",
+  "flags": {},
+  "shapes": [
+    {
+      "label": "fingertip",
+      "points": [
+        [
+          1413.03488372093,
+          1391.7325581395348
+        ],
+        [
+          1629.3139534883724,
+          1540.5697674418602
+        ]
+      ],
+      "group_id": null,
+      "description": "",
+      "shape_type": "rectangle",
+      "flags": {},
+      "mask": null
+    }
+  ],
+  "imagePath": "IMG_E6100.JPG",
+  "imageData": null,
+  "imageHeight": 5223,
+  "imageWidth": 3647
+}

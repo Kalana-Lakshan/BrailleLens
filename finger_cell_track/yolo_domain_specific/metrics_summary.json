@@ -1,0 +1,28 @@
+{
+  "base_weights": "yolo26n_fingertip_best.pt",
+  "best_weights": "C:\\Users\\ADMIN\\Documents\\Sem 5 my aca\\CS3501 Data Science and Engineering Project\\BrailleLens\\finger_cell_track\\yolo_domain_specific\\runs\\fingertip_domain\\yolo26n_braille_finetune\\weights\\best.pt",
+  "device": "cpu",
+  "epochs": 80,
+  "val": {
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "map50": 0.995,
+    "map50_95": 0.6469
+  },
+  "test": {
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "map50": 0.995,
+    "map50_95": 0.6997
+  },
+  "hyperparameters": {
+    "lr0": 0.001,
+    "weight_decay": 0.0005,
+    "mosaic": 0.5,
+    "mixup": 0.05,
+    "fliplr": 0.5,
+    "dropout": 0.0
+  }
+}
