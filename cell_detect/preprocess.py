@@ -60,14 +60,17 @@ import numpy as np
 
 
 def apply_clahe(
-    bgr: np.ndarray, clip_limit: float = 2.5, tile_grid: tuple[int, int] = (8, 8)
+    image: np.ndarray, clip_limit: float = 2.5, tile_grid: tuple[int, int] = (8, 8)
 ) -> np.ndarray:
     """Contrast-Limited Adaptive Histogram Equalization on luminance only.
 
-    Operates in LAB space so only the L (lightness) channel is touched --
-    pixel geometry is unchanged, so box coordinates measured on the output
-    are already valid on the input, unlike deskew_page below. clip_limit
-    bounds how much any one tile's histogram can be stretched, which keeps
+    Accepts either a 2-D grayscale array (cell_detect's BGR path and
+    live_reading's grayscale path share this one function) or a 3-D BGR
+    array -- for BGR, operates in LAB space so only the L (lightness)
+    channel is touched, leaving color untouched. Either way pixel geometry
+    is unchanged, so box/point coordinates measured on the output are
+    already valid on the input, unlike deskew_page below. clip_limit bounds
+    how much any one tile's histogram can be stretched, which keeps
     flat/blank regions (a lot of a Braille page) from having sensor noise
     amplified into fake contrast -- the same concern normalize_crop's
     std_floor addresses per-cell-crop, applied here per-page before
@@ -76,9 +79,11 @@ def apply_clahe(
     pixels); 8x8 is OpenCV's own default and a reasonable starting point for
     a full-page photo.
     """
-    lab = cv2.cvtColor(bgr, cv2.COLOR_BGR2LAB)
-    l_chan, a_chan, b_chan = cv2.split(lab)
     clahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=tile_grid)
+    if image.ndim == 2:
+        return clahe.apply(image)
+    lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
+    l_chan, a_chan, b_chan = cv2.split(lab)
     l_chan = clahe.apply(l_chan)
     lab = cv2.merge((l_chan, a_chan, b_chan))
     return cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
@@ -96,8 +101,10 @@ def _order_corners(pts: np.ndarray) -> np.ndarray:
     return np.array([top_left, top_right, bottom_right, bottom_left], dtype=np.float32)
 
 
-def find_page_quad(bgr: np.ndarray, min_area_frac: float = 0.25) -> np.ndarray | None:
+def find_page_quad(image: np.ndarray, min_area_frac: float = 0.25) -> np.ndarray | None:
     """Best-effort page-boundary quadrilateral, or None if not confidently found.
+
+    Accepts either a 2-D grayscale array or a 3-D BGR array (see apply_clahe).
 
     Looks for the largest convex 4-point contour after edge detection.
     Requires it to cover at least min_area_frac of the frame so a random
@@ -106,8 +113,8 @@ def find_page_quad(bgr: np.ndarray, min_area_frac: float = 0.25) -> np.ndarray |
     rather than guessing when nothing qualifies, so the caller can fall back
     to the original image untouched instead of warping it on a bad guess.
     """
-    h, w = bgr.shape[:2]
-    gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+    h, w = image.shape[:2]
+    gray = image if image.ndim == 2 else cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
     edges = cv2.Canny(blurred, 50, 150)
     edges = cv2.dilate(edges, np.ones((5, 5), np.uint8), iterations=1)
@@ -134,20 +141,24 @@ def find_page_quad(bgr: np.ndarray, min_area_frac: float = 0.25) -> np.ndarray |
 
 
 def deskew_page(
-    bgr: np.ndarray, min_area_frac: float = 0.25
+    image: np.ndarray, min_area_frac: float = 0.25
 ) -> tuple[np.ndarray, np.ndarray | None]:
     """Warp the page flat if a confident quadrilateral outline is found.
 
-    Returns (processed_bgr, inverse_matrix). inverse_matrix is None when no
-    quad was found -- processed_bgr is then just the input, unchanged --
-    which callers use to know whether detected box coordinates need mapping
-    back through remap_boxes(). When a quad IS found, processed_bgr is a new,
-    differently-sized image (the straightened page), so anything measured on
-    it (boxes) is only valid in ITS coordinate frame until remapped.
+    Accepts either a 2-D grayscale array or a 3-D BGR array (see
+    apply_clahe) -- cv2.warpPerspective handles both identically.
+
+    Returns (processed_image, inverse_matrix). inverse_matrix is None when
+    no quad was found -- processed_image is then just the input, unchanged
+    -- which callers use to know whether detected box/point coordinates
+    need mapping back through remap_boxes(). When a quad IS found,
+    processed_image is a new, differently-sized image (the straightened
+    page), so anything measured on it is only valid in ITS coordinate frame
+    until remapped.
     """
-    quad = find_page_quad(bgr, min_area_frac=min_area_frac)
+    quad = find_page_quad(image, min_area_frac=min_area_frac)
     if quad is None:
-        return bgr, None
+        return image, None
 
     top_left, top_right, bottom_right, bottom_left = _order_corners(quad)
     width_top = np.linalg.norm(top_right - top_left)
@@ -157,14 +168,14 @@ def deskew_page(
     out_w = int(max(width_top, width_bottom))
     out_h = int(max(height_left, height_right))
     if out_w < 2 or out_h < 2:
-        return bgr, None
+        return image, None
 
     src = np.array([top_left, top_right, bottom_right, bottom_left], dtype=np.float32)
     dst = np.array(
         [[0, 0], [out_w - 1, 0], [out_w - 1, out_h - 1], [0, out_h - 1]], dtype=np.float32
     )
     matrix = cv2.getPerspectiveTransform(src, dst)
-    warped = cv2.warpPerspective(bgr, matrix, (out_w, out_h))
+    warped = cv2.warpPerspective(image, matrix, (out_w, out_h))
     inverse = np.linalg.inv(matrix)
     return warped, inverse
 
