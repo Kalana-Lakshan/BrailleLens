@@ -100,6 +100,31 @@ From Drive:
 | `build_dataset.py` | Split + Ultralytics layout + `data.yaml` |
 | `pack_for_colab.py` | Zip dataset for Drive upload |
 | `train_local.py` | Fine-tune on PC (CPU or CUDA) + export metrics |
+| `export_to_onnx.py` | Export `.pt` → mobile ONNX (no retraining) |
+
+---
+
+## Mobile ONNX export (Flutter)
+
+After training, export to ONNX for `braille_lens_flutter` (`onnxruntime` package):
+
+```powershell
+& $py finger_cell_track/yolo_domain_specific/export_to_onnx.py
+```
+
+Outputs in this folder:
+
+| File | Use |
+|------|-----|
+| `fingertip_braille_yolo26n.onnx` | FP32, fixed 640×640 — best accuracy |
+| `fingertip_braille_yolo26n_mobile.onnx` | UINT8 quantized — **smaller/faster on phone CPU** |
+| `fingertip_braille_yolo26n_meta.json` | Input/output names, preprocess notes for Dart |
+
+Copy the mobile (or FP32) file to:
+
+`braille_lens_flutter/assets/models/fingertip_braille_yolo26n.onnx`
+
+and add it to `pubspec.yaml` assets.
 
 ---
 

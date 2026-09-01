@@ -1,0 +1,32 @@
+{
+  "model": "fingertip_braille_yolo26n.onnx",
+  "task": "detect",
+  "class_names": ["fingertip"],
+  "num_classes": 1,
+  "imgsz": 640,
+  "input_layout": "NCHW",
+  "color_format": "RGB",
+  "normalize": {
+    "scale": 0.00392156862745098,
+    "mean": [0.0, 0.0, 0.0],
+    "std": [1.0, 1.0, 1.0]
+  },
+  "conf_threshold": 0.25,
+  "iou_threshold": 0.45,
+  "nms_in_app": false,
+  "output_format": "Each row: [x1, y1, x2, y2, confidence, class_id] in 640x640 letterbox coords. Max 300 candidates.",
+  "inputs": [
+    {
+      "name": "images",
+      "shape": [1, 3, 640, 640],
+      "dtype": "float32"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "output0",
+      "shape": [1, 300, 6]
+    }
+  ],
+  "flutter_notes": "Preprocess: letterbox resize to 640x640, RGB, float32, divide by 255. Parse output0 [1,300,6]: filter confidence >= 0.25 and class_id == 0, take highest-confidence row. Tip = ((x1+x2)/2, (y1+y2)/2), map back from letterbox to camera frame."
+}
