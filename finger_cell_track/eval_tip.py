@@ -47,18 +47,17 @@ def main() -> None:
     if not args.video.exists():
         raise SystemExit(f"Video not found: {args.video}")
 
-    from hand_track import MediaPipeTip, SkinContourTip
+    # Compare tip detectors on recorded Braille-reading video (hit rate %).
+    # skin_contour usually wins when the palm is cropped out of frame.
+    from tip_backends import create_tip_backend
 
     backends = [
-        ("mediapipe", MediaPipeTip()),
-        ("skin_contour", SkinContourTip()),
+        ("mediapipe", create_tip_backend("mediapipe")),
+        ("skin_contour", create_tip_backend("skin")),  # live_app default
     ]
     if not args.skip_yolo:
         try:
-            from tip_yolo import TipYOLO
-
-            yolo = TipYOLO()
-            backends.append(("tip_yolo", yolo))
+            backends.append(("tip_yolo", create_tip_backend("yolo")))
         except FileNotFoundError as exc:
             print(f"TipYOLO skipped: {exc}")
 

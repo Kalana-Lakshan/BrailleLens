@@ -17,8 +17,9 @@ _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
-from hand_track import open_source  # noqa: E402
-from tip_yolo import TipYOLO  # noqa: E402
+from camera_source import open_source  # noqa: E402
+from tip_backends import create_tip_backend  # noqa: E402
+
 
 
 def main() -> None:
@@ -31,9 +32,10 @@ def main() -> None:
     p.add_argument("--display-width", type=int, default=960)
     args = p.parse_args()
 
-    tipper = TipYOLO(
-        weights=args.tip_weights,
-        conf=args.conf,
+    tipper = create_tip_backend(
+        "yolo",
+        tip_weights=args.tip_weights,
+        tip_conf=args.conf,
         imgsz=args.imgsz,
         device=args.device,
     )

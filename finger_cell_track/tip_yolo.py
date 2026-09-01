@@ -1,4 +1,8 @@
-"""YOLO26 single-class fingertip detector (tip-only / no-palm friendly)."""
+"""Fingertip method 3/3 — TipYOLO (fine-tuned YOLO26n; baseline).
+
+Single-class fingertip box → center. Tip-only / no-palm friendly.
+Wire via tip_backends.create_tip_backend("yolo").
+"""
 
 from __future__ import annotations
 
