@@ -1,0 +1,28 @@
+{
+  "version": "6.3.1",
+  "flags": {},
+  "shapes": [
+    {
+      "label": "fingertip",
+      "points": [
+        [
+          1770.9459459459458,
+          2123.6486486486488
+        ],
+        [
+          1970.9459459459458,
+          2285.810810810811
+        ]
+      ],
+      "group_id": null,
+      "description": "",
+      "shape_type": "rectangle",
+      "flags": {},
+      "mask": null
+    }
+  ],
+  "imagePath": "IMG_E6115.JPG",
+  "imageData": null,
+  "imageHeight": 4950,
+  "imageWidth": 3450
+}
