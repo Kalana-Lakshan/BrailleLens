@@ -1,0 +1,7 @@
+path: C:\Users\ADMIN\Documents\Sem 5 my aca\CS3501 Data Science and Engineering Project\BrailleLens\finger_cell_track\yolo_domain_specific\datasets\braille_fingertip_yolo
+train: images/train
+val: images/val
+test: images/test
+nc: 1
+names:
+  0: fingertip
