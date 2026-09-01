@@ -4,10 +4,14 @@ Live learning app: prescanned CellMap + fingertip hit-test → one character
 per dwell in the terminal.
 
 **Tip detector:** `SkinContourTip` is the default (`--tip-backend skin`).
-Contact is the pad deepest into the page (not the nail). Thin edge/corner
-ghosts are rejected; `TipEMA` also ignores teleport jumps.
+Contact is the distal pad (far end of the finger), not the knuckle. Decorative
+border columns and shallow edge ghosts are rejected. `TipEMA` ignores teleports
+until the previous tip track has been lost for several frames.
 MediaPipe is optional (`--tip-backend mediapipe` or `auto`). TipYOLO is a
 baseline only (`--tip-backend yolo`).
+
+Detectors are split by file and wired in `tip_backends.py`:
+`tip_skin.py` · `tip_mediapipe.py` · `tip_yolo.py`.
 
 **Page capture:** `--auto-scan` freezes a still, hand-free frame and prints
 `[PAGE] CAPTURED`. `R` is still a manual override.
@@ -73,10 +77,14 @@ Train tip model on Colab T4: `BrailleLens_Fingertip_YOLO26_Colab.ipynb` (see `CO
 
 | File | Role |
 |------|------|
+| `tip_skin.py` | `SkinContourTip` — classical CV (default) |
+| `tip_mediapipe.py` | `MediaPipeTip` — landmark 8 |
+| `tip_yolo.py` | `TipYOLO` — YOLO26n baseline |
+| `tip_backends.py` | Wires all three + `create_tip_backend()` / `FallbackTip` |
+| `camera_source.py` | `open_source()` webcam / IP Webcam |
+| `hand_track.py` | MediaPipe CLI demo (+ compat re-exports) |
 | `autoscan.py` | `PageWatcher` — auto page capture, no R required |
-| `hand_track.py` | `MediaPipeTip` + `SkinContourTip` |
 | `eval_tip.py` | Measure MediaPipe vs contour vs YOLO on video |
-| `tip_yolo.py` | Old tip YOLO (baseline only) |
 | `live_app.py` | Tip + CellMap Learning/Testing |
 | `cell_map.py` / `prescan.py` / `modes.py` | CellMap + modes |
 | `registration.py` | ORB+RANSAC; `status` is OK / LOST |

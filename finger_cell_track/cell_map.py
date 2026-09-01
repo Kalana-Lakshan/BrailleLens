@@ -72,49 +72,64 @@ def hit_test(
 
 
 class TipEMA:
-    """Exponential moving average for fingertip coordinates.
+    """Stabilize SkinContourTip (or any tip) over time — not detection itself.
 
-    Also rejects teleport jumps (false tip locks on a distant edge blob).
-    After ``jump_grace`` consecutive huge jumps, the new tip is accepted as a
-    fresh track (real fast motion / re-entry).
+    STUDY WALKTHROUGH (runs AFTER SkinContourTip.detect each frame):
+      1. tip is None  → count misses; briefly "coast" on last tip; then clear
+      2. tip jumps far → ignore (false edge ghost); keep old track
+      3. tip nearby   → EMA smooth: new = α·raw + (1-α)·old
+
+    Teleports to a distant false tip are ignored while a track is alive.
+    A new far tip is allowed only after the tip has been missing for
+    ``lost_frames_to_retarget`` updates (finger left, then re-entered).
     """
 
     def __init__(
         self,
-        alpha: float = 0.35,
-        max_jump_px: float = 180.0,
-        jump_grace: int = 3,
+        alpha: float = 0.35,                 # higher = follow raw tip faster (jitterier)
+        max_jump_px: float = 180.0,          # jumps larger than this are rejected
+        lost_frames_to_retarget: int = 8,    # after this many misses, allow a new far tip
+        coast_frames: int = 5,               # while missing, keep last tip this many frames
     ):
         self.alpha = alpha
         self.max_jump_px = max_jump_px
-        self.jump_grace = jump_grace
-        self._xy: Optional[tuple[float, float]] = None
-        self._jump_streak = 0
+        self.lost_frames_to_retarget = lost_frames_to_retarget
+        self.coast_frames = coast_frames
+        self._xy: Optional[tuple[float, float]] = None  # smoothed tip
+        self._miss_streak = 0                           # consecutive frames with no tip
 
     def reset(self) -> None:
+        # Called after a page rescan so old tip does not stick on new CellMap.
         self._xy = None
-        self._jump_streak = 0
+        self._miss_streak = 0
 
     def update(self, tip: Optional[tuple[float, float]]) -> Optional[tuple[float, float]]:
+        # --- Case 1: detector found nothing this frame ---
         if tip is None:
-            self._xy = None
-            self._jump_streak = 0
+            self._miss_streak += 1
+            if self._xy is None:
+                return None  # never had a tip
+            if self._miss_streak <= self.coast_frames:
+                return self._xy  # brief dropout: keep last position (dwell stays stable)
+            if self._miss_streak >= self.lost_frames_to_retarget:
+                self._xy = None  # finger really left; next tip may be anywhere
             return None
+
+        # --- Case 2: detector returned a tip ---
         x, y = float(tip[0]), float(tip[1])
         if self._xy is not None:
             dx = x - self._xy[0]
             dy = y - self._xy[1]
             dist = (dx * dx + dy * dy) ** 0.5
             if dist > self.max_jump_px:
-                self._jump_streak += 1
-                if self._jump_streak < self.jump_grace:
-                    # Hold last good tip; ignore teleport.
-                    return self._xy
-                # Accept as a new track after repeated far detections.
-            self._jump_streak = 0
+                # Teleport (e.g. edge ghost) while track alive → ignore new tip.
+                return self._xy
+
+        self._miss_streak = 0
         if self._xy is None:
-            self._xy = (x, y)
+            self._xy = (x, y)  # first lock / retarget after loss
         else:
+            # Exponential moving average smooths jitter without lagging too much.
             a = self.alpha
             self._xy = (
                 a * x + (1 - a) * self._xy[0],

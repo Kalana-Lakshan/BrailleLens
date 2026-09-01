@@ -26,7 +26,8 @@ _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
-from hand_track import FallbackTip, MediaPipeTip, SkinContourTip  # noqa: E402
+from tip_backends import FallbackTip, create_tip_backend  # noqa: E402
+
 from cell_map import TipEMA  # noqa: E402
 
 
@@ -122,15 +123,13 @@ def main() -> None:
     )
     args = p.parse_args()
 
-    if args.tip_backend == "skin":
-        tipper = SkinContourTip()
-        label = "SkinContourTip"
-    elif args.tip_backend == "mediapipe":
-        tipper = MediaPipeTip()
-        label = "MediaPipeTip"
-    else:
-        tipper = FallbackTip(MediaPipeTip(), SkinContourTip())
-        label = "MediaPipe+Skin fallback"
+    # Choose tip method for this tip-only window (no Braille CellMap here).
+    tipper = create_tip_backend(args.tip_backend)
+    label = {
+        "skin": "SkinContourTip",
+        "mediapipe": "MediaPipeTip",
+        "auto": "MediaPipe+Skin fallback",
+    }.get(args.tip_backend, args.tip_backend)
 
     print(f"Backend={label}", flush=True)
     src = str(args.source)
@@ -191,7 +190,7 @@ def main() -> None:
         "Point finger into the frame. Yellow/red = tip. Q = quit.",
         flush=True,
     )
-    ema = TipEMA(alpha=0.35, max_jump_px=180.0, jump_grace=3)
+    ema = TipEMA(alpha=0.35, max_jump_px=180.0, lost_frames_to_retarget=8, coast_frames=5)
     t0 = time.time()
     n = 0
     hits = 0

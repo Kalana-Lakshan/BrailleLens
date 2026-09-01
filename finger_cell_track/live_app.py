@@ -31,7 +31,9 @@ import numpy as np  # noqa: E402
 
 from autoscan import PageWatcher  # noqa: E402
 from cell_map import Cell, CellMap, DwellFilter, TipEMA, hit_test  # noqa: E402
-from hand_track import FallbackTip, MediaPipeTip, SkinContourTip, open_source  # noqa: E402
+from camera_source import open_source  # noqa: E402
+from tip_backends import create_tip_backend  # noqa: E402
+
 from modes import LearningMode, TestingMode  # noqa: E402
 from prescan import draw_cellmap, prescan_bgr  # noqa: E402
 from registration import FrameRegistration  # noqa: E402
@@ -90,6 +92,7 @@ def main() -> None:
         help="cells = our YOLO cell detector + CNN (default once weights exist)",
     )
     p.add_argument("--tip-weights", type=Path, default=None, help="Fingertip YOLO (baseline only)")
+    # Tip detector choice — see tip_backends.create_tip_backend / tip_skin.py etc.
     p.add_argument(
         "--tip-backend",
         choices=("auto", "mediapipe", "yolo", "skin"),
@@ -141,32 +144,24 @@ def main() -> None:
         yolo = None
         print(f"Scan backend={args.scan_backend} (recognize_page; dnn only if own weights missing)", flush=True)
 
+    # --- Build tip detector via tip_backends (skin | mediapipe | yolo | auto) ---
+    print(f"Tip backend={args.tip_backend} ...", flush=True)
+    tipper = create_tip_backend(
+        args.tip_backend,
+        tip_weights=args.tip_weights,
+        tip_conf=args.tip_conf,
+        imgsz=args.imgsz,
+        device=args.device,
+    )
     if args.tip_backend == "yolo":
-        from tip_yolo import TipYOLO
-
-        print("Loading tip YOLO ...", flush=True)
-        tipper = TipYOLO(
-            weights=args.tip_weights,
-            conf=args.tip_conf,
-            imgsz=args.imgsz,
-            device=args.device,
-        )
         print(f"Tip weights: {tipper.weights}", flush=True)
-    elif args.tip_backend == "skin":
-        print("Using SkinContourTip ...", flush=True)
-        tipper = SkinContourTip()
-    elif args.tip_backend == "mediapipe":
-        print("Using MediaPipeTip ...", flush=True)
-        tipper = MediaPipeTip()
-    else:
-        print("Using MediaPipeTip with SkinContourTip fallback ...", flush=True)
-        tipper = FallbackTip(MediaPipeTip(), SkinContourTip())
     print(f"Opening {args.source!r} ...", flush=True)
     cap = open_source(args.source)
     source_is_file = Path(str(args.source)).is_file()
 
     cell_map = CellMap()
-    ema = TipEMA(alpha=0.35, max_jump_px=180.0, jump_grace=3)
+    # TipEMA smooths SkinContourTip jitter and rejects teleports (cell_map.py).
+    ema = TipEMA(alpha=0.35, max_jump_px=180.0, lost_frames_to_retarget=8, coast_frames=5)
     dwell = DwellFilter(args.dwell_ms)
     learn = LearningMode()
     test = TestingMode()
@@ -258,6 +253,7 @@ def main() -> None:
                     watcher._last_kind = "captured"
                 pending_force_scan = False
 
+            # Per-frame tip: SkinContourTip.detect → TipEMA smooth → (later) homography + hit_test.
             tip_raw, tip_box, tip_conf = tipper.detect(frame)
             tip = ema.update(tip_raw)
             hand_visible = bool(getattr(tipper, "hand_visible", tip_raw is not None))
