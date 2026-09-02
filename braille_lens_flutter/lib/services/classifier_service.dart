@@ -6,6 +6,7 @@ import 'package:onnxruntime/onnxruntime.dart';
 import 'package:image/image.dart' as img;
 
 import '../config/app_config.dart';
+import '../utils/image_decode.dart';
 
 /// One row from `assets/models/braille_labels.json`.
 class BrailleLabel {
@@ -116,7 +117,7 @@ class ClassifierService {
       }
     }
 
-    final originalImage = img.decodeImage(imageBytes);
+    final originalImage = decodeUpright(imageBytes);
     if (originalImage == null) {
       throw Exception('Failed to decode image');
     }

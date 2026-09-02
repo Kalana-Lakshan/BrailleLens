@@ -6,6 +6,7 @@ import 'package:image/image.dart' as img;
 import 'package:onnxruntime/onnxruntime.dart';
 
 import '../config/app_config.dart';
+import '../utils/image_decode.dart';
 
 /// One detected Braille cell box, before classification.
 class CellDetection {
@@ -74,7 +75,7 @@ class CellDetectorService {
     final session = _session;
     if (session == null) return const [];
 
-    final decoded = img.decodeImage(jpegBytes);
+    final decoded = decodeUpright(jpegBytes);
     if (decoded == null) return const [];
 
     final origW = decoded.width;

@@ -43,7 +43,15 @@ class CameraService {
 
       _controller = CameraController(
         camera,
-        ResolutionPreset.medium,
+        // `medium` (~480p on most devices) is nowhere near enough detail for
+        // Braille cell/dot detection: cell_detect/configs/cells.yaml sizes
+        // its 1280 input around a real page photo of ~1700-2340px -- at
+        // 480p, cells that are already tiny (~36x58px at that reference
+        // resolution) shrink to roughly 10x16px, and letterboxing that back
+        // up to 1280 just upscales blur, it can't recover lost detail. This
+        // is very likely why accuracy looks fine on a laptop against a
+        // proper photo but collapses live on-device.
+        ResolutionPreset.veryHigh,
         enableAudio: false,
         imageFormatGroup: ImageFormatGroup.jpeg,
       );

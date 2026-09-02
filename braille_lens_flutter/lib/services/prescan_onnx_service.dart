@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:image/image.dart' as img;
 
 import '../models/braille_cell.dart';
+import '../utils/image_decode.dart';
 import 'cell_detector_service.dart';
 import 'classifier_service.dart';
 
@@ -46,7 +47,7 @@ class PrescanOnnxService {
       }
     }
 
-    final decoded = img.decodeImage(jpegBytes);
+    final decoded = decodeUpright(jpegBytes);
     if (decoded == null) {
       throw Exception('Could not decode page image');
     }

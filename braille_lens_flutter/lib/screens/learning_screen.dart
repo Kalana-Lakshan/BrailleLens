@@ -2,7 +2,6 @@ import 'dart:typed_data';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
-import 'package:image/image.dart' as img;
 
 import '../models/braille_cell.dart';
 import '../services/audio_service.dart';
@@ -12,6 +11,7 @@ import '../services/coordinate_mapper.dart';
 import '../services/fingertip_onnx_service.dart';
 import '../services/prescan_bridge.dart';
 import '../theme/app_theme.dart';
+import '../utils/image_decode.dart';
 import '../widgets/frozen_image_view.dart';
 import '../widgets/tap_fingertip_dialog.dart';
 
@@ -111,7 +111,7 @@ class _LearningScreenState extends State<LearningScreen> {
       if (map.cells.isEmpty) {
         throw Exception('No cells detected');
       }
-      final decoded = img.decodeImage(jpeg);
+      final decoded = decodeUpright(jpeg);
       final w = decoded?.width ?? map.imageWidth;
       final h = decoded?.height ?? map.imageHeight;
       final fixed = CellMap(cells: map.cells, imageWidth: w, imageHeight: h);
@@ -204,7 +204,7 @@ class _LearningScreenState extends State<LearningScreen> {
 
   /// Fallback when ONNX fingertip model is missing: user taps contact point.
   Future<FingertipDetection?> _promptTapFingertip(Uint8List jpeg) async {
-    final decoded = img.decodeImage(jpeg);
+    final decoded = decodeUpright(jpeg);
     if (decoded == null) return null;
 
     final tap = await showDialog<Offset>(
