@@ -48,6 +48,18 @@ class AudioService {
     }
   }
 
+  /// Says a Sinhala glyph using the device's Sinhala voice when available.
+  Future<void> speakSinhalaCharacter(String character) async {
+    try {
+      await _tts.stop();
+      await _tts.setLanguage('si-LK');
+      await _tts.speak(character);
+    } catch (e) {
+      debugPrint('[AudioService] Sinhala TTS error: $e');
+      await speak('Detected character $character');
+    }
+  }
+
   // ── Earcons ──────────────────────────────────────────────────────────────────
 
   /// High-pitch chime — played when the microphone opens.
