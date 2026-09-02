@@ -35,6 +35,11 @@ class PrescanOnnxService {
 
     final det = DotCellDetector.detectCellBoxes(jpegBytes);
     if (det.boxes.isEmpty) {
+      // The model loaded fine and this ran — it just found nothing to
+      // classify. Log that distinctly from a load/init failure so it's
+      // obvious this is a framing/lighting problem, not a broken model.
+      debugPrint('Prescan returned 0 detections '
+          '(page ${det.width}x${det.height}px, dot-grid found no cell boxes)');
       throw Exception(
         'No Braille cells found — use even lighting and fill the frame with the page',
       );
@@ -83,6 +88,8 @@ class PrescanOnnxService {
     }
 
     if (cells.isEmpty) {
+      debugPrint('Prescan returned 0 detections '
+          '($total dot-grid box(es) found, every per-cell classification threw)');
       throw Exception('CNN could not classify any cells');
     }
 

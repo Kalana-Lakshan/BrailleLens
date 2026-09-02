@@ -33,14 +33,29 @@ class ClassifierService {
   Future<bool> initialize() async {
     if (_isInitialized) return true;
 
+    // Split into two stages, each logged separately: an asset-not-found
+    // error (bad path / not listed in pubspec.yaml) and an ONNX session
+    // creation error (corrupt file, unsupported IR version, etc.) look very
+    // different in $e but were previously caught together — split them so
+    // the debug console tells you which one actually happened.
+    Uint8List modelBytes;
+    try {
+      final data = await rootBundle.load(AppConfig.brailleCnnAsset);
+      modelBytes = data.buffer.asUint8List();
+    } catch (e) {
+      _lastError = e.toString();
+      _isInitialized = false;
+      debugPrint('Failed to load asset: $e');
+      debugPrint(
+          '[Classifier] asset not found at "${AppConfig.brailleCnnAsset}" — '
+          'check the path matches assets/models/ and is listed under pubspec.yaml\'s flutter/assets:');
+      return false;
+    }
+
     try {
       OrtEnv.instance.init();
-      final modelBytes = await rootBundle.load(AppConfig.brailleCnnAsset);
       final sessionOptions = OrtSessionOptions();
-      _session = OrtSession.fromBuffer(
-        modelBytes.buffer.asUint8List(),
-        sessionOptions,
-      );
+      _session = OrtSession.fromBuffer(modelBytes, sessionOptions);
 
       final labelsRaw = await rootBundle.loadString('assets/labels.txt');
       _labels = labelsRaw
@@ -57,7 +72,10 @@ class ClassifierService {
     } catch (e) {
       _lastError = e.toString();
       _isInitialized = false;
-      debugPrint('[Classifier] failed to load ${AppConfig.brailleCnnAsset}: $e');
+      debugPrint('Failed to load asset: $e');
+      debugPrint('[Classifier] asset bytes loaded OK but ONNX session/tensor '
+          'init failed — likely a corrupt file or unsupported IR version, '
+          'not a missing-asset problem: $e');
       return false;
     }
   }
