@@ -10,7 +10,7 @@ import 'prescan_onnx_service.dart';
 /// Stage-1 prescan: detect all Braille cells and label each crop.
 ///
 /// Order:
-/// 1. On-device ONNX (`braille_model.onnx` + dot grid) — **default for phone**
+/// 1. On-device ONNX (`braille_cnn.onnx` + dot grid) — **default for phone**
 /// 2. Native MethodChannel `prescanPage`
 /// 3. HTTP PC server (`prescan_server.py`) if [prescanServerUrl] is set
 class PrescanBridge {
@@ -86,7 +86,7 @@ class PrescanBridge {
     }
 
     throw PrescanUnavailableException(
-      'On-device prescan failed. Check lighting and that braille_model.onnx is bundled. '
+      'On-device prescan failed. Check lighting and that braille_cnn.onnx is bundled. '
       'Optional: set PrescanBridge.prescanServerUrl for PC server.',
     );
   }

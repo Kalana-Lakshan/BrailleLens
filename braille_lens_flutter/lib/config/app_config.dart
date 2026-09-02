@@ -10,8 +10,17 @@ class AppConfig {
   /// Set to `null` only if you implement native `prescanPage` MethodChannel on Android.
   static const String? prescanServerUrl = null; // e.g. 'http://192.168.1.5:8765'
 
-  /// 26-class cell CNN (28×28 grayscale). Bundled as a single ONNX file.
-  static const String brailleCnnAsset = 'assets/models/braille_model.onnx';
+  /// 64-class Sinhala Braille cell CNN (64×64 grayscale, class index == the
+  /// 6-dot cell code). Exported by `braille_cnn/export_onnx.py` from
+  /// `braille_cnn/checkpoints/braille_cnn_gold_finetuned.pt` — trained
+  /// directly on the Sri Lankan Sinhala Braille chart, unlike the previous
+  /// `braille_model.onnx` (a 26-class English Grade-1 letter model that
+  /// needed `SinhalaBrailleService`'s English-letter round-trip hack to
+  /// produce Sinhala output at all).
+  static const String brailleCnnAsset = 'assets/models/braille_cnn.onnx';
+
+  /// Per-code {code, si, en, dots} rows, generated alongside [brailleCnnAsset].
+  static const String brailleLabelsAsset = 'assets/models/braille_labels.json';
 
   /// Fingertip YOLO26n — UINT8 quantized first (phone CPU), FP32 fallback.
   static const String fingertipOnnxAsset =

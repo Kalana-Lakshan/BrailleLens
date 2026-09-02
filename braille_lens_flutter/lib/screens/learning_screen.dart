@@ -64,7 +64,7 @@ class _LearningScreenState extends State<LearningScreen> {
     setState(() {
       _cameraReady = true;
       _statusLine = [
-        cnnReady ? 'CNN: braille_model.onnx' : 'CNN failed',
+        cnnReady ? 'CNN: braille_cnn.onnx' : 'CNN failed',
         tipReady
             ? 'YOLO: ${_fingertipOnnx.loadedAsset?.split('/').last}'
             : 'YOLO failed — tap fingertip',
@@ -89,7 +89,7 @@ class _LearningScreenState extends State<LearningScreen> {
     if (_busy || !_cameraReady) return;
     setState(() {
       _busy = true;
-      _statusLine = 'Scanning page on device…';
+      _statusLine = 'Scanning the page for Braille cells…';
     });
 
     final jpeg = await _camera.captureJpeg();
@@ -185,13 +185,19 @@ class _LearningScreenState extends State<LearningScreen> {
       _covered = result;
       _busy = false;
       _statusLine = result.hasHit
-          ? 'Cell #${result.cell!.id} under finger'
+          ? '${result.cell!.detectedCellLabel} detected under finger'
           : 'No cell under fingertip — rescan page or adjust finger';
     });
 
     if (result.hasHit) {
       final ch = result.headline;
-      await widget.audioService.speak('Character $ch');
+      if (ch == '—') {
+        await widget.audioService.speak(
+          'The detected cell is an indicator, not a standalone character.',
+        );
+      } else {
+        await widget.audioService.speakSinhalaCharacter(ch);
+      }
     } else {
       await widget.audioService.speak('No character found under your finger.');
     }
@@ -320,8 +326,8 @@ class _LearningScreenState extends State<LearningScreen> {
 
   Widget _buildTopBar() {
     final title = _stage == _LearningStage.prescan
-        ? 'STAGE 1 · SCAN PAGE'
-        : (_fingerJpeg != null ? 'STAGE 2 · RESULT' : 'STAGE 2 · PLACE FINGER');
+        ? '1 · SCAN BRAILLE PAGE'
+        : (_fingerJpeg != null ? '2 · DETECTED CHARACTER' : '2 · POINT TO A CELL');
 
     return SafeArea(
       child: Container(
@@ -379,6 +385,32 @@ class _LearningScreenState extends State<LearningScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            if (_stage == _LearningStage.prescan && _cellMap == null)
+              const Padding(
+                padding: EdgeInsets.only(bottom: 18),
+                child: Column(
+                  children: [
+                    Icon(Icons.document_scanner_outlined,
+                        color: AppTheme.primaryYellow, size: 34),
+                    SizedBox(height: 6),
+                    Text(
+                      'CENTER THE BRAILLE PAGE IN THE CAMERA',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: AppTheme.primaryYellow,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 0.7,
+                      ),
+                    ),
+                    SizedBox(height: 4),
+                    Text(
+                      'Keep fingers out · use bright, even light',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.white70, fontSize: 13),
+                    ),
+                  ],
+                ),
+              ),
             if (_fingertip != null)
               const Padding(
                 padding: EdgeInsets.only(bottom: 8),
@@ -387,14 +419,26 @@ class _LearningScreenState extends State<LearningScreen> {
                   style: TextStyle(color: Color(0xFF00E5FF), fontWeight: FontWeight.bold),
                 ),
               ),
-            Text(
-              headline,
-              style: const TextStyle(
-                fontSize: 48,
-                fontWeight: FontWeight.bold,
-                color: AppTheme.primaryYellow,
+            if (covered?.hasHit == true) ...[
+              const Text(
+                'SINHALA CHARACTER',
+                style: TextStyle(color: Colors.white70, fontSize: 12, letterSpacing: 1.1),
               ),
-            ),
+              const SizedBox(height: 4),
+              Text(
+                headline,
+                style: const TextStyle(fontSize: 56, fontWeight: FontWeight.bold, color: AppTheme.primaryYellow),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Detected ${covered!.cell!.detectedCellLabel}',
+                style: const TextStyle(color: Color(0xFF00E5FF), fontWeight: FontWeight.w600),
+              ),
+            ] else
+              Text(
+                headline,
+                style: const TextStyle(fontSize: 42, fontWeight: FontWeight.bold, color: AppTheme.primaryYellow),
+              ),
             const SizedBox(height: 6),
             Text(
               subtitle,
@@ -431,8 +475,8 @@ class _LearningScreenState extends State<LearningScreen> {
                 ),
                 child: Text(
                   _stage == _LearningStage.prescan
-                      ? 'Capture page (no finger)'
-                      : 'Capture finger on cell',
+                      ? 'SCAN BRAILLE PAGE'
+                      : 'DETECT CHARACTER UNDER FINGER',
                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                 ),
               ),

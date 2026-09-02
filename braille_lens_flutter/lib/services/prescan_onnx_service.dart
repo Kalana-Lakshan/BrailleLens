@@ -5,7 +5,7 @@ import '../models/braille_cell.dart';
 import 'classifier_service.dart';
 import 'dot_cell_detector.dart';
 
-/// Stage-1 on-device prescan: dot grid + `braille_model.onnx` per cell.
+/// Stage-1 on-device prescan: dot grid + `braille_cnn.onnx` per cell.
 class PrescanOnnxService {
   final ClassifierService _cnn;
 
@@ -24,7 +24,7 @@ class PrescanOnnxService {
     if (!_cnn.isInitialized) {
       final ok = await _cnn.initialize();
       if (!ok) {
-        throw Exception(_cnn.lastError ?? 'braille_model.onnx failed to load');
+        throw Exception(_cnn.lastError ?? 'braille_cnn.onnx failed to load');
       }
     }
 
@@ -64,8 +64,9 @@ class PrescanOnnxService {
       );
 
       try {
+        // The CNN's class index IS the 6-dot cell code -- no more label
+        // round-tripping through an English letter (see AppConfig.brailleCnnAsset).
         final pred = await _cnn.predictCrop(crop);
-        final ch = pred.character.toUpperCase();
         cells.add(
           BrailleCell(
             id: i,
@@ -73,9 +74,9 @@ class PrescanOnnxService {
             y0: y0.toDouble(),
             x1: x1.toDouble(),
             y1: y1.toDouble(),
-            char: ch,
-            pattern: '',
-            code: pred.classIndex + 1,
+            char: pred.character,
+            pattern: pred.dots,
+            code: pred.classIndex,
             conf: pred.confidence,
             line: 0,
             col: i,
