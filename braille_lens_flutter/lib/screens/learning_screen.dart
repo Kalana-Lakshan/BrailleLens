@@ -292,8 +292,35 @@ class _LearningScreenState extends State<LearningScreen> {
             _buildImageArea(),
             _buildTopBar(),
             _buildBottomPanel(),
-            if (_busy) const ColoredBox(color: Color(0x88000000), child: Center(child: CircularProgressIndicator(color: AppTheme.primaryYellow))),
+            if (_busy) _buildBusyIndicator(),
           ],
+        ),
+      ),
+    );
+  }
+
+  /// Small, non-obscuring "working" badge — deliberately does *not* dim the
+  /// rest of the screen (a full-screen translucent veil made the camera
+  /// preview, status text, and buttons hard to read while scanning).
+  /// [_statusLine] already carries the actual progress text; this is just a
+  /// small spinner so it's clear something is happening.
+  Widget _buildBusyIndicator() {
+    return IgnorePointer(
+      child: Center(
+        child: Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.55),
+            shape: BoxShape.circle,
+          ),
+          child: const SizedBox(
+            width: 22,
+            height: 22,
+            child: CircularProgressIndicator(
+              strokeWidth: 2.5,
+              color: AppTheme.primaryYellow,
+            ),
+          ),
         ),
       ),
     );
