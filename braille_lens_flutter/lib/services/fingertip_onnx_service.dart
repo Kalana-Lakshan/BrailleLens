@@ -1,6 +1,4 @@
 import 'dart:math';
-import 'dart:typed_data';
-import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -83,9 +81,8 @@ class FingertipOnnxService {
       return null;
     }
 
-    dynamic outValue = outputs['output0']?.value;
-    outValue ??= outputs.values.first?.value;
-    for (final o in outputs.values) {
+    final dynamic outValue = outputs[0]?.value;
+    for (final o in outputs) {
       o?.release();
     }
 

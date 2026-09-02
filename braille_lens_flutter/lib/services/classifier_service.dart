@@ -1,5 +1,4 @@
 import 'dart:math';
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:onnxruntime/onnxruntime.dart';
@@ -122,17 +121,9 @@ class ClassifierService {
       throw Exception('CNN inference returned empty output');
     }
 
-    dynamic outValue;
-    if (outputs is Map) {
-      outValue = outputs['output']?.value ?? outputs.values.first?.value;
-      for (final o in outputs.values) {
-        o?.release();
-      }
-    } else {
-      outValue = outputs[0]?.value ?? outputs[0];
-      for (final o in outputs) {
-        o?.release();
-      }
+    final dynamic outValue = outputs[0]?.value;
+    for (final o in outputs) {
+      o?.release();
     }
 
     final logits = _flattenLogits(outValue);

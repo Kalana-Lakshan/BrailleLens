@@ -576,7 +576,7 @@ class _TapFingertipDialogState extends State<_TapFingertipDialog> {
                   final oy = (360 - dh) / 2;
                   final ix = ((local.dx - ox) / s).clamp(0, _image!.width.toDouble());
                   final iy = ((local.dy - oy) / s).clamp(0, _image!.height.toDouble());
-                  Navigator.pop(context, Offset(ix, iy));
+                  Navigator.pop(context, Offset(ix.toDouble(), iy.toDouble()));
                 },
                 child: CustomPaint(
                   painter: _ImagePainter(_image!),
