@@ -95,7 +95,7 @@ Until 4a / 4b weights exist, live scan falls through to dots / DotNeuralNet.
 | 5.1 `autoscan.py` `PageWatcher` (hands-free page capture) | **done** |
 | 5.2 prescan uses `recognize_page()`; DotNeuralNet only as fallback | **done** |
 | 5.2 auto-scan **on by default** (`--scan-backend auto\|cells\|dots\|dnn`) | **done** |
-| 5.3 `MediaPipeTip` + `SkinContourTip` fallback (`--tip-backend auto`) | **done** |
+| 5.3 `TipYOLO` (YOLO26) + `SkinContourTip` fallback (`--tip-backend auto`) | **done** |
 | 5.3 `eval_tip.py` on real oCam footage | **code ready, not run yet** |
 | 5.4 `live_app.py` dwell → print code + character (`--lang si` default) | **done** |
 

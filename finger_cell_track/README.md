@@ -3,15 +3,16 @@
 Live learning app: prescanned CellMap + fingertip hit-test → one character
 per dwell in the terminal.
 
-**Tip detector:** `SkinContourTip` is the default (`--tip-backend skin`).
-Contact is the distal pad (far end of the finger), not the knuckle. Decorative
-border columns and shallow edge ghosts are rejected. `TipEMA` ignores teleports
-until the previous tip track has been lost for several frames.
-MediaPipe is optional (`--tip-backend mediapipe` or `auto`). TipYOLO is a
-baseline only (`--tip-backend yolo`).
+**Tip detector:** YOLO26n (`TipYOLO`) is the default (`--tip-backend auto`).
+If YOLO returns no box that frame, `SkinContourTip` is used automatically.
+Contact is the distal pad (box centre for YOLO; far end of the finger for
+skin). Decorative border columns and shallow edge ghosts are rejected on the
+skin path. `TipEMA` ignores teleports until the previous tip track has been
+lost for several frames. MediaPipe is optional (`--tip-backend mediapipe`).
+Force YOLO-only or skin-only with `--tip-backend yolo` / `skin`.
 
 Detectors are split by file and wired in `tip_backends.py`:
-`tip_skin.py` · `tip_mediapipe.py` · `tip_yolo.py`.
+`tip_yolo.py` · `tip_skin.py` · `tip_mediapipe.py`.
 
 **Page capture:** `--auto-scan` freezes a still, hand-free frame and prints
 `[PAGE] CAPTURED`. `R` is still a manual override.
@@ -36,25 +37,25 @@ cd ..
 Needed weights:
 
 - Braille cells: `experiments/DotNeuralNet/weights/yolov8_braille.pt`
-- Fingertip: `finger_cell_track/weights/yolo26n_fingertip_best.pt` (from Colab)
+- Fingertip: `finger_cell_track/weights/yolo26n_fingertip_braille_best.pt` (Braille-domain YOLO26n; falls back to `yolo26n_fingertip_best.pt`)
 
 ## Quick start
 
 ```powershell
 $py = "finger_cell_track\.venv\Scripts\python.exe"
 
-# Tip-only check (no Braille book) — yellow dot on fingertip
+# Tip-only check (no Braille book) — yellow dot on fingertip (YOLO26 + skin fallback)
 & $py finger_cell_track/tip_dot_test.py --source http://PHONE_IP:8080/video
-& $py finger_cell_track/tip_dot_test.py --source 0 --show-mask
+& $py finger_cell_track/tip_dot_test.py --source http://PHONE_IP:8080/video --tip-backend skin --show-mask
 
 # Full CellMap + tip → Learning/Testing (3 s dwell before cell print)
-& $py finger_cell_track/live_app.py --source 0 --mode learning --lang si --tip-backend skin --scan-backend cells --dwell-ms 3000
+& $py finger_cell_track/live_app.py --source 0 --mode learning --lang si --scan-backend cells --dwell-ms 3000
 
 # IP Webcam on phone (replace IP)
-& $py finger_cell_track/live_app.py --source http://PHONE_IP:8080/video --mode learning --lang si --tip-backend skin --scan-backend cells --dwell-ms 3000
+& $py finger_cell_track/live_app.py --source http://PHONE_IP:8080/video --mode learning --lang si --scan-backend cells --dwell-ms 3000
 
 # Replay a recording in the terminal (no window)
-& $py finger_cell_track/live_app.py --source path\to.mp4 --no-window --force-scan --tip-backend skin --scan-backend cells --lang si --dwell-ms 3000
+& $py finger_cell_track/live_app.py --source path\to.mp4 --no-window --force-scan --scan-backend cells --lang si --dwell-ms 3000
 
 # Measure tip backends on recorded footage
 & $py finger_cell_track/eval_tip.py
@@ -77,9 +78,9 @@ Train tip model on Colab T4: `BrailleLens_Fingertip_YOLO26_Colab.ipynb` (see `CO
 
 | File | Role |
 |------|------|
-| `tip_skin.py` | `SkinContourTip` — classical CV (default) |
+| `tip_yolo.py` | `TipYOLO` — YOLO26n (default primary) |
+| `tip_skin.py` | `SkinContourTip` — classical CV fallback |
 | `tip_mediapipe.py` | `MediaPipeTip` — landmark 8 |
-| `tip_yolo.py` | `TipYOLO` — YOLO26n baseline |
 | `tip_backends.py` | Wires all three + `create_tip_backend()` / `FallbackTip` |
 | `camera_source.py` | `open_source()` webcam / IP Webcam |
 | `hand_track.py` | MediaPipe CLI demo (+ compat re-exports) |

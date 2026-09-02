@@ -1,13 +1,13 @@
 """Wire the three fingertip detectors behind one factory.
 
 Modules:
-  tip_skin.py       → SkinContourTip   (default classical CV)
-  tip_mediapipe.py  → MediaPipeTip     (landmark 8)
-  tip_yolo.py       → TipYOLO          (fine-tuned YOLO26n)
+  tip_yolo.py       → TipYOLO          (YOLO26n; live-app default)
+  tip_skin.py       → SkinContourTip   (classical CV fallback)
+  tip_mediapipe.py  → MediaPipeTip     (landmark 8; optional)
 
 Usage:
   from tip_backends import create_tip_backend
-  tipper = create_tip_backend("skin")
+  tipper = create_tip_backend("auto")   # YOLO26, SkinContour if YOLO misses
   tip, box, conf = tipper.detect(frame_bgr)
 """
 
@@ -19,12 +19,15 @@ from typing import Any, Optional
 from tip_mediapipe import MediaPipeTip
 from tip_skin import SkinContourTip
 
-# TipYOLO imported lazily inside create_tip_backend("yolo") so skin/mediapipe
-# runs do not require ultralytics / tip weights.
+# TipYOLO imported lazily so skin/mediapipe runs do not require ultralytics.
+
+
+def _detector_name(det: Any) -> str:
+    return str(getattr(det, "name", det.__class__.__name__))
 
 
 class FallbackTip:
-    """Try primary first (usually MediaPipe); if it fails, use fallback (skin)."""
+    """Try primary first (YOLO26 by default); if it misses, use fallback (skin)."""
 
     def __init__(self, primary, fallback) -> None:
         self.primary = primary
@@ -36,7 +39,7 @@ class FallbackTip:
         tip, box, conf = self.primary.detect(frame_bgr)
         self.hand_visible = bool(getattr(self.primary, "hand_visible", tip is not None))
         if tip is not None:
-            self.last_backend = "primary"
+            self.last_backend = _detector_name(self.primary)
             return tip, box, conf
         if self.fallback is None:
             self.last_backend = "none"
@@ -44,7 +47,9 @@ class FallbackTip:
         out = self.fallback.detect(frame_bgr)
         fb_visible = bool(getattr(self.fallback, "hand_visible", out[0] is not None))
         self.hand_visible = self.hand_visible or fb_visible
-        self.last_backend = "fallback" if out[0] is not None else "none"
+        self.last_backend = (
+            _detector_name(self.fallback) if out[0] is not None else "none"
+        )
         return out
 
     def close(self) -> None:
@@ -53,23 +58,16 @@ class FallbackTip:
                 det.close()
 
 
-def create_tip_backend(
-    name: str = "skin",
+def _try_tip_yolo(
     *,
-    tip_weights: Optional[Path] = None,
-    tip_conf: float = 0.25,
-    imgsz: int = 640,
-    device: str = "cpu",
+    tip_weights: Optional[Path],
+    tip_conf: float,
+    imgsz: int,
+    device: str,
+    required: bool,
 ) -> Any:
-    """Build a tip detector. name: skin | mediapipe | yolo | auto."""
-    key = (name or "skin").lower().strip()
-    if key == "skin":
-        return SkinContourTip()
-    if key == "mediapipe":
-        return MediaPipeTip()
-    if key == "auto":
-        return FallbackTip(MediaPipeTip(), SkinContourTip())
-    if key == "yolo":
+    """Load TipYOLO. If required=False, missing weights/import return None."""
+    try:
         from tip_yolo import TipYOLO
 
         return TipYOLO(
@@ -78,12 +76,57 @@ def create_tip_backend(
             imgsz=imgsz,
             device=device,
         )
+    except (FileNotFoundError, ImportError) as exc:
+        if required:
+            raise
+        print(f"TipYOLO unavailable ({exc}); using SkinContourTip.", flush=True)
+        return None
+
+
+def create_tip_backend(
+    name: str = "auto",
+    *,
+    tip_weights: Optional[Path] = None,
+    tip_conf: float = 0.25,
+    imgsz: int = 640,
+    device: str = "cpu",
+) -> Any:
+    """Build a tip detector. name: auto | yolo | skin | mediapipe.
+
+    auto  — YOLO26 fingertip model, SkinContourTip if YOLO returns no tip
+    yolo  — YOLO26 only (error if weights are missing)
+    skin  — classical YCrCb contour (no neural net)
+    mediapipe — Hands landmark 8 (needs a visible palm)
+    """
+    key = (name or "auto").lower().strip()
+    if key == "skin":
+        return SkinContourTip()
+    if key == "mediapipe":
+        return MediaPipeTip()
+    if key == "yolo":
+        return _try_tip_yolo(
+            tip_weights=tip_weights,
+            tip_conf=tip_conf,
+            imgsz=imgsz,
+            device=device,
+            required=True,
+        )
+    if key == "auto":
+        yolo = _try_tip_yolo(
+            tip_weights=tip_weights,
+            tip_conf=tip_conf,
+            imgsz=imgsz,
+            device=device,
+            required=False,
+        )
+        if yolo is None:
+            return SkinContourTip()
+        return FallbackTip(yolo, SkinContourTip())
     raise ValueError(
-        f"Unknown tip backend {name!r}. Use: skin | mediapipe | yolo | auto"
+        f"Unknown tip backend {name!r}. Use: auto | yolo | skin | mediapipe"
     )
 
 
-# Re-exports so callers can `from tip_backends import SkinContourTip, ...`
 __all__ = [
     "SkinContourTip",
     "MediaPipeTip",

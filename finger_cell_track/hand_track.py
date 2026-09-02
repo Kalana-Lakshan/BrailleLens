@@ -1,9 +1,9 @@
 """CLI demo: MediaPipe Hands index-tip overlay (PC webcam / IP Webcam).
 
 Tip detectors live in separate modules — see tip_backends.py:
-  tip_skin.py       SkinContourTip   (default)
+  tip_yolo.py       TipYOLO          (YOLO26n default)
+  tip_skin.py       SkinContourTip   (fallback)
   tip_mediapipe.py  MediaPipeTip
-  tip_yolo.py       TipYOLO
 
 From BrailleLens repo root:
 
