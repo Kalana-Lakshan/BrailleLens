@@ -91,13 +91,18 @@ def main() -> None:
         default="cells",
         help="cells = our YOLO cell detector + CNN (default once weights exist)",
     )
-    p.add_argument("--tip-weights", type=Path, default=None, help="Fingertip YOLO (baseline only)")
-    # Tip detector choice — see tip_backends.create_tip_backend / tip_skin.py etc.
+    p.add_argument(
+        "--tip-weights",
+        type=Path,
+        default=None,
+        help="Fingertip YOLO26 weights (default: yolo26n_fingertip_braille_best.pt)",
+    )
+    # Tip detector: YOLO26 default, SkinContourTip if YOLO misses the frame.
     p.add_argument(
         "--tip-backend",
-        choices=("auto", "mediapipe", "yolo", "skin"),
-        default="skin",
-        help="skin = SkinContourTip (default; MediaPipe is ~0%% on over-page footage)",
+        choices=("auto", "yolo", "skin", "mediapipe"),
+        default="auto",
+        help="auto = YOLO26 then SkinContourTip fallback (default); yolo/skin/mediapipe = that detector only",
     )
     p.add_argument(
         "--auto-scan",
@@ -144,7 +149,7 @@ def main() -> None:
         yolo = None
         print(f"Scan backend={args.scan_backend} (recognize_page; dnn only if own weights missing)", flush=True)
 
-    # --- Build tip detector via tip_backends (skin | mediapipe | yolo | auto) ---
+    # --- Build tip detector via tip_backends (auto = YOLO26 + skin fallback) ---
     print(f"Tip backend={args.tip_backend} ...", flush=True)
     tipper = create_tip_backend(
         args.tip_backend,
@@ -153,14 +158,15 @@ def main() -> None:
         imgsz=args.imgsz,
         device=args.device,
     )
-    if args.tip_backend == "yolo":
-        print(f"Tip weights: {tipper.weights}", flush=True)
+    yolo_det = getattr(tipper, "primary", tipper)
+    if hasattr(yolo_det, "weights"):
+        print(f"Tip weights: {yolo_det.weights}", flush=True)
     print(f"Opening {args.source!r} ...", flush=True)
     cap = open_source(args.source)
     source_is_file = Path(str(args.source)).is_file()
 
     cell_map = CellMap()
-    # TipEMA smooths SkinContourTip jitter and rejects teleports (cell_map.py).
+    # TipEMA smooths YOLO / SkinContourTip jitter and rejects teleports (cell_map.py).
     ema = TipEMA(alpha=0.35, max_jump_px=180.0, lost_frames_to_retarget=8, coast_frames=5)
     dwell = DwellFilter(args.dwell_ms)
     learn = LearningMode()
@@ -204,7 +210,7 @@ def main() -> None:
     if args.auto_scan and not pending_force_scan:
         print(f"Mode={mode}. Auto-scan on. Hold still, hand off the page. R = force rescan. Q quit.", flush=True)
     elif pending_force_scan:
-        print(f"Mode={mode}. Force-scan on first frame. SkinContourTip → cell char on the terminal.", flush=True)
+        print(f"Mode={mode}. Force-scan on first frame. YOLO26 tip (skin fallback) → cell char on the terminal.", flush=True)
     else:
         print(f"Mode={mode}. Press R over a Braille page to build CellMap. Q quit.", flush=True)
 
@@ -253,7 +259,7 @@ def main() -> None:
                     watcher._last_kind = "captured"
                 pending_force_scan = False
 
-            # Per-frame tip: SkinContourTip.detect → TipEMA smooth → (later) homography + hit_test.
+            # Per-frame tip: YOLO26 (SkinContour fallback) → TipEMA → homography + hit_test.
             tip_raw, tip_box, tip_conf = tipper.detect(frame)
             tip = ema.update(tip_raw)
             hand_visible = bool(getattr(tipper, "hand_visible", tip_raw is not None))
@@ -362,10 +368,12 @@ def main() -> None:
             else:
                 reg_status = f"{registration.status}({reg_inliers})"
             page_state = watcher.state if watcher is not None else "manual"
+            tip_src = getattr(tipper, "last_backend", args.tip_backend)
             hud1 = (
                 f"mode={mode}  cells={len(cell_map)}  page={page_state}  reg={reg_status}  "
                 f"hit={hit.char if hit else '-'}  tip={'Y' if tip else 'N'}"
                 + (f" {tip_conf:.2f}" if tip_raw else "")
+                + (f" [{tip_src}]" if tip else "")
             )
             cv2.putText(
                 out, hud1, (10, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 120), 2

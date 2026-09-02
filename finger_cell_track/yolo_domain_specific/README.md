@@ -50,7 +50,17 @@ Follow [ANNOTATION_GUIDE.md](ANNOTATION_GUIDE.md).
 py -3.11 -m labelme "Gold Dataset/Braille_fingertip"
 ```
 
-### Step 2 — Build YOLO dataset (PC)
+### Combined dataset (TI1K + Roboflow + Braille)
+
+```powershell
+& $py finger_cell_track/yolo_domain_specific/build_dataset.py --clean
+& $py finger_cell_track/yolo_domain_specific/build_combined_dataset.py --zip
+```
+
+Output zip: `yolo_domain_specific/colab_upload/fingertip_combined_yolo26.zip`  
+Upload to Drive: `MyDrive/BrailleLens_Fingertip_Domain/fingertip_combined_yolo26.zip`
+
+### Step 2 — Build Braille-only YOLO dataset (PC)
 
 ```powershell
 $py = "finger_cell_track\.venv\Scripts\python.exe"
@@ -97,7 +107,7 @@ From Drive:
 | Script | Role |
 |--------|------|
 | `labelme_to_yolo.py` | Convert LabelMe JSON → YOLO `.txt` (called by `build_dataset.py`) |
-| `build_dataset.py` | Split + Ultralytics layout + `data.yaml` |
+| `build_combined_dataset.py` | Merge TI1K+Roboflow + Braille into `fingertip_yolo26` + zip |
 | `pack_for_colab.py` | Zip dataset for Drive upload |
 | `train_local.py` | Fine-tune on PC (CPU or CUDA) + export metrics |
 | `export_to_onnx.py` | Export `.pt` → mobile ONNX (no retraining) |

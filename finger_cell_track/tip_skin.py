@@ -1,7 +1,7 @@
-"""Fingertip method 1/3 — SkinContourTip (classical CV; live-app default).
+"""Fingertip method — SkinContourTip (classical CV; fallback when YOLO26 misses).
 
 YCrCb skin mask → contours → distal pad contact. No neural net.
-Wire via tip_backends.create_tip_backend("skin") or TipEMA in live_app.
+Wire via tip_backends.create_tip_backend("auto") (YOLO then this) or "skin".
 """
 
 from __future__ import annotations
@@ -13,15 +13,16 @@ import numpy as np
 class SkinContourTip:
     """Contact point from the largest skin blob that enters the frame.
 
-    STUDY WALKTHROUGH (default tip method — classical CV, not a neural net):
+    STUDY WALKTHROUGH (fallback tip method — classical CV, not a neural net):
       Step A  _mask()         → binary skin pixels (white=skin, black=other)
       Step B  findContours    → candidate finger-shaped blobs
       Step C  filter + score  → keep border-entering blobs; pick best
       Step D  distal pad      → contact (x,y) on the pad, not nail/knuckle
       Step E  reject ghosts   → drop corner / shallow false tips
 
-    Used as the live-app default. MediaPipe fails on top-down Braille footage
-    (palm cropped); this path does not need the palm.
+    Used as the live-app fallback when YOLO26 returns no fingertip. MediaPipe
+    fails on top-down Braille footage (palm cropped); this path does not need
+    the palm.
     """
 
     def __init__(
@@ -49,6 +50,7 @@ class SkinContourTip:
         self.corner_min_area = corner_min_area
         self.min_reach_frac = min_reach_frac
         self.max_edge_aspect = max_edge_aspect
+        self.name = "skin"
         self.hand_visible = False  # True when detect() found a tip this frame
 
     def _mask(self, frame_bgr: np.ndarray) -> np.ndarray:

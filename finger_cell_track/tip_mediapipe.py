@@ -1,7 +1,7 @@
 """Fingertip method 2/3 — MediaPipe Hands (landmark 8 = index tip).
 
 Needs a visible palm. Weak on tip-only / over-page Braille views.
-Wire via tip_backends.create_tip_backend("mediapipe") or "auto".
+Wire via tip_backends.create_tip_backend("mediapipe").
 """
 
 from __future__ import annotations
@@ -43,6 +43,7 @@ class MediaPipeTip:
         contact_offset: float = 0.18,
     ) -> None:
         self.contact_offset = contact_offset
+        self.name = "mediapipe"
         mp_hands, _, _ = _mediapipe()
         self._hands = mp_hands.Hands(
             static_image_mode=False,

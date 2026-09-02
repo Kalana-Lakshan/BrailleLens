@@ -1,6 +1,6 @@
 """Stage 5.3 — measure fingertip detectors on real Braille-reading footage.
 
-Compares MediaPipe, the skin-contour fallback, and TipYOLO (baseline only).
+Compares MediaPipe, SkinContourTip, and TipYOLO (YOLO26n default).
 
     finger_cell_track\\.venv\\Scripts\\python.exe finger_cell_track/eval_tip.py
     finger_cell_track\\.venv\\Scripts\\python.exe finger_cell_track/eval_tip.py --video path\\to.mp4
@@ -53,12 +53,12 @@ def main() -> None:
 
     backends = [
         ("mediapipe", create_tip_backend("mediapipe")),
-        ("skin_contour", create_tip_backend("skin")),  # live_app default
+        ("skin_contour", create_tip_backend("skin")),
     ]
     if not args.skip_yolo:
         try:
             backends.append(("tip_yolo", create_tip_backend("yolo")))
-        except FileNotFoundError as exc:
+        except (FileNotFoundError, ImportError) as exc:
             print(f"TipYOLO skipped: {exc}")
 
     print(f"video: {args.video}")
@@ -96,11 +96,11 @@ def main() -> None:
         print(f"{name:<14} {frames:7d} {hits:7d} {rate:8.1%}")
         if name == "mediapipe":
             if rate >= 0.90:
-                print("  gate: ship MediaPipe alone; keep contour as --tip-backend")
+                print("  gate: MediaPipe is usable on this video")
             elif rate >= 0.60:
-                print("  gate: MediaPipe primary, skin-contour automatic fallback")
+                print("  gate: MediaPipe weak; YOLO26 + skin fallback is preferred")
             else:
-                print("  gate: skin-contour primary; MediaPipe only for finger identity")
+                print("  gate: MediaPipe fails on over-page views; ship YOLO26 + skin")
 
 
 if __name__ == "__main__":

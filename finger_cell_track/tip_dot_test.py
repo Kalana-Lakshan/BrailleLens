@@ -1,6 +1,6 @@
 """Easy fingertip check — no Braille page needed.
 
-Draws a bright yellow dot where SkinContourTip (default) thinks the finger is.
+Draws a bright yellow dot where TipYOLO (default; SkinContour fallback) thinks the finger is.
 Use any plain background / desk / paper.
 
 IP Webcam streams are read as MJPEG (more reliable than OpenCV's FFMPEG open).
@@ -100,9 +100,9 @@ def main() -> None:
     )
     p.add_argument(
         "--tip-backend",
-        choices=("skin", "mediapipe", "auto"),
-        default="skin",
-        help="skin = SkinContourTip (default for over-page / cropped hand)",
+        choices=("auto", "yolo", "skin", "mediapipe"),
+        default="auto",
+        help="auto = YOLO26 then SkinContourTip fallback (default)",
     )
     p.add_argument(
         "--display-width",
@@ -126,9 +126,10 @@ def main() -> None:
     # Choose tip method for this tip-only window (no Braille CellMap here).
     tipper = create_tip_backend(args.tip_backend)
     label = {
+        "auto": "YOLO26+Skin fallback",
+        "yolo": "TipYOLO",
         "skin": "SkinContourTip",
         "mediapipe": "MediaPipeTip",
-        "auto": "MediaPipe+Skin fallback",
     }.get(args.tip_backend, args.tip_backend)
 
     print(f"Backend={label}", flush=True)
