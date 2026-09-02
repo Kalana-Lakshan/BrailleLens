@@ -290,6 +290,7 @@ class _LearningScreenState extends State<LearningScreen> {
           fit: StackFit.expand,
           children: [
             _buildImageArea(),
+            _buildFramingHint(),
             _buildTopBar(),
             _buildBottomPanel(),
             if (_busy) _buildBusyIndicator(),
@@ -350,41 +351,111 @@ class _LearningScreenState extends State<LearningScreen> {
     return const Center(child: CircularProgressIndicator(color: AppTheme.primaryYellow));
   }
 
+  /// Small rounded badge with just enough backing to stay legible over a
+  /// bright camera feed (e.g. white paper) -- deliberately not a full-width
+  /// bar, so the camera preview around it stays at full brightness.
+  Widget _pill({required Widget child, VoidCallback? onTap}) {
+    final content = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.black54,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: child,
+    );
+    if (onTap == null) return content;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: onTap,
+        child: content,
+      ),
+    );
+  }
+
   Widget _buildTopBar() {
     final title = _stage == _LearningStage.prescan
         ? '1 · SCAN BRAILLE PAGE'
         : (_fingerJpeg != null ? '2 · DETECTED CHARACTER' : '2 · POINT TO A CELL');
 
     return SafeArea(
-      child: Container(
+      child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        color: Colors.black.withValues(alpha: 0.7),
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            TextButton(
-              onPressed: _exit,
-              child: const Text('Exit', style: TextStyle(color: AppTheme.primaryYellow)),
+            _pill(
+              onTap: _exit,
+              child: const Text('Exit',
+                  style: TextStyle(color: AppTheme.primaryYellow, fontWeight: FontWeight.bold)),
             ),
+            const SizedBox(width: 8),
             Expanded(
-              child: Text(
-                title,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: AppTheme.primaryYellow,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 1.2,
-                  fontSize: 13,
+              child: Center(
+                child: _pill(
+                  child: Text(
+                    title,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: AppTheme.primaryYellow,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1.2,
+                      fontSize: 13,
+                    ),
+                  ),
                 ),
               ),
             ),
+            const SizedBox(width: 8),
             if (_cellMap != null)
-              TextButton(
-                onPressed: _busy ? null : _rescan,
-                child: const Text('Rescan', style: TextStyle(color: Colors.white70)),
+              _pill(
+                onTap: _busy ? null : _rescan,
+                child: const Text('Rescan', style: TextStyle(color: Colors.white)),
               )
             else
-              const SizedBox(width: 56),
+              const SizedBox(width: 8),
           ],
+        ),
+      ),
+    );
+  }
+
+  /// Framing guidance as a small floating pill instead of a permanent block
+  /// baked into the bottom sheet -- keeps it visible without eating into
+  /// the camera viewport's height.
+  Widget _buildFramingHint() {
+    if (!(_stage == _LearningStage.prescan && _cellMap == null)) {
+      return const SizedBox.shrink();
+    }
+    return Align(
+      alignment: Alignment.topCenter,
+      child: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.only(top: 56),
+          child: IgnorePointer(
+            child: _pill(
+              child: const Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'CENTER THE PAGE · KEEP FINGERS OUT',
+                    style: TextStyle(
+                      color: AppTheme.primaryYellow,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                  SizedBox(height: 2),
+                  Text(
+                    'Use bright, even light',
+                    style: TextStyle(color: Colors.white70, fontSize: 11),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ),
       ),
     );
@@ -403,40 +474,20 @@ class _LearningScreenState extends State<LearningScreen> {
       right: 0,
       bottom: 0,
       child: Container(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+        // Trimmed from the original fromLTRB(20,16,20,32) + a large
+        // icon+instruction block baked in above the button -- that block
+        // (now a small floating pill over the viewport instead, see
+        // _buildFramingHint) plus this padding used to eat a third or more
+        // of the screen's height, squeezing the camera preview into a thin
+        // strip and reading as if the whole feed were covered by a scrim.
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
         decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: 0.92),
+          color: Colors.black.withValues(alpha: 0.75),
           border: const Border(top: BorderSide(color: AppTheme.primaryYellow, width: 2)),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (_stage == _LearningStage.prescan && _cellMap == null)
-              const Padding(
-                padding: EdgeInsets.only(bottom: 18),
-                child: Column(
-                  children: [
-                    Icon(Icons.document_scanner_outlined,
-                        color: AppTheme.primaryYellow, size: 34),
-                    SizedBox(height: 6),
-                    Text(
-                      'CENTER THE BRAILLE PAGE IN THE CAMERA',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: AppTheme.primaryYellow,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 0.7,
-                      ),
-                    ),
-                    SizedBox(height: 4),
-                    Text(
-                      'Keep fingers out · use bright, even light',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: Colors.white70, fontSize: 13),
-                    ),
-                  ],
-                ),
-              ),
             if (_fingertip != null)
               const Padding(
                 padding: EdgeInsets.only(bottom: 8),
