@@ -28,4 +28,15 @@ class AppConfig {
 
   static const String fingertipOnnxFallbackAsset =
       'assets/models/fingertip_braille_yolo26n.onnx';
+
+  /// Multi-cell page detector — single-class YOLO26n (`braille_cell`),
+  /// 1280×1280 input, up to 800 boxes per page. Exported by
+  /// `cell_detect/export_to_onnx.py` from `cell_detect/weights/
+  /// braille_cell_best.pt`. UINT8 quantized first (phone CPU), FP32 fallback
+  /// — same dual-asset pattern as [fingertipOnnxAsset].
+  static const String cellDetectorOnnxAsset =
+      'assets/models/braille_cell_yolo26n_mobile.onnx';
+
+  static const String cellDetectorOnnxFallbackAsset =
+      'assets/models/braille_cell_yolo26n.onnx';
 }

@@ -1,5 +1,4 @@
 import 'dart:typed_data';
-import 'dart:ui' as ui;
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
@@ -13,8 +12,8 @@ import '../services/coordinate_mapper.dart';
 import '../services/fingertip_onnx_service.dart';
 import '../services/prescan_bridge.dart';
 import '../theme/app_theme.dart';
-import '../utils/image_fit.dart';
-import '../widgets/cell_overlay_painter.dart';
+import '../widgets/frozen_image_view.dart';
+import '../widgets/tap_fingertip_dialog.dart';
 
 enum _LearningStage { prescan, fingerResult }
 
@@ -211,7 +210,7 @@ class _LearningScreenState extends State<LearningScreen> {
     final tap = await showDialog<Offset>(
       context: context,
       barrierDismissible: false,
-      builder: (ctx) => _TapFingertipDialog(jpeg: jpeg),
+      builder: (ctx) => TapFingertipDialog(jpeg: jpeg),
     );
     if (tap == null) return null;
 
@@ -302,7 +301,7 @@ class _LearningScreenState extends State<LearningScreen> {
 
   Widget _buildImageArea() {
     if (_stage == _LearningStage.fingerResult && _fingerJpeg != null) {
-      return _FrozenImageView(
+      return FrozenImageView(
         jpeg: _fingerJpeg!,
         cellMap: _mappedCellsForFingerFrame(),
         highlighted: _covered?.cell,
@@ -310,7 +309,7 @@ class _LearningScreenState extends State<LearningScreen> {
       );
     }
     if (_prescanJpeg != null && _cellMap != null) {
-      return _FrozenImageView(
+      return FrozenImageView(
         jpeg: _prescanJpeg!,
         cellMap: _cellMap,
       );
@@ -488,146 +487,3 @@ class _LearningScreenState extends State<LearningScreen> {
   }
 }
 
-class _FrozenImageView extends StatelessWidget {
-  final Uint8List jpeg;
-  final CellMap? cellMap;
-  final BrailleCell? highlighted;
-  final FingertipDetection? fingertip;
-
-  const _FrozenImageView({
-    required this.jpeg,
-    this.cellMap,
-    this.highlighted,
-    this.fingertip,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return FutureBuilder<ui.Image>(
-      future: _decode(jpeg),
-      builder: (context, snap) {
-        if (!snap.hasData) {
-          return const Center(child: CircularProgressIndicator(color: AppTheme.primaryYellow));
-        }
-        final image = snap.data!;
-        return LayoutBuilder(
-          builder: (context, constraints) {
-            final size = Size(constraints.maxWidth, constraints.maxHeight);
-            final imgW = cellMap?.imageWidth ?? image.width;
-            final imgH = cellMap?.imageHeight ?? image.height;
-
-            return Stack(
-              fit: StackFit.expand,
-              children: [
-                CustomPaint(
-                  painter: _ImagePainter(image),
-                  size: size,
-                ),
-                if (cellMap != null)
-                  CustomPaint(
-                    painter: CellOverlayPainter(
-                      cells: cellMap!.cells,
-                      highlighted: highlighted,
-                      imageWidth: imgW,
-                      imageHeight: imgH,
-                    ),
-                    size: size,
-                  ),
-                if (fingertip != null)
-                  CustomPaint(
-                    painter: FingertipOverlayPainter(
-                      tipBox: fingertip!.box,
-                      contactPoint: fingertip!.contactPoint,
-                      imageWidth: fingertip!.imageWidth,
-                      imageHeight: fingertip!.imageHeight,
-                    ),
-                    size: size,
-                  ),
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
-
-  Future<ui.Image> _decode(Uint8List bytes) async {
-    final codec = await ui.instantiateImageCodec(bytes);
-    final frame = await codec.getNextFrame();
-    return frame.image;
-  }
-}
-
-class _ImagePainter extends CustomPainter {
-  final ui.Image image;
-  _ImagePainter(this.image);
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final src = Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble());
-    final dst = ImageFit.fittedRect(size, image.width / image.height);
-    canvas.drawImageRect(image, src, dst, Paint());
-  }
-
-  @override
-  bool shouldRepaint(_ImagePainter old) => old.image != image;
-}
-
-class _TapFingertipDialog extends StatefulWidget {
-  final Uint8List jpeg;
-  const _TapFingertipDialog({required this.jpeg});
-
-  @override
-  State<_TapFingertipDialog> createState() => _TapFingertipDialogState();
-}
-
-class _TapFingertipDialogState extends State<_TapFingertipDialog> {
-  ui.Image? _image;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    final codec = await ui.instantiateImageCodec(widget.jpeg);
-    final frame = await codec.getNextFrame();
-    setState(() => _image = frame.image);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      backgroundColor: Colors.grey[900],
-      title: const Text('Tap fingertip contact point', style: TextStyle(color: Colors.white)),
-      content: SizedBox(
-        width: 280,
-        height: 360,
-        child: _image == null
-            ? const Center(child: CircularProgressIndicator())
-            : GestureDetector(
-                onTapDown: (d) {
-                  final box = context.findRenderObject() as RenderBox?;
-                  if (box == null || _image == null) return;
-                  final local = box.globalToLocal(d.globalPosition);
-                  final scale = 280 / _image!.width;
-                  final scaleY = 360 / _image!.height;
-                  final s = scale < scaleY ? scale : scaleY;
-                  final dw = _image!.width * s;
-                  final dh = _image!.height * s;
-                  final ox = (280 - dw) / 2;
-                  final oy = (360 - dh) / 2;
-                  final ix = ((local.dx - ox) / s).clamp(0, _image!.width.toDouble());
-                  final iy = ((local.dy - oy) / s).clamp(0, _image!.height.toDouble());
-                  Navigator.pop(context, Offset(ix.toDouble(), iy.toDouble()));
-                },
-                child: CustomPaint(
-                  painter: _ImagePainter(_image!),
-                  size: const Size(280, 360),
-                ),
-              ),
-      ),
-    );
-  }
-}

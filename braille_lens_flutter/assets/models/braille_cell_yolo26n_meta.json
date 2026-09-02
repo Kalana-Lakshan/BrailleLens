@@ -1,0 +1,54 @@
+{
+  "model": "braille_cell_yolo26n.onnx",
+  "task": "detect",
+  "class_names": [
+    "braille_cell"
+  ],
+  "num_classes": 1,
+  "imgsz": 1280,
+  "input_layout": "NCHW",
+  "color_format": "RGB",
+  "normalize": {
+    "scale": 0.00392156862745098,
+    "mean": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "std": [
+      1.0,
+      1.0,
+      1.0
+    ]
+  },
+  "conf_threshold": 0.25,
+  "iou_threshold": 0.45,
+  "max_det": 800,
+  "nms_in_app": true,
+  "ir_version": 7,
+  "source_weights": "braille_cell_best.pt",
+  "source_weights_sha256_16": "264b6b85e13a4c87",
+  "inputs": [
+    {
+      "name": "images",
+      "shape": [
+        1,
+        3,
+        1280,
+        1280
+      ],
+      "dtype": "float32"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "output0",
+      "shape": [
+        1,
+        800,
+        6
+      ]
+    }
+  ],
+  "flutter_notes": "Preprocess: resize letterbox to 1280x1280, RGB, divide by 255. Postprocess: YOLO26 detection head, output already de-duplicated (end-to-end head) -- keep every row above conf_threshold (a page has many cells, unlike the fingertip model which only keeps the single best row). Box centers are the cell centroids."
+}

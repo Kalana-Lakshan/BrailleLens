@@ -37,4 +37,7 @@ flutter:
     - assets/models/fingertip_braille_yolo26n.onnx
     - assets/models/fingertip_braille_yolo26n_mobile.onnx
     - assets/models/fingertip_braille_yolo26n_meta.json
+    - assets/models/braille_cell_yolo26n.onnx
+    - assets/models/braille_cell_yolo26n_mobile.onnx
+    - assets/models/braille_cell_yolo26n_meta.json
     - assets/samples/

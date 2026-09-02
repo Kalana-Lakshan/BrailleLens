@@ -48,6 +48,10 @@ class ClassifierService {
   String? get loadedAsset => _loadedAsset;
   String? get lastError => _lastError;
 
+  /// Every loaded {code, si, en, dots} row, in no particular order — e.g.
+  /// for Testing Mode to draw a random target character from.
+  List<BrailleLabel> get labels => _labels.values.toList(growable: false);
+
   Future<bool> initialize() async {
     if (_isInitialized) return true;
 
