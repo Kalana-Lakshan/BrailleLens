@@ -4,6 +4,7 @@ import '../services/audio_service.dart';
 import '../services/bluetooth_service.dart';
 import '../theme/app_theme.dart';
 import 'learning_screen.dart';
+import 'model_check_screen.dart';
 import 'testing_screen.dart';
 
 /// Entry screen — accessible split-screen mode selector.
@@ -205,7 +206,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     onTap: () => _navigateTo('learning'),
                     child: _ModeZone(
                       title: 'LEARNING\nMODE',
-                      subtitle: 'Live camera · Mock TTS',
+                      subtitle: 'Two-photo scan · Sinhala output',
                       icon: Icons.school_rounded,
                       gradientBegin: AppTheme.learningZoneBlue,
                       gradientEnd: AppTheme.learningZoneBlue,
@@ -426,6 +427,21 @@ class _StatusBar extends StatelessWidget {
               ),
             ),
             const Spacer(),
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const ModelCheckScreen()),
+                );
+              },
+              child: const Text(
+                'ONNX',
+                style: TextStyle(
+                  color: AppTheme.primaryYellow,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1.0,
+                ),
+              ),
+            ),
             _buildBtIndicator(),
           ],
         ),
