@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math';
+import 'dart:typed_data';
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'audio_service.dart';
@@ -90,6 +91,18 @@ class CameraService {
     debugPrint('[CameraService] Mock prediction: $char');
     onCharacterDetected?.call(char);
     audioService.speak('Simulated character $char');
+  }
+
+  /// Capture a still JPEG from the live preview (stage 1 / stage 2 photos).
+  Future<Uint8List?> captureJpeg() async {
+    if (_controller == null || !_isInitialized) return null;
+    try {
+      final file = await _controller!.takePicture();
+      return await file.readAsBytes();
+    } catch (e) {
+      debugPrint('[CameraService] capture error: $e');
+      return null;
+    }
   }
 
   /// Stops the mock simulation loop without releasing the camera.

@@ -68,6 +68,8 @@
 	</array>
 	<key>NSCameraUsageDescription</key>
 	<string>BrailleLens uses the camera for live Braille character detection.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>BrailleLens uses your photos to check the Braille CNN and fingertip detector.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>BrailleLens uses the microphone to recognize your voice answers.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
