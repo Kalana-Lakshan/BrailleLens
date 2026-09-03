@@ -1,0 +1,28 @@
+{
+  "version": "6.3.1",
+  "flags": {},
+  "shapes": [
+    {
+      "label": "figertip",
+      "points": [
+        [
+          724.6969696969695,
+          405.22727272727275
+        ],
+        [
+          970.151515151515,
+          602.1969696969697
+        ]
+      ],
+      "group_id": null,
+      "description": "",
+      "shape_type": "rectangle",
+      "flags": {},
+      "mask": null
+    }
+  ],
+  "imagePath": "IMG_E6108.JPG",
+  "imageData": null,
+  "imageHeight": 5665,
+  "imageWidth": 3910
+}
