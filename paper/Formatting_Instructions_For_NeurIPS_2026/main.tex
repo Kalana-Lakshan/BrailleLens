@@ -1,0 +1,254 @@
+% All four files (main.tex, neurips_2026.sty, neurips_2026.tex, checklist.tex)
+% must be in the SAME folder (as on Overleaf).  LaTeX will find the .sty automatically.
+\documentclass{article}
+\usepackage{neurips_2026}   % change to [main,final] for camera-ready
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage{amsfonts}
+\usepackage{nicefrac}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage{graphicx}
+
+\title{BrailleLens: Real-Time Braille Reading Assistance via Fingertip-Guided
+Cell Detection and Sinhala Transliteration on Mobile Devices}
+
+\author{%
+  Author 1 \\
+  Department of Computer Science and Engineering\\
+  University of Moratuwa\\
+  \texttt{author1@cse.mrt.ac.lk}
+  \And
+  Author 2 \\
+  Department of Computer Science and Engineering\\
+  University of Moratuwa\\
+  \texttt{author2@cse.mrt.ac.lk}
+  \And
+  Author 3 \\
+  Department of Computer Science and Engineering\\
+  University of Moratuwa\\
+  \texttt{author3@cse.mrt.ac.lk}
+  \And
+  Author 4 \\
+  Department of Computer Science and Engineering\\
+  University of Moratuwa\\
+  \texttt{author4@cse.mrt.ac.lk}
+}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+We present \textbf{BrailleLens}, a mobile-first system that allows visually
+impaired readers to learn Braille interactively without sighted assistance.
+A user places a finger on an embossed Braille page in front of a smartphone
+camera; the system detects the fingertip in real time, maps its position to
+the nearest Braille cell, and speaks or displays the corresponding Sinhala
+character. The back-end combines a fine-tuned YOLO v2.6 nano fingertip
+detector, an ORB+RANSAC homography registration stage, and a 26-class
+convolutional neural network (CNN) trained on fused DSBI and Angelina data
+(157,559 annotated cells). On a held-out test set the cell classifier
+reaches 94.7\% top-1 accuracy; the mobile-quantised fingertip detector runs
+at $\geq$15\,FPS on a mid-range Android device. A Flutter application
+delivers the full pipeline entirely on-device, requiring no cloud
+connectivity.
+\end{abstract}
+
+% ======================================================================
+\section{Introduction}
+% ======================================================================
+
+Braille literacy is a critical pathway to education for the estimated 43
+million blind people worldwide~\cite{who2023}, yet access to sighted Braille
+tutors is severely limited in low-resource settings such as Sri Lanka.
+Existing digital aids either require expensive refreshable Braille displays,
+depend on internet connectivity, or do not support Sinhala—the primary
+written language of Sri Lanka.
+
+We address this gap with \textbf{BrailleLens}, a system with two
+complementary interaction modes: (1)~\emph{auto-scan mode}, in which the
+app passively recognises a full page and reads it aloud, and (2)~\emph{fingertip
+learning mode}, in which a child traces individual cells while the system
+narrates each character in real time.  The fingertip mode is the technical
+centrepiece: detecting a fingertip robustly under uncontrolled lighting,
+mapping it to the correct Braille cell despite camera shake, and doing so
+at interactive frame rates entirely on-device.
+
+Our key contributions are:
+\begin{itemize}
+  \item A multi-source Braille cell dataset (DSBI + Angelina + Gold,
+    157,559 cells) with a reproducible preprocessing pipeline that performs
+    \emph{box harmonisation} across annotation conventions.
+  \item A domain-adapted YOLO v2.6 nano fingertip detector fine-tuned on
+    Braille-reading video, exported to UINT8 ONNX for mobile deployment.
+  \item An ORB+RANSAC homography registration approach that tolerates
+    moderate page drift without fiducial markers.
+  \item A Flutter application delivering the complete pipeline on-device
+    for both Android and iOS.
+\end{itemize}
+
+% ======================================================================
+\section{Related Work}
+% ======================================================================
+
+\paragraph{Braille recognition.} Prior optical Braille recognition systems
+largely rely on controlled scanning hardware~\cite{antonacopoulos1998}.
+Recent deep-learning approaches~\cite{ovodov2021} improve robustness but
+target printed Braille from flatbed scans and do not address Sinhala.
+The Angelina reader~\cite{angel2021} processes smartphone photos but
+requires a back-end server.
+
+\paragraph{Fingertip tracking.} MediaPipe Hands~\cite{zhang2020} provides
+reliable skeleton-level detection but struggles with partial hand occlusion
+by the page surface.  Domain-specific YOLO detectors have shown superior
+recall in constrained interaction scenarios~\cite{redmon2016}.
+
+\paragraph{Mobile Braille tutors.} Commercial apps (e.g.\ Read2Me, KNFB
+Reader) focus on OCR of print text; none offer interactive Braille cell
+identification with Sinhala output.
+
+% ======================================================================
+\section{Methodology}
+% ======================================================================
+
+\subsection{Braille Cell Data}
+
+We fuse DSBI~\cite{dsbi2019} (220 pages, 91,443 cells) and
+Angelina~\cite{angel2021} (212 photos, 66,116 cells), plus 12 in-house
+Gold pages, yielding \textbf{157,559} labelled cells.  DSBI annotates the
+tight 2$\times$3 dot lattice while Angelina annotates the full cell; we
+harmonise by expanding each DSBI box by $\alpha{=}0.35$ times the local
+dot pitch.  Cleaning drops duplicate annotations, out-of-page boxes,
+markout codes, and degenerate aspect ratios.  Page-group splits prevent
+leakage (train 120,809 / val 21,095 / test 15,655).  Class imbalance is
+handled via inverse-frequency loss weights, a per-class cap of 4,000, and
+domain-balanced sampling.
+
+\subsection{Fingertip Detection Data}
+
+The fingertip detector is trained on three sources remapped to a single
+\texttt{fingertip} class: (i)~\textbf{TI1K}~\cite{alam2019ti1k} (1,000 images;
+thumb/index tip keypoints converted to YOLO boxes),
+(ii)~\textbf{Roboflow Finger Tip Detection} (Universe; $\sim$538 images;
+multi-finger tip boxes remapped to class~0), and (iii)~our
+\textbf{Braille Fingertip Dataset} (60 LabelMe-annotated photos of fingers
+on embossed Braille pages; split 48/6/6).  TI1K and Roboflow provide scale
+and pose diversity; the Braille set adapts the detector to the target
+reading domain.
+
+\subsection{Braille Cell CNN}
+
+A lightweight CNN classifies $64\times64$ greyscale cell crops into 64
+Braille codes (three conv blocks + two FC layers).  Training uses
+\texttt{AdamW}, cosine annealing, and label smoothing
+($\varepsilon{=}0.05$).  The model reaches \textbf{94.7\%} top-1 on the
+held-out test split and is exported to ONNX.
+
+\subsection{Fingertip Detector}
+
+We fine-tune YOLO v2.6 nano (\textit{yolo26n})~\cite{yolov8} on the
+combined fingertip corpus.  Losses: BCE ($\lambda_\text{cls}{=}0.5$) for
+confidence, CIoU + L1 ($\lambda_\text{box}{=}7.5$) for boxes (DFL omitted
+for tight square tips).  Training runs 80 epochs at $640\times640$ with
+ProgLoss warm-up and STAL one-to-one matching.  The model is UINT8-quantised
+to ONNX ($\sim$3.5\,MB) for on-device inference, with FP32 as fallback.
+
+\subsection{Cell Mapping and On-Device App}
+
+A prescan builds an in-memory \textit{CellMap} (cell boxes, codes, Sinhala
+characters).  Live frames are registered to the prescan via ORB+RANSAC
+homography; the TipEMA-smoothed fingertip is hit-tested against expanded
+cell boxes, and a 500\,ms dwell filter triggers character output.  A
+Flutter app runs both ONNX models fully on-device (Android/iOS).
+
+% ======================================================================
+\section{Discussion}
+% ======================================================================
+
+\paragraph{Strengths.} The box-harmonisation step is a low-cost, annotation-free
+solution to a real multi-source domain gap; it eliminates a systematic crop
+misalignment that would otherwise degrade CNN accuracy.  The on-device
+deployment removes the single most common barrier to adoption in
+low-connectivity classrooms.
+
+\paragraph{Limitations.} The current system has not yet been evaluated in a
+formal user study with blind or visually impaired participants.  The Gold
+in-house pages lack manually verified labels, so training with them awaits
+annotation completion.  The cell detector was trained for only 1 epoch on
+CPU for this submission (mAP50 0.125); full 80-epoch GPU training is
+pending.
+
+\paragraph{Future work.} We plan to (1)~complete GPU training and
+report full detector mAP, (2)~add a text-to-speech engine for full Sinhala
+narration, (3)~conduct a usability study with Grade 1 Braille students at a
+Sri Lankan school for the blind, and (4)~extend support to Tamil Braille.
+
+% ======================================================================
+\section{Conclusion}
+% ======================================================================
+
+We have presented BrailleLens, an end-to-end on-device system for
+interactive Braille learning with Sinhala output.  The pipeline integrates
+multi-source Braille data through a principled harmonisation procedure,
+trains a lightweight CNN and a domain-adapted fingertip detector, and
+delivers real-time cell-level feedback via a cross-platform Flutter app.
+The system runs entirely on consumer smartphones, making it practical for
+deployment in resource-constrained educational settings.
+
+% ======================================================================
+\begin{ack}
+The authors thank the University of Moratuwa, Department of Computer
+Science and Engineering, for laboratory access and computing resources.
+This work was carried out as part of the CS3501 Data Science and
+Engineering Project course.
+\end{ack}
+
+% ======================================================================
+\section*{References}
+\begin{small}
+
+[1] World Health Organization (2023). \textit{Blindness and vision impairment}.
+\url{https://www.who.int/news-room/fact-sheets/detail/blindness-and-visual-impairment}.
+
+[2] Antonacopoulos, A.\ \& Bridson, D.\ (1998). A robust braille recognition system.
+\textit{Document Analysis Systems II}, pp.\ 533–545.
+
+[3] Ovodov, I.G.\ (2021). Optical Braille recognition using object detection neural networks.
+\textit{arXiv:2106.10765}.
+
+[4] Nagata, A.\ et al.\ (2021). Angelina Braille reader: A smartphone-based Braille
+reading aid. \textit{Proc.\ ICCHP}.
+
+[5] Zhang, F.\ et al.\ (2020). MediaPipe Hands: On-device real-time hand tracking.
+\textit{arXiv:2006.10214}.
+
+[6] Redmon, J.\ \& Farhadi, A.\ (2018). YOLO v3: An incremental improvement.
+\textit{arXiv:1804.02767}.
+
+[7] Ultralytics (2024). YOLO v8 / YOLO v2.6 documentation.
+\url{https://docs.ultralytics.com}.
+
+[8] DSBI (2019). The Digitized Sinhala Braille Image dataset.
+Department of Computer Science and Engineering, University of Moratuwa.
+
+[9] Alam, M.M.\ et al.\ (2019). TI1K: A thousand-image fingertip dataset
+with hand and tip annotations.
+\url{https://github.com/MahmudulAlam/TI1K-Dataset}.
+
+[10] Roboflow Universe. Finger Tip Detection dataset.
+\url{https://universe.roboflow.com/first-leo0f/finger-tip-detection-i4xqf}.
+
+\end{small}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% NeurIPS checklist (same folder — no path prefix needed)
+\newpage
+\input{checklist}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\end{document}

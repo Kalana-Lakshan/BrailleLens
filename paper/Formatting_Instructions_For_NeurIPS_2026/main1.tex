@@ -1,0 +1,282 @@
+% All four files (main1.tex, neurips_2026.sty, neurips_2026.tex, checklist.tex)
+% must be in the SAME folder (as on Overleaf).
+\documentclass{article}
+\usepackage{neurips_2026}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage{amsfonts}
+\usepackage{nicefrac}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage{graphicx}
+
+\title{BrailleLens: Real-Time Braille Reading Assistance via Fingertip-Guided
+Cell Detection and Sinhala Transliteration on Mobile Devices}
+
+\author{%
+  Author 1 \\
+  Department of Computer Science and Engineering \\
+  University of Moratuwa \\
+  \texttt{author1@cse.mrt.ac.lk}
+  \And
+  Author 2 \\
+  Department of Computer Science and Engineering \\
+  University of Moratuwa \\
+  \texttt{author2@cse.mrt.ac.lk}
+  \And
+  Author 3 \\
+  Department of Computer Science and Engineering \\
+  University of Moratuwa \\
+  \texttt{author3@cse.mrt.ac.lk}
+  \And
+  Author 4 \\
+  Department of Computer Science and Engineering \\
+  University of Moratuwa \\
+  \texttt{author4@cse.mrt.ac.lk}
+}
+
+\begin{document}
+
+\maketitle
+
+% ---------------------------------------------------------------
+\begin{abstract}
+TODO: Write abstract here.
+\end{abstract}
+% ---------------------------------------------------------------
+
+
+% ---------------------------------------------------------------
+\section{Introduction}
+% ---------------------------------------------------------------
+
+Braille literacy is a critical pathway for the estimated 43.3 million blind people around the globe. But access to sighted Braille tutors is severely limited in low resource settings such as Sri Lanka. Further, it takes from 18 months to 3 years time approximately to learn Braille. The Existing digital aids mostly depend on expensive hardware, depend on internet connectivity and do not support interactive Braille learning.
+
+We address this gap with BrailleLens, a system with two complementary interaction modes: (1) learning mode, in which a child traces individual cells while the system narrates each character in real time and (2) assessment mode, in which the reader reads the covered character aloud and system verifies whether it is correct or not.
+
+
+% ---------------------------------------------------------------
+\section{Related Work}
+% ---------------------------------------------------------------
+
+
+\subsection*{Assistive Technology for the Blind}
+
+Assistive technologies for blind and low-vision users include screen readers such as JAWS, NVDA, and VoiceOver, as well as camera-based systems such as OrCam MyEye [9] and Microsoft Seeing AI [10]. These systems primarily target digital or printed text and general visual scenes. Braille requires a different recognition process because its information is represented through spatial arrangements of raised dots rather than conventional letterforms. This makes Braille recognition and language decoding a distinct problem.
+
+\subsection*{Braille Recognition}
+
+Li et al. introduced DSBI, a double-sided Braille scanning dataset with per-dot coordinates, and evaluated Haar-cascade-based dot detection [2]. Ovodov formulated optical Braille recognition as an object detection problem and introduced the Angelina dataset and reader application [3]. Other approaches detect Braille cells using edge features or YOLO-based ``connect-the-dots'' methods [4]. Our approach adopts whole-cell detection but separates detection from dot-pattern decoding, allowing the Sinhala Braille mapping to remain deterministic and independent of the detector. Unlike these approaches, our system targets Sinhala Braille and integrates recognition into a point-and-read interaction.
+
+\subsection*{Fingertip Tracking}
+
+Fingertip localisation enables the system to identify the cell selected by the user. Although MediaPipe Hands [6] performs well when sufficient portion of the palm is visible, performance can degrade when only the fingertip is visible in top-down Braille-reading views. Existing fingertip datasets, including TI1K [7] and Roboflow datasets, do not specifically represent Braille-reading scenes. We therefore fine-tune a fingertip detector using in-domain photographs.
+
+\subsection*{Mobile Braille Tutors}
+
+Existing Braille learning systems include optical Braille readers and dedicated-hardware tutors. The Angelina Braille Reader [3] performs page-level Braille recognition but does not provide interactive learning or cell-level spoken assessment. Hardware-based tutors, meanwhile, provide interactive and spoken feedback but require additional hardware. BrailleLens combines Braille recognition, interactive learning, and spoken assessment using a standard phone camera and embossed Braille pages.
+% ---------------------------------------------------------------
+\section{Methodology}
+% ---------------------------------------------------------------
+
+\subsection{Dataset and Preprocessing}
+
+\subsubsection{Data Sources}
+We use three datasets for Braille character detection. \textbf{DSBI} [2] contains 114 double-sided flatbed-scanned pages (approximately 220 images), with 91,443 labelled cells covering all 64 Braille codes. \textbf{Angelina} [3] contains 212 handheld photographs and 66,116 cells, covering 54 codes. \textbf{Gold dataset} is our own corpus, consisting of 12 embossed Braille pages photographed under high- and low-quality lighting conditions. Images were annotated in LabelMe using dot-number strings (e.g., \texttt{1345}). 
+
+The fingertip detector is trained on three sources remapped to a single
+\texttt{fingertip} class: (i)~\textbf{TI1K}~\cite{alam2019ti1k} (1,000 images;
+thumb/index tip keypoints converted to YOLO boxes),
+(ii)~\textbf{Roboflow Finger Tip Detection} (Universe; $\sim$538 images;
+multi-finger tip boxes remapped to class~0), and (iii)~our
+\textbf{Braille Fingertip Dataset} (60 LabelMe-annotated photos of fingers
+on embossed Braille pages; split 48/6/6).  TI1K and Roboflow provide scale
+and diversity; the Braille set adapts the detector to the target
+reading domain.
+
+\subsubsection{Box Harmonisation}
+The three Braille character datasets use different annotation formats. We parse each source with a source-specific reader and convert all annotations into a common schema containing the source, image path, page group, split, bounding box, and 6-bit Braille code. For Gold, only the high-quality images were manually annotated; annotations were transferred to their corresponding low-quality images using an ORB+RANSAC homography.
+
+\subsubsection{Data Cleaning}
+Malformed or degenerate boxes are removed and logged. All 157,559 integrated annotations were retained in the final manifest. Decorative divider rows between sections are flagged rather than removed to preserve this potential detector failure mode.
+
+\subsubsection{Train / Val / Test Splits}
+We use 70/15/15 train/validation/test splits by \emph{page group} to prevent cells from the same physical page appearing across splits, resulting in 120,809/21,095/15,655 cells. For Gold, pages 1--8 are used for training, pages 9 and 12 for validation, and pages 10--11 for testing. High- and low-quality images of the same page share a \texttt{page\_group} and remain within the same split.
+
+\subsubsection{Handling Class Imbalance}
+Braille code frequencies are highly imbalanced, particularly in Angelina, where ten codes are absent and the present-class frequency ratio reaches $6150\times$. DSBI contains all 64 codes and is less imbalanced ($26\times$). We address this using inverse-frequency class weights in the cross-entropy loss (Section~\ref{sec}), with optional sample caps for majority classes.
+
+\subsection{Braille Cell CNN}
+\label{sec:cnn}
+\label{sec:celldet}
+
+Recognising a cell is a two-stage process: a detector localises each 6-dot cell, and a classifier identifies the dot pattern within it. We detect \emph{whole cells} rather than individual dots, as classical dot-clustering and grid-fitting reaches 74--97\% end-to-end accuracy on scans but becomes unreliable under handheld perspective and scale variation, where same-cell and next-cell spacings differ by only \(\sim 10\%\) (Section~\ref{sec:e2e}). The detector is a single-class \texttt{braille\_cell} YOLO26-nano model [5], fine-tuned from COCO-pretrained weights at 1280~px input resolution, so a \(\sim 36\)~px DSBI cell remains detectable. \texttt{max\_det}=800 covers the measured maximum of 623 cells per page. The model is trained for 80 epochs with aggressive photometric and mild geometric augmentation; flips are disabled after reducing validation mAP$_{50}$ from 0.81 to 0.32 on the 12-page Gold set.
+
+
+\texttt{SimpleBrailleCNN} is a compact three-block CNN with Conv--BN--ReLU--MaxPool stages, channel widths of 16/32/64, adaptive pooling to $4\times4$, and fully connected layers of $1024\rightarrow128\rightarrow64$. With $\sim1.6\times10^5$ parameters, it is small enough for CPU inference and repeated fine-tuning without the overhead of a large backbone. The input is a mean--std normalised $64\times64$ crop, and the output is a 64-way softmax over the bit-packed dot code
+
+$$
+c=\sum_{d\in\mathcal{D}}2^{d-1},
+$$
+
+where $d\in{1,\ldots,6}$ denotes a raised dot.
+
+Training uses Adam and weighted cross-entropy in four stages: a synthetic renderer trains the initial checkpoint from scratch; DSBI fine-tuning ($10^{-4}$, 10 epochs) adapts it to real scans; mixed synthetic+DSBI+Angelina batches prevent the catastrophic forgetting observed with DSBI-only fine-tuning, where synthetic accuracy fell to $\sim$14%; and a final Gold fine-tuning stage, mixed with DSBI crops, adapts the model to Sinhala without degrading DSBI accuracy.
+
+
+\subsection{Fingertip Detection}
+
+\subsubsection{Model Architecture}
+We fine-tune YOLO v2.6 nano (yolo26n) on above mentioned three fingertip detection datasets.
+The backbone is a series of C3k2 residual blocks; the neck is an FPN/PAN with C2PSA cross-stage
+attention; the head is a decoupled Detect layer producing per-anchor class logits and regression
+offsets. We replace the standard DFL regression with direct L1 regression (loss gain λbox = 7.5)
+because fingertip boxes are tight and nearly rectangular, making distributional regression over offsets
+redundant. Loss components: binary cross-entropy (λcls = 0.5) for class confidence, CIoU for box
+quality, and L1 for coordinate regression. Further, a skincontour method which uses domain specific geometric features remains as the fallback mechanism.
+
+\subsubsection{Mobile Deployment}
+The trained FP32 model is exported to ONNX and post-training quantised to
+ UINT8. The FP32 ONNX is kept as a fallback.
+ Both assets are bundled in the Flutter app and loaded via onnxruntime.
+
+\subsection{Cell Mapping and Fingertip--Cell Fusion}
+
+\subsubsection{Prescan and CellMap Construction}
+Before the learning session begins, the app captures a still frame and runs the cell CNN over the full page, constructing a CellMap: an in-memory list of Cell objects, each storing page coordinates, Braille code, and decoded Sinhala character.
+
+\subsubsection{Homography Registration}
+To cope with camera movement during the session, each live frame is registered to the prescan reference using ORB feature matching followed by RANSAC homography estimation (FrameRegistration). The live fingertip coordinate is projected through the inverse homography into prescan-frame coordinates.
+
+
+\subsubsection{Hit-Testing}
+In the current implementation, the first image which contains only Braille characters will directed to the Braille character identification building the cell map. Next image with fingertip is directed for fingertip detection. The transformed fingertip position is tested against all cell bounding boxes expanded by a 10 px margin.
+
+\subsection{Flutter Application}
+TODO
+
+
+% ---------------------------------------------------------------
+\section{Results}
+% ---------------------------------------------------------------
+
+
+\subsection*{Cell Classifier Accuracy}
+
+Table~\ref{tab:cnn} summarises the cell classification results. The synthetic-only model achieves 100\% accuracy on synthetic data but only 51.2\% on the 71{,}250 real DSBI test cells, indicating a substantial synthetic-to-real domain gap. Fine-tuning on DSBI training cells with per-crop normalisation increases accuracy to 99.24\% (recto: 99.33\%; verso: 99.16\%). On the Angelina validation set, the mixed-domain checkpoint achieves 99.56\% (13{,}228/13{,}286).
+
+On the held-out Gold test pages, the mixed-domain checkpoint achieves 67.74\%. Fine-tuning on Gold training pages together with live DSBI crops increases this to 95.93\%, while maintaining 99.4\% accuracy on the DSBI subset. The results show that domain-specific fine-tuning is important for reliable performance on real-world photographs.
+
+\begin{table}[t]
+    \centering
+    \caption{SimpleBrailleCNN cell accuracy (ground-truth crops).}
+    \label{tab:cnn}
+    \begin{tabular}{lcc}
+        \toprule
+        Checkpoint / protocol & Domain & Acc.\ (\%) \\
+        \midrule
+        Synthetic only, DSBI test (zero-shot) & Scan & 51.2 \\
+        DSBI fine-tuned + per-crop normalised, DSBI test & Scan & \textbf{99.24} \\
+        Mixed-domain, Angelina validation & Phone & 99.56 \\
+        Gold baseline (mixed-domain checkpoint), Gold test & Gold & 67.74 \\
+        Gold fine-tuned, Gold test pages 10--11 & Gold & \textbf{95.93} \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\subsection{Fingertip Detector Performance}
+
+We train YOLO26n from base weights in three stages
+(Table~\ref{tab:tip-stages}).  Stage~1 pre-trains on TI1K + Roboflow
+(50 epochs) for generic fingertip detection.  Stage~2 fine-tunes those
+weights on the Braille-only set (16 epochs) and yields near-perfect
+scores, but they are not trustworthy: the 60-image set causes
+overfitting to specific hands/lighting/pages, mAP$\approx$1.0 on only
+6~val~/~6~test images is inflated, and the model forgets TI1K/Roboflow
+behaviour.  Stage~3 retrains from \texttt{yolo26n} on all three sources
+together (30 epochs) and is the deployed detector---slightly lower
+headline mAP than Stage~2, but trained on a broader corpus without
+small-set inflation.
+
+\begin{table}[h]
+  \caption{Fingertip detector training stages and validation metrics.
+  Stage~3 is used in the app.}
+  \label{tab:tip-stages}
+  \centering
+  \begin{tabular}{llccc}
+    \toprule
+    Stage & Data / epochs & Prec. & Recall & mAP@50 \\
+    \midrule
+    1 & TI1K+Roboflow / 50 & 0.938 & 0.871 & 0.943 \\
+    2 & Braille only / 16 & 0.985 & 1.000 & 0.995 \\
+    3 & All three / 30 & 0.967 & 0.884 & 0.933 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+
+\subsection{Sound}
+TODO
+
+
+% ---------------------------------------------------------------
+\section{Discussion}
+% ---------------------------------------------------------------
+
+\subsection{Strengths}
+Multi-source Braille fusion with box harmonisation removes a systematic
+DSBI--Angelina size mismatch without re-annotation.  Combined fingertip
+training (TI1K + Roboflow + Braille) avoids the overfitting and forgetting
+seen when fine-tuning on 60 Braille images alone.  ORB+RANSAC registration
+keeps the CellMap valid under moderate camera/page drift, and the Flutter
+ONNX pipeline runs fully on-device---useful for low-connectivity classrooms.
+
+\subsection{Limitations}
+No formal user study with blind or visually impaired learners has been
+completed yet. The Braille fingertip set is small (60 images), so
+Braille-only metrics remain fragile even when headline scores look high.
+Gold pages annotation needs to be verified with a inter annotator agreement.  End-to-end accuracy on real classrooms is not
+yet fully quantified beyond component metrics.
+
+
+\subsection{Future Work}
+We plan to (1)~run a usability study with Braille students,
+(2)~expand the Braille fingertip corpus and re-evaluate Stage~3 under
+held-out hands/lighting,(2)~expand the Gold dataset and a implement the inter annotator agreement part for that
+held-out hands/lighting, (4)~improve the ondevice Sinhala listening capability.
+
+
+% ---------------------------------------------------------------
+\section{Conclusion}
+% ---------------------------------------------------------------
+
+TODO: Write conclusion here.
+
+
+% ---------------------------------------------------------------
+\begin{ack}
+TODO: Write acknowledgements here.
+\end{ack}
+% ---------------------------------------------------------------
+
+
+% ---------------------------------------------------------------
+\section*{References}
+% ---------------------------------------------------------------
+
+\begin{small}
+[1] TODO \\
+[2] TODO \\
+[3] TODO \\
+\end{small}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\newpage
+\input{checklist}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\end{document}
