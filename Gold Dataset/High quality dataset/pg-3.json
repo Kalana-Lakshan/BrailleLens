@@ -255,24 +255,6 @@
       "mask": null
     },
     {
-      "label": "0",
-      "points": [
-        [
-          335.16666666666663,
-          120.0
-        ],
-        [
-          357.16666666666663,
-          149.0
-        ]
-      ],
-      "group_id": null,
-      "description": "",
-      "shape_type": "rectangle",
-      "flags": {},
-      "mask": null
-    },
-    {
       "label": "134",
       "points": [
         [
@@ -767,24 +749,6 @@
         ],
         [
           576.8333333333333,
-          280.3333333333333
-        ]
-      ],
-      "group_id": null,
-      "description": "",
-      "shape_type": "rectangle",
-      "flags": {},
-      "mask": null
-    },
-    {
-      "label": "0",
-      "points": [
-        [
-          580.8333333333333,
-          252.0
-        ],
-        [
-          602.8333333333333,
           280.3333333333333
         ]
       ],
@@ -2703,24 +2667,6 @@
       "mask": null
     },
     {
-      "label": "0",
-      "points": [
-        [
-          404.83333333333326,
-          744.3333333333334
-        ],
-        [
-          426.83333333333326,
-          772.6666666666666
-        ]
-      ],
-      "group_id": null,
-      "description": "",
-      "shape_type": "rectangle",
-      "flags": {},
-      "mask": null
-    },
-    {
       "label": "1",
       "points": [
         [
@@ -3531,24 +3477,6 @@
       "mask": null
     },
     {
-      "label": "0",
-      "points": [
-        [
-          377.16666666666663,
-          1001.0
-        ],
-        [
-          397.5,
-          1030.6666666666667
-        ]
-      ],
-      "group_id": null,
-      "description": "",
-      "shape_type": "rectangle",
-      "flags": {},
-      "mask": null
-    },
-    {
       "label": "1",
       "points": [
         [
@@ -3648,24 +3576,6 @@
         [
           574.1666666666666,
           1024.6666666666667
-        ]
-      ],
-      "group_id": null,
-      "description": "",
-      "shape_type": "rectangle",
-      "flags": {},
-      "mask": null
-    },
-    {
-      "label": "0",
-      "points": [
-        [
-          578.1666666666666,
-          994.3333333333333
-        ],
-        [
-          600.1666666666666,
-          1025.3333333333333
         ]
       ],
       "group_id": null,

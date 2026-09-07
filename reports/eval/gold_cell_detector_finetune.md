@@ -327,3 +327,38 @@ Validated across all 12 gold pages, both variants: F1 0.7509 -> 0.7520, a
 real but negligible effect, well below the noise floor of every other result
 in this document. Not adopted -- not worth the added complexity for this
 little gain.
+
+## Settled: train stays at 12 images (8 high + low-quality 1-4), not 16
+
+Once all 12 low-quality pages were annotated, retraining on the full 16-image
+train set (8 high + low 1-8, same proven hyperparameters) was attempted
+**three separate times** -- stronger perspective/scale (twice, different step
+sizes) and, after suspecting annotation contamination, again with all
+zero/blank-labeled shapes removed from the gold set first. All three
+regressed identically: best val result at epoch 2, no improvement for the
+rest of training, held-out test mAP50 dropping to ~0.60 (vs. 0.80 for the
+12-image checkpoint on the same test set).
+
+Checked for an actual data bug in pages 5-8's low-quality annotations before
+concluding this is just fine-tune fragility: image/JSON dimension match,
+box-size distributions all normal, no outlier boxes -- clean by every check
+run. So the dividing line isn't a data quality issue, and it isn't
+"high-quality vs. low-quality" either (low-quality pages 1-4 are exactly
+what took mAP50 0.65 -> 0.80 in the first place, so dropping all low-quality
+data would be a step backward, not a fix). It's specifically **going from
+12 to 16 training images** that destabilizes this fine-tune, independent of
+which hyperparameters or which 4 additional pages.
+
+**Decision: keep training at the 12-image config indefinitely** (`--train
+1 2 3 4 5 6 7 8`, low-quality auto-added only for pages 1-4, i.e.
+`cell_detect/finetune_gold.py`'s low-quality auto-detection scoped down from
+its default of "every annotated low-quality page" for this specific split).
+Val/test keep the full low-quality extension from earlier (pages 9,10,11,12
+each get their low-quality variant too) -- that change was never implicated
+in any regression, since it only affects evaluation, not what the model
+trains on, and it's what gave us the more reliable 24-image-informed 0.80
+baseline in the first place. Untested: whether a smaller nudge (e.g. one
+extra low-quality page at a time, 13 -> 14 -> 15 -> 16 images) would find a
+stable point between 12 and 16 -- not pursued, since the 12-image checkpoint
+already performs well and further Colab rounds have a demonstrated track
+record of not paying off on this dataset.

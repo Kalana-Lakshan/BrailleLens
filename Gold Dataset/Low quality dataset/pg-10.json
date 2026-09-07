@@ -921,24 +921,6 @@
       "mask": null
     },
     {
-      "label": "0",
-      "points": [
-        [
-          273.80804953560374,
-          234.42724458204327
-        ],
-        [
-          298.5758513931889,
-          268.4829721362228
-        ]
-      ],
-      "group_id": null,
-      "description": "",
-      "shape_type": "rectangle",
-      "flags": {},
-      "mask": null
-    },
-    {
       "label": "123",
       "points": [
         [

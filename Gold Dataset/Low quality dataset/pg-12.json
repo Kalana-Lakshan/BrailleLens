@@ -1443,24 +1443,6 @@
       "mask": null
     },
     {
-      "label": "0",
-      "points": [
-        [
-          245.0,
-          369.18918918918916
-        ],
-        [
-          269.86486486486484,
-          402.16216216216213
-        ]
-      ],
-      "group_id": null,
-      "description": "",
-      "shape_type": "rectangle",
-      "flags": {},
-      "mask": null
-    },
-    {
       "label": "2345",
       "points": [
         [
@@ -1560,24 +1542,6 @@
         [
           437.1269487750558,
           393.1180400890869
-        ]
-      ],
-      "group_id": null,
-      "description": "",
-      "shape_type": "rectangle",
-      "flags": {},
-      "mask": null
-    },
-    {
-      "label": "0",
-      "points": [
-        [
-          342.9175946547885,
-          367.50556792873056
-        ],
-        [
-          364.2984409799555,
-          396.2360801781738
         ]
       ],
       "group_id": null,
