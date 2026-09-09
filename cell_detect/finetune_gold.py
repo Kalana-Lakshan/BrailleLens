@@ -161,6 +161,14 @@ def main() -> None:
                          help="Failure analysis in reports/eval/gold_cell_detector_finetune.md found missed cells run ~6-7%% smaller than detected ones (perspective foreshortening near a book's spine) -- worth trying higher than the current default to see if it closes more of that gap")
     parser.add_argument("--no-low-quality", action="store_true",
                          help="Don't add low-quality-lighting variants of any split's pages as extra images, even if labelled")
+    parser.add_argument("--low-quality-pages", type=int, nargs="+", default=None,
+                         help="Which low-quality pages to use, overriding auto-detection of every labelled one. "
+                              "Reports/eval/gold_cell_detector_finetune.md's 'Settled' section: going from 12 to 16 "
+                              "training images (all 8 low-quality train pages instead of just 1-4) regressed "
+                              "training three separate times, for reasons unrelated to data quality (checked) or "
+                              "which 4 pages (checked) -- just the image count. Default reproduces that finding: "
+                              "only pages 1-4 (the proven set) get added to train; val/test still get every "
+                              "low-quality page available, since that side was never implicated.")
     parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--amp", action=argparse.BooleanOptionalAction, default=False,
                          help="Automatic mixed precision -- off by default, it's a CUDA feature and unreliable on CPU")
@@ -172,9 +180,22 @@ def main() -> None:
 
     low_quality_pages = []
     if not args.no_low_quality:
-        low_quality_pages = sorted(
+        available = sorted(
             int(p.stem.split("-")[1]) for p in LOW_GOLD_DIR.glob("pg-*.json")
         ) if LOW_GOLD_DIR.is_dir() else []
+        if args.low_quality_pages is not None:
+            low_quality_pages = args.low_quality_pages
+        else:
+            # Safe default (see --low-quality-pages's help): every available
+            # low-quality page for val/test, but only the proven pages 1-4
+            # for train, even if more are labelled and --train-pages covers
+            # them -- adding low-quality 5-8 to train regressed three
+            # separate times.
+            SAFE_TRAIN_LOW_PAGES = {1, 2, 3, 4}
+            val_test_pages = set(args.val_page) | set(args.test_page)
+            low_quality_pages = sorted(
+                n for n in available if n in val_test_pages or n in SAFE_TRAIN_LOW_PAGES
+            )
 
     yaml_path, low_used = build_dataset(args.train_pages, args.val_page, args.test_page, DATASET_ROOT, low_quality_pages)
 
