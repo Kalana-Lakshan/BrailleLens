@@ -1,6 +1,4 @@
 import 'dart:math';
-import 'dart:typed_data';
-import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -8,6 +6,7 @@ import 'package:image/image.dart' as img;
 import 'package:onnxruntime/onnxruntime.dart';
 
 import '../config/app_config.dart';
+import '../utils/image_decode.dart';
 
 /// YOLO26n fingertip detector — stage 2 only (where the finger is).
 /// Covered character comes from prescan hit-test, not this model.
@@ -60,7 +59,7 @@ class FingertipOnnxService {
     final session = _session;
     if (session == null) return null;
 
-    final decoded = img.decodeImage(jpegBytes);
+    final decoded = decodeUpright(jpegBytes);
     if (decoded == null) return null;
 
     final origW = decoded.width;
@@ -83,9 +82,8 @@ class FingertipOnnxService {
       return null;
     }
 
-    dynamic outValue = outputs['output0']?.value;
-    outValue ??= outputs.values.first?.value;
-    for (final o in outputs.values) {
+    final dynamic outValue = outputs[0]?.value;
+    for (final o in outputs) {
       o?.release();
     }
 

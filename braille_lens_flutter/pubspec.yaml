@@ -32,9 +32,12 @@ flutter:
 
   assets:
     - assets/audio/
-    - assets/models/braille_model.onnx
+    - assets/models/braille_cnn.onnx
+    - assets/models/braille_labels.json
     - assets/models/fingertip_braille_yolo26n.onnx
     - assets/models/fingertip_braille_yolo26n_mobile.onnx
     - assets/models/fingertip_braille_yolo26n_meta.json
-    - assets/labels.txt
+    - assets/models/braille_cell_yolo26n.onnx
+    - assets/models/braille_cell_yolo26n_mobile.onnx
+    - assets/models/braille_cell_yolo26n_meta.json
     - assets/samples/

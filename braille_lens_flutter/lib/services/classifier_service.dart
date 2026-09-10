@@ -1,28 +1,46 @@
+import 'dart:convert';
 import 'dart:math';
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:onnxruntime/onnxruntime.dart';
 import 'package:image/image.dart' as img;
 
 import '../config/app_config.dart';
+import '../utils/image_decode.dart';
+
+/// One row from `assets/models/braille_labels.json`.
+class BrailleLabel {
+  final int code; // 6-dot cell code == CNN class index (0..63)
+  final String si; // Sinhala grapheme / base form
+  final String en; // English Grade-1 letter for the same dot pattern (reference only)
+  final String dots; // e.g. "dots 1, 3"
+
+  const BrailleLabel(this.code, this.si, this.en, this.dots);
+}
 
 class PredictionResult {
-  final String character;
+  final String character; // Sinhala grapheme (or '#<code>' if unmapped)
   final double confidence;
-  final int classIndex;
+  final int classIndex; // == 6-dot cell code
+  final BrailleLabel? label;
 
   PredictionResult({
     required this.character,
     required this.confidence,
     required this.classIndex,
+    this.label,
   });
+
+  String get dots => label?.dots ?? '(code $classIndex)';
 }
 
-/// 26-class Braille letter CNN (`braille_model.onnx`, 28×28 grayscale).
+/// 64-class Sinhala Braille cell CNN (`braille_cnn.onnx`, 64×64 grayscale,
+/// class index == the 6-dot cell code). See [AppConfig.brailleCnnAsset].
 class ClassifierService {
+  static const int _imgSize = 64;
+
   OrtSession? _session;
-  List<String> _labels = [];
+  final Map<int, BrailleLabel> _labels = {};
   bool _isInitialized = false;
   String? _loadedAsset;
   String? _lastError;
@@ -31,24 +49,49 @@ class ClassifierService {
   String? get loadedAsset => _loadedAsset;
   String? get lastError => _lastError;
 
+  /// Every loaded {code, si, en, dots} row, in no particular order — e.g.
+  /// for Testing Mode to draw a random target character from.
+  List<BrailleLabel> get labels => _labels.values.toList(growable: false);
+
   Future<bool> initialize() async {
     if (_isInitialized) return true;
 
+    // Split into two stages, each logged separately: an asset-not-found
+    // error (bad path / not listed in pubspec.yaml) and an ONNX session
+    // creation error (corrupt file, unsupported IR version, etc.) look very
+    // different in $e but were previously caught together — split them so
+    // the debug console tells you which one actually happened.
+    Uint8List modelBytes;
+    try {
+      final data = await rootBundle.load(AppConfig.brailleCnnAsset);
+      modelBytes = data.buffer.asUint8List();
+    } catch (e) {
+      _lastError = e.toString();
+      _isInitialized = false;
+      debugPrint('Failed to load asset: $e');
+      debugPrint(
+          '[Classifier] asset not found at "${AppConfig.brailleCnnAsset}" — '
+          'check the path matches assets/models/ and is listed under pubspec.yaml\'s flutter/assets:');
+      return false;
+    }
+
     try {
       OrtEnv.instance.init();
-      final modelBytes = await rootBundle.load(AppConfig.brailleCnnAsset);
       final sessionOptions = OrtSessionOptions();
-      _session = OrtSession.fromBuffer(
-        modelBytes.buffer.asUint8List(),
-        sessionOptions,
-      );
+      _session = OrtSession.fromBuffer(modelBytes, sessionOptions);
 
-      final labelsRaw = await rootBundle.loadString('assets/labels.txt');
-      _labels = labelsRaw
-          .split('\n')
-          .map((e) => e.trim())
-          .where((e) => e.isNotEmpty)
-          .toList();
+      final labelsRaw = await rootBundle.loadString(AppConfig.brailleLabelsAsset);
+      _labels.clear();
+      for (final e in (jsonDecode(labelsRaw) as List)) {
+        final m = e as Map<String, dynamic>;
+        final code = m['code'] as int;
+        _labels[code] = BrailleLabel(
+          code,
+          (m['si'] ?? '') as String,
+          (m['en'] ?? '') as String,
+          (m['dots'] ?? '') as String,
+        );
+      }
 
       _loadedAsset = AppConfig.brailleCnnAsset;
       _lastError = null;
@@ -58,7 +101,10 @@ class ClassifierService {
     } catch (e) {
       _lastError = e.toString();
       _isInitialized = false;
-      debugPrint('[Classifier] failed to load ${AppConfig.brailleCnnAsset}: $e');
+      debugPrint('Failed to load asset: $e');
+      debugPrint('[Classifier] asset bytes loaded OK but ONNX session/tensor '
+          'init failed — likely a corrupt file or unsupported IR version, '
+          'not a missing-asset problem: $e');
       return false;
     }
   }
@@ -71,14 +117,16 @@ class ClassifierService {
       }
     }
 
-    final originalImage = img.decodeImage(imageBytes);
+    final originalImage = decodeUpright(imageBytes);
     if (originalImage == null) {
       throw Exception('Failed to decode image');
     }
     return predictCrop(originalImage);
   }
 
-  /// Classify a single cell crop (28×28 grayscale inside the model).
+  /// Classify a single cell crop (64×64 grayscale inside the model,
+  /// per-crop brightness/contrast standardised — mirrors
+  /// `braille_cnn/normalize.py::normalize_crop` exactly).
   Future<PredictionResult> predictCrop(img.Image crop) async {
     if (!_isInitialized || _session == null) {
       final ok = await initialize();
@@ -87,26 +135,59 @@ class ClassifierService {
       }
     }
 
-    final resized = img.copyResize(crop, width: 28, height: 28);
+    final resized = img.copyResize(
+      crop,
+      width: _imgSize,
+      height: _imgSize,
+      interpolation: img.Interpolation.cubic,
+    );
     final grayscale = img.grayscale(resized);
 
-    final inputFloatList = Float32List(1 * 1 * 28 * 28);
-    var index = 0;
-    for (var y = 0; y < 28; y++) {
-      for (var x = 0; x < 28; x++) {
-        final pixel = grayscale.getPixel(x, y);
-        final r = pixel.r / 255.0;
-        inputFloatList[index++] = (r - 0.5) / 0.5;
+    final px = Float32List(_imgSize * _imgSize);
+    var i = 0;
+    for (var y = 0; y < _imgSize; y++) {
+      for (var x = 0; x < _imgSize; x++) {
+        px[i++] = grayscale.getPixel(x, y).r.toDouble();
       }
     }
 
-    return _runInference(inputFloatList);
+    return _runInference(_normalizeCrop(px));
+  }
+
+  /// Subtract the crop's own mean, divide by its own std (floored so a
+  /// blank cell's sensor noise isn't amplified), rescale, recentre at 0.5,
+  /// clip to [0, 1] — same algorithm as `braille_cnn/normalize.py`.
+  Float32List _normalizeCrop(
+    Float32List px, {
+    double stdFloor = 10.0,
+    double spanStd = 4.0,
+  }) {
+    var sum = 0.0;
+    for (final v in px) {
+      sum += v;
+    }
+    final mean = sum / px.length;
+
+    var sq = 0.0;
+    for (final v in px) {
+      final d = v - mean;
+      sq += d * d;
+    }
+    final std = sqrt(sq / px.length);
+    final scale = max(std, stdFloor) * spanStd;
+
+    final out = Float32List(px.length);
+    for (var i = 0; i < px.length; i++) {
+      final v = (px[i] - mean) / scale + 0.5;
+      out[i] = v < 0.0 ? 0.0 : (v > 1.0 ? 1.0 : v);
+    }
+    return out;
   }
 
   Future<PredictionResult> _runInference(Float32List inputFloatList) async {
     final inputTensor = OrtValueTensor.createTensorWithDataList(
       inputFloatList,
-      [1, 1, 28, 28],
+      [1, 1, _imgSize, _imgSize],
     );
 
     final runOptions = OrtRunOptions();
@@ -122,17 +203,9 @@ class ClassifierService {
       throw Exception('CNN inference returned empty output');
     }
 
-    dynamic outValue;
-    if (outputs is Map) {
-      outValue = outputs['output']?.value ?? outputs.values.first?.value;
-      for (final o in outputs.values) {
-        o?.release();
-      }
-    } else {
-      outValue = outputs[0]?.value ?? outputs[0];
-      for (final o in outputs) {
-        o?.release();
-      }
+    final dynamic outValue = outputs[0]?.value;
+    for (final o in outputs) {
+      o?.release();
     }
 
     final logits = _flattenLogits(outValue);
@@ -154,13 +227,15 @@ class ClassifierService {
       }
     }
 
+    final label = _labels[maxIndex];
     final predictedChar =
-        (maxIndex < _labels.length) ? _labels[maxIndex] : '?';
+        (label?.si.trim().isNotEmpty ?? false) ? label!.si : '#$maxIndex';
 
     return PredictionResult(
       character: predictedChar,
       confidence: maxProb,
       classIndex: maxIndex,
+      label: label,
     );
   }
 
@@ -179,5 +254,6 @@ class ClassifierService {
     _session?.release();
     _session = null;
     _isInitialized = false;
+    _labels.clear();
   }
 }

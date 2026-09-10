@@ -1,24 +1,35 @@
-import 'dart:typed_data';
-
 import 'package:flutter/foundation.dart';
 import 'package:image/image.dart' as img;
 
 import '../models/braille_cell.dart';
+import '../utils/image_decode.dart';
+import 'cell_detector_service.dart';
 import 'classifier_service.dart';
-import 'dot_cell_detector.dart';
 
-/// Stage-1 on-device prescan: dot grid + `braille_model.onnx` per cell.
+/// Stage-1 on-device prescan: multi-cell YOLO26n detector
+/// (`braille_cell_yolo26n*.onnx`) finds every cell box, then
+/// `braille_cnn.onnx` classifies each crop.
 class PrescanOnnxService {
   final ClassifierService _cnn;
+  final CellDetectorService _detector;
 
-  PrescanOnnxService({ClassifierService? classifier})
-      : _cnn = classifier ?? ClassifierService();
+  PrescanOnnxService({ClassifierService? classifier, CellDetectorService? detector})
+      : _cnn = classifier ?? ClassifierService(),
+        _detector = detector ?? CellDetectorService();
 
-  bool get isReady => _cnn.isInitialized;
+  bool get isReady => _cnn.isInitialized && _detector.isReady;
 
-  Future<bool> initialize() => _cnn.initialize();
+  /// Exposes the loaded classifier (e.g. its `.labels`) without loading a
+  /// second copy of the model elsewhere.
+  ClassifierService get classifier => _cnn;
 
-  /// Build [CellMap] from a full-page JPEG using bundled CNN.
+  Future<bool> initialize() async {
+    final results = await Future.wait([_cnn.initialize(), _detector.initialize()]);
+    return results.every((ok) => ok);
+  }
+
+  /// Build [CellMap] from a full-page JPEG: detect every cell box, classify
+  /// each one, and drop background/space tokens from the result.
   Future<CellMap> prescanPage(
     Uint8List jpegBytes, {
     void Function(int done, int total)? onProgress,
@@ -26,31 +37,43 @@ class PrescanOnnxService {
     if (!_cnn.isInitialized) {
       final ok = await _cnn.initialize();
       if (!ok) {
-        throw Exception(_cnn.lastError ?? 'braille_model.onnx failed to load');
+        throw Exception(_cnn.lastError ?? 'braille_cnn.onnx failed to load');
+      }
+    }
+    if (!_detector.isReady) {
+      final ok = await _detector.initialize();
+      if (!ok) {
+        throw Exception(_detector.lastError ?? 'braille_cell_yolo26n.onnx failed to load');
       }
     }
 
-    final decoded = img.decodeImage(jpegBytes);
+    final decoded = decodeUpright(jpegBytes);
     if (decoded == null) {
       throw Exception('Could not decode page image');
     }
 
-    final det = DotCellDetector.detectCellBoxes(jpegBytes);
-    if (det.boxes.isEmpty) {
+    final detections = await _detector.detect(jpegBytes);
+    if (detections.isEmpty) {
+      // The models loaded fine and this ran — it just found nothing to
+      // classify. Log that distinctly from a load/init failure so it's
+      // obvious this is a framing/lighting problem, not a broken model.
+      debugPrint('Prescan returned 0 detections '
+          '(page ${decoded.width}x${decoded.height}px, detector found no cell boxes)');
       throw Exception(
         'No Braille cells found — use even lighting and fill the frame with the page',
       );
     }
 
     final cells = <BrailleCell>[];
-    final total = det.boxes.length;
+    final total = detections.length;
+    var droppedBackground = 0;
 
     for (var i = 0; i < total; i++) {
-      final b = det.boxes[i];
-      final x0 = b.x0.round().clamp(0, decoded.width - 1);
-      final y0 = b.y0.round().clamp(0, decoded.height - 1);
-      final x1 = b.x1.round().clamp(x0 + 1, decoded.width);
-      final y1 = b.y1.round().clamp(y0 + 1, decoded.height);
+      final b = detections[i].box;
+      final x0 = b.left.round().clamp(0, decoded.width - 1);
+      final y0 = b.top.round().clamp(0, decoded.height - 1);
+      final x1 = b.right.round().clamp(x0 + 1, decoded.width);
+      final y1 = b.bottom.round().clamp(y0 + 1, decoded.height);
 
       final crop = img.copyCrop(
         decoded,
@@ -61,21 +84,36 @@ class PrescanOnnxService {
       );
 
       try {
+        // The CNN's class index IS the 6-dot cell code -- no label
+        // round-tripping through an English letter (see AppConfig.brailleCnnAsset).
         final pred = await _cnn.predictCrop(crop);
-        final ch = pred.character.toUpperCase();
+
+        // Exclude background/space tokens from the primary detection list:
+        // code 0 is the space/blank cell, '#<code>' is a real dot pattern
+        // just outside the curated label chart -- neither is a nameable
+        // character worth surfacing to the learner.
+        final isBackground = pred.classIndex == 0 ||
+            pred.character.trim().isEmpty ||
+            pred.character.startsWith('#');
+        if (isBackground) {
+          droppedBackground++;
+          onProgress?.call(i + 1, total);
+          continue;
+        }
+
         cells.add(
           BrailleCell(
-            id: i,
+            id: cells.length,
             x0: x0.toDouble(),
             y0: y0.toDouble(),
             x1: x1.toDouble(),
             y1: y1.toDouble(),
-            char: ch,
-            pattern: '',
-            code: pred.classIndex + 1,
+            char: pred.character,
+            pattern: pred.dots,
+            code: pred.classIndex,
             conf: pred.confidence,
             line: 0,
-            col: i,
+            col: cells.length,
           ),
         );
       } catch (e) {
@@ -85,16 +123,23 @@ class PrescanOnnxService {
     }
 
     if (cells.isEmpty) {
+      debugPrint('Prescan returned 0 detections '
+          '($total box(es) found, $droppedBackground background/unmapped, '
+          'rest failed to classify)');
       throw Exception('CNN could not classify any cells');
     }
 
-    debugPrint('[PrescanOnnx] ${cells.length} cells classified on-device');
+    debugPrint('[PrescanOnnx] $total box(es) -> ${cells.length} cell(s) kept '
+        '(dropped $droppedBackground background/space)');
     return CellMap(
       cells: cells,
-      imageWidth: det.width,
-      imageHeight: det.height,
+      imageWidth: decoded.width,
+      imageHeight: decoded.height,
     );
   }
 
-  void dispose() => _cnn.dispose();
+  void dispose() {
+    _cnn.dispose();
+    _detector.dispose();
+  }
 }

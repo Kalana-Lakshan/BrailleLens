@@ -1,9 +1,7 @@
 import 'dart:typed_data';
-import 'dart:ui' as ui;
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
-import 'package:image/image.dart' as img;
 
 import '../models/braille_cell.dart';
 import '../services/audio_service.dart';
@@ -13,8 +11,9 @@ import '../services/coordinate_mapper.dart';
 import '../services/fingertip_onnx_service.dart';
 import '../services/prescan_bridge.dart';
 import '../theme/app_theme.dart';
-import '../utils/image_fit.dart';
-import '../widgets/cell_overlay_painter.dart';
+import '../utils/image_decode.dart';
+import '../widgets/frozen_image_view.dart';
+import '../widgets/tap_fingertip_dialog.dart';
 
 enum _LearningStage { prescan, fingerResult }
 
@@ -64,7 +63,7 @@ class _LearningScreenState extends State<LearningScreen> {
     setState(() {
       _cameraReady = true;
       _statusLine = [
-        cnnReady ? 'CNN: braille_model.onnx' : 'CNN failed',
+        cnnReady ? 'CNN: braille_cnn.onnx' : 'CNN failed',
         tipReady
             ? 'YOLO: ${_fingertipOnnx.loadedAsset?.split('/').last}'
             : 'YOLO failed — tap fingertip',
@@ -89,7 +88,7 @@ class _LearningScreenState extends State<LearningScreen> {
     if (_busy || !_cameraReady) return;
     setState(() {
       _busy = true;
-      _statusLine = 'Scanning page on device…';
+      _statusLine = 'Scanning the page for Braille cells…';
     });
 
     final jpeg = await _camera.captureJpeg();
@@ -112,7 +111,7 @@ class _LearningScreenState extends State<LearningScreen> {
       if (map.cells.isEmpty) {
         throw Exception('No cells detected');
       }
-      final decoded = img.decodeImage(jpeg);
+      final decoded = decodeUpright(jpeg);
       final w = decoded?.width ?? map.imageWidth;
       final h = decoded?.height ?? map.imageHeight;
       final fixed = CellMap(cells: map.cells, imageWidth: w, imageHeight: h);
@@ -185,13 +184,19 @@ class _LearningScreenState extends State<LearningScreen> {
       _covered = result;
       _busy = false;
       _statusLine = result.hasHit
-          ? 'Cell #${result.cell!.id} under finger'
+          ? '${result.cell!.detectedCellLabel} detected under finger'
           : 'No cell under fingertip — rescan page or adjust finger';
     });
 
     if (result.hasHit) {
       final ch = result.headline;
-      await widget.audioService.speak('Character $ch');
+      if (ch == '—') {
+        await widget.audioService.speak(
+          'The detected cell is an indicator, not a standalone character.',
+        );
+      } else {
+        await widget.audioService.speakSinhalaCharacter(ch);
+      }
     } else {
       await widget.audioService.speak('No character found under your finger.');
     }
@@ -199,13 +204,13 @@ class _LearningScreenState extends State<LearningScreen> {
 
   /// Fallback when ONNX fingertip model is missing: user taps contact point.
   Future<FingertipDetection?> _promptTapFingertip(Uint8List jpeg) async {
-    final decoded = img.decodeImage(jpeg);
+    final decoded = decodeUpright(jpeg);
     if (decoded == null) return null;
 
     final tap = await showDialog<Offset>(
       context: context,
       barrierDismissible: false,
-      builder: (ctx) => _TapFingertipDialog(jpeg: jpeg),
+      builder: (ctx) => TapFingertipDialog(jpeg: jpeg),
     );
     if (tap == null) return null;
 
@@ -285,10 +290,38 @@ class _LearningScreenState extends State<LearningScreen> {
           fit: StackFit.expand,
           children: [
             _buildImageArea(),
+            _buildFramingHint(),
             _buildTopBar(),
             _buildBottomPanel(),
-            if (_busy) const ColoredBox(color: Color(0x88000000), child: Center(child: CircularProgressIndicator(color: AppTheme.primaryYellow))),
+            if (_busy) _buildBusyIndicator(),
           ],
+        ),
+      ),
+    );
+  }
+
+  /// Small, non-obscuring "working" badge — deliberately does *not* dim the
+  /// rest of the screen (a full-screen translucent veil made the camera
+  /// preview, status text, and buttons hard to read while scanning).
+  /// [_statusLine] already carries the actual progress text; this is just a
+  /// small spinner so it's clear something is happening.
+  Widget _buildBusyIndicator() {
+    return IgnorePointer(
+      child: Center(
+        child: Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.55),
+            shape: BoxShape.circle,
+          ),
+          child: const SizedBox(
+            width: 22,
+            height: 22,
+            child: CircularProgressIndicator(
+              strokeWidth: 2.5,
+              color: AppTheme.primaryYellow,
+            ),
+          ),
         ),
       ),
     );
@@ -296,7 +329,7 @@ class _LearningScreenState extends State<LearningScreen> {
 
   Widget _buildImageArea() {
     if (_stage == _LearningStage.fingerResult && _fingerJpeg != null) {
-      return _FrozenImageView(
+      return FrozenImageView(
         jpeg: _fingerJpeg!,
         cellMap: _mappedCellsForFingerFrame(),
         highlighted: _covered?.cell,
@@ -304,7 +337,7 @@ class _LearningScreenState extends State<LearningScreen> {
       );
     }
     if (_prescanJpeg != null && _cellMap != null) {
-      return _FrozenImageView(
+      return FrozenImageView(
         jpeg: _prescanJpeg!,
         cellMap: _cellMap,
       );
@@ -318,41 +351,111 @@ class _LearningScreenState extends State<LearningScreen> {
     return const Center(child: CircularProgressIndicator(color: AppTheme.primaryYellow));
   }
 
+  /// Small rounded badge with just enough backing to stay legible over a
+  /// bright camera feed (e.g. white paper) -- deliberately not a full-width
+  /// bar, so the camera preview around it stays at full brightness.
+  Widget _pill({required Widget child, VoidCallback? onTap}) {
+    final content = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.black54,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: child,
+    );
+    if (onTap == null) return content;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: onTap,
+        child: content,
+      ),
+    );
+  }
+
   Widget _buildTopBar() {
     final title = _stage == _LearningStage.prescan
-        ? 'STAGE 1 · SCAN PAGE'
-        : (_fingerJpeg != null ? 'STAGE 2 · RESULT' : 'STAGE 2 · PLACE FINGER');
+        ? '1 · SCAN BRAILLE PAGE'
+        : (_fingerJpeg != null ? '2 · DETECTED CHARACTER' : '2 · POINT TO A CELL');
 
     return SafeArea(
-      child: Container(
+      child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        color: Colors.black.withValues(alpha: 0.7),
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            TextButton(
-              onPressed: _exit,
-              child: const Text('Exit', style: TextStyle(color: AppTheme.primaryYellow)),
+            _pill(
+              onTap: _exit,
+              child: const Text('Exit',
+                  style: TextStyle(color: AppTheme.primaryYellow, fontWeight: FontWeight.bold)),
             ),
+            const SizedBox(width: 8),
             Expanded(
-              child: Text(
-                title,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: AppTheme.primaryYellow,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 1.2,
-                  fontSize: 13,
+              child: Center(
+                child: _pill(
+                  child: Text(
+                    title,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: AppTheme.primaryYellow,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1.2,
+                      fontSize: 13,
+                    ),
+                  ),
                 ),
               ),
             ),
+            const SizedBox(width: 8),
             if (_cellMap != null)
-              TextButton(
-                onPressed: _busy ? null : _rescan,
-                child: const Text('Rescan', style: TextStyle(color: Colors.white70)),
+              _pill(
+                onTap: _busy ? null : _rescan,
+                child: const Text('Rescan', style: TextStyle(color: Colors.white)),
               )
             else
-              const SizedBox(width: 56),
+              const SizedBox(width: 8),
           ],
+        ),
+      ),
+    );
+  }
+
+  /// Framing guidance as a small floating pill instead of a permanent block
+  /// baked into the bottom sheet -- keeps it visible without eating into
+  /// the camera viewport's height.
+  Widget _buildFramingHint() {
+    if (!(_stage == _LearningStage.prescan && _cellMap == null)) {
+      return const SizedBox.shrink();
+    }
+    return Align(
+      alignment: Alignment.topCenter,
+      child: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.only(top: 56),
+          child: IgnorePointer(
+            child: _pill(
+              child: const Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'CENTER THE PAGE · KEEP FINGERS OUT',
+                    style: TextStyle(
+                      color: AppTheme.primaryYellow,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                  SizedBox(height: 2),
+                  Text(
+                    'Use bright, even light',
+                    style: TextStyle(color: Colors.white70, fontSize: 11),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ),
       ),
     );
@@ -371,9 +474,15 @@ class _LearningScreenState extends State<LearningScreen> {
       right: 0,
       bottom: 0,
       child: Container(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+        // Trimmed from the original fromLTRB(20,16,20,32) + a large
+        // icon+instruction block baked in above the button -- that block
+        // (now a small floating pill over the viewport instead, see
+        // _buildFramingHint) plus this padding used to eat a third or more
+        // of the screen's height, squeezing the camera preview into a thin
+        // strip and reading as if the whole feed were covered by a scrim.
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
         decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: 0.92),
+          color: Colors.black.withValues(alpha: 0.75),
           border: const Border(top: BorderSide(color: AppTheme.primaryYellow, width: 2)),
         ),
         child: Column(
@@ -387,14 +496,26 @@ class _LearningScreenState extends State<LearningScreen> {
                   style: TextStyle(color: Color(0xFF00E5FF), fontWeight: FontWeight.bold),
                 ),
               ),
-            Text(
-              headline,
-              style: const TextStyle(
-                fontSize: 48,
-                fontWeight: FontWeight.bold,
-                color: AppTheme.primaryYellow,
+            if (covered?.hasHit == true) ...[
+              const Text(
+                'SINHALA CHARACTER',
+                style: TextStyle(color: Colors.white70, fontSize: 12, letterSpacing: 1.1),
               ),
-            ),
+              const SizedBox(height: 4),
+              Text(
+                headline,
+                style: const TextStyle(fontSize: 56, fontWeight: FontWeight.bold, color: AppTheme.primaryYellow),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Detected ${covered!.cell!.detectedCellLabel}',
+                style: const TextStyle(color: Color(0xFF00E5FF), fontWeight: FontWeight.w600),
+              ),
+            ] else
+              Text(
+                headline,
+                style: const TextStyle(fontSize: 42, fontWeight: FontWeight.bold, color: AppTheme.primaryYellow),
+              ),
             const SizedBox(height: 6),
             Text(
               subtitle,
@@ -431,8 +552,8 @@ class _LearningScreenState extends State<LearningScreen> {
                 ),
                 child: Text(
                   _stage == _LearningStage.prescan
-                      ? 'Capture page (no finger)'
-                      : 'Capture finger on cell',
+                      ? 'SCAN BRAILLE PAGE'
+                      : 'DETECT CHARACTER UNDER FINGER',
                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                 ),
               ),
@@ -444,146 +565,3 @@ class _LearningScreenState extends State<LearningScreen> {
   }
 }
 
-class _FrozenImageView extends StatelessWidget {
-  final Uint8List jpeg;
-  final CellMap? cellMap;
-  final BrailleCell? highlighted;
-  final FingertipDetection? fingertip;
-
-  const _FrozenImageView({
-    required this.jpeg,
-    this.cellMap,
-    this.highlighted,
-    this.fingertip,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return FutureBuilder<ui.Image>(
-      future: _decode(jpeg),
-      builder: (context, snap) {
-        if (!snap.hasData) {
-          return const Center(child: CircularProgressIndicator(color: AppTheme.primaryYellow));
-        }
-        final image = snap.data!;
-        return LayoutBuilder(
-          builder: (context, constraints) {
-            final size = Size(constraints.maxWidth, constraints.maxHeight);
-            final imgW = cellMap?.imageWidth ?? image.width;
-            final imgH = cellMap?.imageHeight ?? image.height;
-
-            return Stack(
-              fit: StackFit.expand,
-              children: [
-                CustomPaint(
-                  painter: _ImagePainter(image),
-                  size: size,
-                ),
-                if (cellMap != null)
-                  CustomPaint(
-                    painter: CellOverlayPainter(
-                      cells: cellMap!.cells,
-                      highlighted: highlighted,
-                      imageWidth: imgW,
-                      imageHeight: imgH,
-                    ),
-                    size: size,
-                  ),
-                if (fingertip != null)
-                  CustomPaint(
-                    painter: FingertipOverlayPainter(
-                      tipBox: fingertip!.box,
-                      contactPoint: fingertip!.contactPoint,
-                      imageWidth: fingertip!.imageWidth,
-                      imageHeight: fingertip!.imageHeight,
-                    ),
-                    size: size,
-                  ),
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
-
-  Future<ui.Image> _decode(Uint8List bytes) async {
-    final codec = await ui.instantiateImageCodec(bytes);
-    final frame = await codec.getNextFrame();
-    return frame.image;
-  }
-}
-
-class _ImagePainter extends CustomPainter {
-  final ui.Image image;
-  _ImagePainter(this.image);
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final src = Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble());
-    final dst = ImageFit.fittedRect(size, image.width / image.height);
-    canvas.drawImageRect(image, src, dst, Paint());
-  }
-
-  @override
-  bool shouldRepaint(_ImagePainter old) => old.image != image;
-}
-
-class _TapFingertipDialog extends StatefulWidget {
-  final Uint8List jpeg;
-  const _TapFingertipDialog({required this.jpeg});
-
-  @override
-  State<_TapFingertipDialog> createState() => _TapFingertipDialogState();
-}
-
-class _TapFingertipDialogState extends State<_TapFingertipDialog> {
-  ui.Image? _image;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    final codec = await ui.instantiateImageCodec(widget.jpeg);
-    final frame = await codec.getNextFrame();
-    setState(() => _image = frame.image);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      backgroundColor: Colors.grey[900],
-      title: const Text('Tap fingertip contact point', style: TextStyle(color: Colors.white)),
-      content: SizedBox(
-        width: 280,
-        height: 360,
-        child: _image == null
-            ? const Center(child: CircularProgressIndicator())
-            : GestureDetector(
-                onTapDown: (d) {
-                  final box = context.findRenderObject() as RenderBox?;
-                  if (box == null || _image == null) return;
-                  final local = box.globalToLocal(d.globalPosition);
-                  final scale = 280 / _image!.width;
-                  final scaleY = 360 / _image!.height;
-                  final s = scale < scaleY ? scale : scaleY;
-                  final dw = _image!.width * s;
-                  final dh = _image!.height * s;
-                  final ox = (280 - dw) / 2;
-                  final oy = (360 - dh) / 2;
-                  final ix = ((local.dx - ox) / s).clamp(0, _image!.width.toDouble());
-                  final iy = ((local.dy - oy) / s).clamp(0, _image!.height.toDouble());
-                  Navigator.pop(context, Offset(ix, iy));
-                },
-                child: CustomPaint(
-                  painter: _ImagePainter(_image!),
-                  size: const Size(280, 360),
-                ),
-              ),
-      ),
-    );
-  }
-}

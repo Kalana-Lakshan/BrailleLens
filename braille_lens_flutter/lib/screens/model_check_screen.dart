@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
@@ -10,7 +8,7 @@ import '../theme/app_theme.dart';
 import '../widgets/cell_overlay_painter.dart';
 
 /// On-device check for the two bundled ONNX models:
-/// CNN (`braille_model.onnx`) and fingertip YOLO (`*_mobile.onnx`).
+/// CNN (`braille_cnn.onnx`) and fingertip YOLO (`*_mobile.onnx`).
 class ModelCheckScreen extends StatefulWidget {
   const ModelCheckScreen({super.key});
 
@@ -55,32 +53,36 @@ class _ModelCheckScreenState extends State<ModelCheckScreen> {
     });
   }
 
+  /// Smoke-test the classifier against the bundled sample crops. These were
+  /// captured for the old 26-class English-letter model, so there's no
+  /// known Sinhala ground truth to assert against here — this just confirms
+  /// the model runs end-to-end and lets you eyeball the outputs, it does
+  /// not measure accuracy.
   Future<void> _classifySamples() async {
     if (!_cnn.isInitialized || _busy) return;
     setState(() {
       _busy = true;
-      _log = 'Classifying bundled samples…';
+      _log = 'Running bundled samples through the CNN…';
       _detection = null;
     });
 
-    var ok = 0;
     const letters = 'abcdefghijklmnopqrstuvwxyz';
     final lines = <String>[];
+    var ran = 0;
     for (var i = 0; i < letters.length; i++) {
       final ch = letters[i];
       final asset = 'assets/samples/sample_$ch.jpg';
       try {
         final data = await rootBundle.load(asset);
         final pred = await _cnn.predict(data.buffer.asUint8List());
-        final hit = pred.character.toLowerCase() == ch;
-        if (hit) ok++;
+        ran++;
         lines.add(
-          '${hit ? "✓" : "✗"} $ch → ${pred.character} '
+          '$ch (dots) → ${pred.character}  code ${pred.classIndex}  '
           '${(pred.confidence * 100).toStringAsFixed(0)}%',
         );
         if (i == 0) {
           _cnnResult = pred;
-          _cnnExpected = ch;
+          _cnnExpected = null;
           _photo = data.buffer.asUint8List();
         }
       } catch (e) {
@@ -91,7 +93,7 @@ class _ModelCheckScreenState extends State<ModelCheckScreen> {
     if (!mounted) return;
     setState(() {
       _busy = false;
-      _log = 'CNN samples $ok/${letters.length}\n${lines.join('\n')}';
+      _log = 'CNN ran $ran/${letters.length} samples\n${lines.join('\n')}';
     });
   }
 
@@ -173,7 +175,7 @@ class _ModelCheckScreenState extends State<ModelCheckScreen> {
             )
           : Column(
               children: [
-                _statusRow('CNN  braille_model.onnx', _cnn.isInitialized),
+                _statusRow('CNN  braille_cnn.onnx', _cnn.isInitialized),
                 _statusRow(
                   'YOLO  ${_tip.loadedAsset?.split('/').last ?? "not loaded"}',
                   _tip.isReady,
