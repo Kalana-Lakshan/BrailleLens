@@ -13,17 +13,20 @@ from camera_capture.camera import (
 
 
 def test_cc01_first_frame_motion_is_zero():
+    """Check the first frame (no previous image) has motion 0 so it is not treated as camera shake."""
     curr = np.zeros((16, 16), dtype=np.uint8)
     assert _motion_score(None, curr) == 0.0
 
 
 def test_cc02_changed_frame_has_positive_motion():
+    """Check black then white frames produce motion > 0 (page or camera moved)."""
     a = np.zeros((16, 16), dtype=np.uint8)
     b = np.full((16, 16), 255, dtype=np.uint8)
     assert _motion_score(a, b) > 0.0
 
 
 def test_cc03_fit_for_display_no_upscale():
+    """Check a 200 px-wide frame in a 400 px window is not enlarged (scale 1.0)."""
     frame = np.zeros((100, 200, 3), dtype=np.uint8)
     out, scale = _fit_for_display(frame, max_width=400)
     assert scale == 1.0
@@ -31,6 +34,7 @@ def test_cc03_fit_for_display_no_upscale():
 
 
 def test_cc04_fit_for_display_downscales():
+    """Check a 400 px-wide frame in a 200 px window is scaled by 0.5."""
     frame = np.zeros((100, 400, 3), dtype=np.uint8)
     out, scale = _fit_for_display(frame, max_width=200)
     assert abs(scale - 0.5) < 1e-9
@@ -38,6 +42,7 @@ def test_cc04_fit_for_display_downscales():
 
 
 def test_cc05_scale_box_and_empty_status():
+    """Check detection boxes scale with the preview; with no result the overlay tells the user to wait."""
     assert _scale_box((10, 20, 30, 40), 0.5) == (5, 10, 15, 20)
     lines = _overlay_status_lines(None, 1.0)
     assert "waiting" in lines[0].lower() or "Hold camera" in lines[1]

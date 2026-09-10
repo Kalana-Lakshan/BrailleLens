@@ -18,6 +18,7 @@ from registration import FrameRegistration  # noqa: E402
 
 
 def test_ft10_identity_homography_maps_point_unchanged():
+    """Check with H = identity a point (20, 25) maps to itself (no camera motion after prescan)."""
     gray = np.zeros((64, 64), dtype=np.uint8)
     gray[10:40, 10:40] = 255
     reg = FrameRegistration(gray)
@@ -28,6 +29,7 @@ def test_ft10_identity_homography_maps_point_unchanged():
 
 
 def test_ft11_synthetic_drift_maps_within_two_pixels():
+    """Check a warped synthetic page maps a known point back within 2 px of the reference location."""
     rng = np.random.default_rng(0)
     ref = (rng.random((480, 640)) * 255).astype(np.uint8)
     cv2.rectangle(ref, (100, 100), (300, 250), 255, -1)
