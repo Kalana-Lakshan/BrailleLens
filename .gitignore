@@ -65,3 +65,5 @@ finger_cell_track/runs/
 finger_cell_track/weights/
 finger_cell_track/**/*.pt
 finger_cell_track/**/*.zip
+vendor/
+vendor/
