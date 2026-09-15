@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../services/audio_service.dart';
 import '../services/bluetooth_service.dart';
 import '../theme/app_theme.dart';
@@ -62,6 +63,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   // ── Initialization ────────────────────────────────────────────────────────────
 
   Future<void> _initialize() async {
+    await Permission.camera.request();
+    await Permission.microphone.request();
+    if (!mounted) return;
+
     // Run BT scan in background — update indicator when done
     _btService.scanForGlasses().then((found) {
       if (!mounted) return;
@@ -173,7 +178,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.of(context).size;
     return Scaffold(
       backgroundColor: AppTheme.backgroundBlack,
       body: Stack(
@@ -206,7 +210,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     onTap: () => _navigateTo('learning'),
                     child: _ModeZone(
                       title: 'LEARNING\nMODE',
-                      subtitle: 'Two-photo scan · Sinhala output',
+                      subtitle: 'Two-photo scan · English letters',
                       icon: Icons.school_rounded,
                       gradientBegin: AppTheme.learningZoneBlue,
                       gradientEnd: AppTheme.learningZoneBlue,
