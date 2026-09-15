@@ -151,11 +151,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
     if (mounted) {
       setState(() => _navigating = false);
-      // Re-start voice loop on return
       await Future.delayed(const Duration(milliseconds: 600));
+      if (!mounted || _navigating) return;
       await _audioService.speak(
         "Back at main menu. Say 'Learning' or 'Testing', or tap a side.",
       );
+      if (!mounted || _navigating) return;
       _startVoiceCommandLoop();
     }
   }

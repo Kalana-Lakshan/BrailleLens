@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:audioplayers/audioplayers.dart';
+import '../utils/answer_match.dart';
 
 /// Unified audio service handling TTS, STT, earcon tones, and haptic feedback.
 /// All methods fail silently so a missing earcon asset or hardware limitation
@@ -166,6 +167,7 @@ class AudioService {
     });
 
     try {
+      if (_speech.isListening) await _speech.stop();
       await _speech.listen(
         onResult: (result) {
           if (result.finalResult && result.recognizedWords.isNotEmpty) {
@@ -184,16 +186,37 @@ class AudioService {
         ),
       );
     } catch (e) {
-      debugPrint('[AudioService] listenForAnswer error: $e');
-      timer.cancel();
-      if (!completer.isCompleted) completer.complete(null);
+      debugPrint('[AudioService] listenForAnswer on-device error: $e');
+      try {
+        if (_speech.isListening) await _speech.stop();
+        await _speech.listen(
+          onResult: (result) {
+            if (result.finalResult && result.recognizedWords.isNotEmpty) {
+              timer?.cancel();
+              if (!completer.isCompleted) {
+                completer.complete(
+                  result.recognizedWords.toLowerCase().trim(),
+                );
+              }
+            }
+          },
+          listenOptions: stt.SpeechListenOptions(
+            listenMode: stt.ListenMode.confirmation,
+            partialResults: false,
+            onDevice: false,
+          ),
+        );
+      } catch (e2) {
+        debugPrint('[AudioService] listenForAnswer error: $e2');
+        timer.cancel();
+        if (!completer.isCompleted) completer.complete(null);
+      }
     }
 
     return completer.future;
   }
 
-  /// Continuous listen that ends when the user says **"stop"** or [timeout] elapses.
-  /// The word "stop" is stripped from [ListenOutcome.words].
+  /// Continuous listen that ends when the user says the word **"stop"** or [timeout] elapses.
   Future<ListenOutcome> listenUntilStop({
     Duration timeout = const Duration(seconds: 12),
   }) async {
@@ -217,29 +240,31 @@ class AudioService {
       }
     });
 
+    void onResult(result) {
+      final words = result.recognizedWords.toLowerCase().trim();
+
+      if (spokenContainsStopKeyword(words)) {
+        timer?.cancel();
+        if (!completer.isCompleted) {
+          _speech.stop();
+          completer.complete(const ListenOutcome(
+            words: null,
+            stoppedByKeyword: true,
+            timedOut: false,
+          ));
+        }
+        return;
+      }
+
+      if (result.finalResult) {
+        latestWords = words;
+      }
+    }
+
     try {
+      if (_speech.isListening) await _speech.stop();
       await _speech.listen(
-        onResult: (result) {
-          final words = result.recognizedWords.toLowerCase().trim();
-
-          if (words.contains('stop')) {
-            timer?.cancel();
-            if (!completer.isCompleted) {
-              _speech.stop();
-              final cleaned = words.replaceAll('stop', '').trim();
-              completer.complete(ListenOutcome(
-                words: cleaned.isNotEmpty ? cleaned : null,
-                stoppedByKeyword: true,
-                timedOut: false,
-              ));
-            }
-            return;
-          }
-
-          if (result.finalResult) {
-            latestWords = words;
-          }
-        },
+        onResult: onResult,
         listenOptions: stt.SpeechListenOptions(
           listenMode: stt.ListenMode.dictation,
           partialResults: true,
@@ -247,15 +272,28 @@ class AudioService {
         ),
       );
     } catch (e) {
-      debugPrint('[AudioService] listenUntilStop error: $e');
-      timer.cancel();
-      if (!completer.isCompleted) {
-        completer.complete(const ListenOutcome(
-          words: null,
-          stoppedByKeyword: false,
-          timedOut: false,
-          sttUnavailable: true,
-        ));
+      debugPrint('[AudioService] listenUntilStop on-device error: $e');
+      try {
+        if (_speech.isListening) await _speech.stop();
+        await _speech.listen(
+          onResult: onResult,
+          listenOptions: stt.SpeechListenOptions(
+            listenMode: stt.ListenMode.dictation,
+            partialResults: true,
+            onDevice: false,
+          ),
+        );
+      } catch (e2) {
+        debugPrint('[AudioService] listenUntilStop error: $e2');
+        timer.cancel();
+        if (!completer.isCompleted) {
+          completer.complete(const ListenOutcome(
+            words: null,
+            stoppedByKeyword: false,
+            timedOut: false,
+            sttUnavailable: true,
+          ));
+        }
       }
     }
 

@@ -13,6 +13,7 @@ import '../services/fingertip_onnx_service.dart';
 import '../services/prescan_bridge.dart';
 import '../theme/app_theme.dart';
 import '../utils/answer_match.dart';
+import '../widgets/tap_fingertip_dialog.dart';
 
 enum _TestPhase { scanPage, aimFinger, quiz }
 
@@ -50,7 +51,6 @@ class _TestingScreenState extends State<TestingScreen>
   bool _isExiting = false;
   String? _statusLine;
 
-  Uint8List? _prescanJpeg;
   CellMap? _cellMap;
   Uint8List? _fingerJpeg;
   CoveredCellResult? _covered;
@@ -97,7 +97,13 @@ class _TestingScreenState extends State<TestingScreen>
     await PrescanBridge.ensureOnDeviceReady();
     await _fingertipOnnx.initialize();
     if (!mounted) return;
-    setState(() => _cameraReady = true);
+    setState(() => _cameraReady = _camera.isInitialized);
+    if (!_camera.isInitialized) {
+      await widget.audioService.speak(
+        'Camera is not available. Grant camera permission and try again.',
+      );
+      return;
+    }
     await widget.audioService.hapticMedium();
     await widget.audioService.speak(
       'Testing Mode. First scan the page with no finger, then place your finger on a cell. '
@@ -142,7 +148,6 @@ class _TestingScreenState extends State<TestingScreen>
       final h = decoded?.height ?? map.imageHeight;
       final fixed = CellMap(cells: map.cells, imageWidth: w, imageHeight: h);
       setState(() {
-        _prescanJpeg = jpeg;
         _cellMap = fixed;
         _phase = _TestPhase.aimFinger;
         _busy = false;
@@ -180,10 +185,12 @@ class _TestingScreenState extends State<TestingScreen>
     }
     FingertipDetection? tip = await _fingertipOnnx.detect(jpeg);
     if (!mounted) return;
+    tip ??= await _promptTapFingertip(jpeg);
+    if (!mounted) return;
     if (tip == null) {
       setState(() {
         _busy = false;
-        _statusLine = 'No fingertip — try again or rescan';
+        _statusLine = 'No fingertip — tap the tip on screen or recapture';
       });
       await widget.audioService.speak('No fingertip found. Try again.');
       return;
@@ -195,6 +202,7 @@ class _TestingScreenState extends State<TestingScreen>
       fingerImageHeight: tip.imageHeight,
       fingertipBox: tip.box,
     );
+    if (!mounted) return;
     if (!result.hasHit) {
       setState(() {
         _fingerJpeg = jpeg;
@@ -206,6 +214,7 @@ class _TestingScreenState extends State<TestingScreen>
       await widget.audioService.speak('No character under your finger. Adjust and capture again.');
       return;
     }
+    if (!mounted) return;
     setState(() {
       _fingerJpeg = jpeg;
       _fingertip = tip;
@@ -217,6 +226,20 @@ class _TestingScreenState extends State<TestingScreen>
       _statusLine = 'Say the character under your finger';
     });
     _runTestLoop();
+  }
+
+  Future<FingertipDetection?> _promptTapFingertip(Uint8List jpeg) async {
+    final decoded = img.decodeImage(jpeg);
+    if (decoded == null) return null;
+    final tap = await showTapFingertipDialog(context: context, jpeg: jpeg);
+    if (tap == null) return null;
+    return FingertipDetection(
+      contactPoint: tap,
+      box: Rect.fromCenter(center: tap, width: 48, height: 48),
+      confidence: 1.0,
+      imageWidth: decoded.width,
+      imageHeight: decoded.height,
+    );
   }
 
   Future<void> _runTestLoop() async {
@@ -345,7 +368,6 @@ class _TestingScreenState extends State<TestingScreen>
     _loopActive = false;
     setState(() {
       _phase = _TestPhase.scanPage;
-      _prescanJpeg = null;
       _cellMap = null;
       _fingerJpeg = null;
       _covered = null;
@@ -404,7 +426,9 @@ class _TestingScreenState extends State<TestingScreen>
   }
 
   Widget _buildImageArea() {
-    if (_cameraReady && _camera.controller != null &&
+    if (_cameraReady &&
+        _camera.controller != null &&
+        _camera.controller!.value.isInitialized &&
         (_phase != _TestPhase.quiz || _fingerJpeg == null)) {
       return ColoredBox(
         color: Colors.black,

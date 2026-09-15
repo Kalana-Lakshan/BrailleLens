@@ -30,4 +30,11 @@ void main() {
     expect(parseVoiceModeCommand('latest'), isNull);
     expect(parseVoiceModeCommand('contest'), isNull);
   });
+
+  test('stop keyword is a whole word', () {
+    expect(spokenContainsStopKeyword('stop'), isTrue);
+    expect(spokenContainsStopKeyword('please stop now'), isTrue);
+    expect(spokenContainsStopKeyword('stopped'), isFalse);
+    expect(spokenContainsStopKeyword('stopwatch'), isFalse);
+  });
 }

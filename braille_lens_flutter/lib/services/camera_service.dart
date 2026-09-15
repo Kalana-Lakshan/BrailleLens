@@ -40,6 +40,9 @@ class CameraService {
       debugPrint('[CameraService] Camera initialized (${camera.name}).');
     } catch (e) {
       debugPrint('[CameraService] Initialization error: $e');
+      await _controller?.dispose();
+      _controller = null;
+      _isInitialized = false;
     }
   }
 

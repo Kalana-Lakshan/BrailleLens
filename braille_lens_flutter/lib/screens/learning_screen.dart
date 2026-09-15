@@ -15,6 +15,7 @@ import '../services/prescan_bridge.dart';
 import '../theme/app_theme.dart';
 import '../utils/image_fit.dart';
 import '../widgets/cell_overlay_painter.dart';
+import '../widgets/tap_fingertip_dialog.dart';
 
 enum _LearningStage { prescan, fingerResult }
 
@@ -44,7 +45,6 @@ class _LearningScreenState extends State<LearningScreen> {
   bool _isExiting = false;
   String? _statusLine;
 
-  Uint8List? _prescanJpeg;
   CellMap? _cellMap;
   Uint8List? _fingerJpeg;
   CoveredCellResult? _covered;
@@ -62,14 +62,22 @@ class _LearningScreenState extends State<LearningScreen> {
     final tipReady = await _fingertipOnnx.initialize();
     if (!mounted) return;
     setState(() {
-      _cameraReady = true;
-      _statusLine = [
-        cnnReady ? 'CNN: braille_model.onnx' : 'CNN failed',
-        tipReady
-            ? 'YOLO: ${_fingertipOnnx.loadedAsset?.split('/').last}'
-            : 'YOLO failed — tap fingertip',
-      ].join(' · ');
+      _cameraReady = _camera.isInitialized;
+      _statusLine = _camera.isInitialized
+          ? [
+              cnnReady ? 'CNN: braille_model.onnx' : 'CNN failed',
+              tipReady
+                  ? 'YOLO: ${_fingertipOnnx.loadedAsset?.split('/').last}'
+                  : 'YOLO failed — tap fingertip',
+            ].join(' · ')
+          : 'Camera failed — grant camera permission and reopen Learning.';
     });
+    if (!_camera.isInitialized) {
+      await widget.audioService.speak(
+        'Camera is not available. Grant camera permission and try again.',
+      );
+      return;
+    }
     await widget.audioService.speak(
       'Learning Mode. Stage 1: hold the Braille page still with no finger, '
       'then tap capture. Stage 2: place your finger on a cell and tap capture.',
@@ -121,7 +129,6 @@ class _LearningScreenState extends State<LearningScreen> {
 
       if (!mounted) return;
       setState(() {
-        _prescanJpeg = jpeg;
         _cellMap = fixed;
         _stage = _LearningStage.fingerResult;
         _busy = false;
@@ -211,11 +218,7 @@ class _LearningScreenState extends State<LearningScreen> {
     final decoded = img.decodeImage(jpeg);
     if (decoded == null) return null;
 
-    final tap = await showDialog<Offset>(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => _TapFingertipDialog(jpeg: jpeg),
-    );
+    final tap = await showTapFingertipDialog(context: context, jpeg: jpeg);
     if (tap == null) return null;
 
     return FingertipDetection(
@@ -234,7 +237,6 @@ class _LearningScreenState extends State<LearningScreen> {
   void _rescan() {
     setState(() {
       _stage = _LearningStage.prescan;
-      _prescanJpeg = null;
       _cellMap = null;
       _fingerJpeg = null;
       _covered = null;
@@ -303,6 +305,7 @@ class _LearningScreenState extends State<LearningScreen> {
   Widget _buildImageArea() {
     if (_fingerJpeg != null) {
       return _FrozenImageView(
+        key: ObjectKey(_fingerJpeg),
         jpeg: _fingerJpeg!,
         cellMap: _mappedCellsForFingerFrame(),
         highlighted: _covered?.cell,
@@ -311,7 +314,9 @@ class _LearningScreenState extends State<LearningScreen> {
     }
     // Live preview for stage 1 and for aiming the finger (stage 2).
     // Do not keep showing the hand-free still or the learner cannot see the finger.
-    if (_cameraReady && _camera.controller != null) {
+    if (_cameraReady &&
+        _camera.controller != null &&
+        _camera.controller!.value.isInitialized) {
       return ColoredBox(
         color: Colors.black,
         child: Center(child: CameraPreview(_camera.controller!)),
@@ -453,6 +458,7 @@ class _FrozenImageView extends StatefulWidget {
   final FingertipDetection? fingertip;
 
   const _FrozenImageView({
+    super.key,
     required this.jpeg,
     this.cellMap,
     this.highlighted,
@@ -542,59 +548,4 @@ class _ImagePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_ImagePainter old) => old.image != image;
-}
-
-class _TapFingertipDialog extends StatefulWidget {
-  final Uint8List jpeg;
-  const _TapFingertipDialog({required this.jpeg});
-
-  @override
-  State<_TapFingertipDialog> createState() => _TapFingertipDialogState();
-}
-
-class _TapFingertipDialogState extends State<_TapFingertipDialog> {
-  ui.Image? _image;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    final codec = await ui.instantiateImageCodec(widget.jpeg);
-    final frame = await codec.getNextFrame();
-    setState(() => _image = frame.image);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      backgroundColor: Colors.grey[900],
-      title: const Text('Tap fingertip contact point', style: TextStyle(color: Colors.white)),
-      content: SizedBox(
-        width: 280,
-        height: 360,
-        child: _image == null
-            ? const Center(child: CircularProgressIndicator())
-            : GestureDetector(
-                onTapDown: (d) {
-                  if (_image == null) return;
-                  final mapped = ImageFit.viewToImage(
-                    d.localPosition,
-                    const Size(280, 360),
-                    _image!.width,
-                    _image!.height,
-                  );
-                  if (mapped == null) return;
-                  Navigator.pop(context, mapped);
-                },
-                child: CustomPaint(
-                  painter: _ImagePainter(_image!),
-                  size: const Size(280, 360),
-                ),
-              ),
-      ),
-    );
-  }
 }

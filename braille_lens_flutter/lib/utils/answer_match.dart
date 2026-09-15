@@ -71,3 +71,14 @@ String? parseVoiceModeCommand(String? spoken) {
   }
   return null;
 }
+
+/// True when the user said the whole word "stop" (not "stopped" / "stopwatch").
+bool spokenContainsStopKeyword(String? spoken) {
+  if (spoken == null) return false;
+  final tokens = spoken
+      .toLowerCase()
+      .replaceAll(RegExp(r'[^a-z\s]'), ' ')
+      .split(RegExp(r'\s+'))
+      .where((t) => t.isNotEmpty);
+  return tokens.contains('stop');
+}
