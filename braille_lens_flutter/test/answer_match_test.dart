@@ -23,4 +23,11 @@ void main() {
     expect(spokenAnswerMatches('', 'A'), isFalse);
     expect(spokenAnswerMatches('  ', 'A'), isFalse);
   });
+
+  test('voice mode uses whole words not substrings', () {
+    expect(parseVoiceModeCommand('learning'), 'learning');
+    expect(parseVoiceModeCommand('open testing please'), 'testing');
+    expect(parseVoiceModeCommand('latest'), isNull);
+    expect(parseVoiceModeCommand('contest'), isNull);
+  });
 }

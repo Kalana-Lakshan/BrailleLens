@@ -54,3 +54,20 @@ bool spokenAnswerMatches(String? spoken, String expected) {
 
   return tokens.any(tokenHits);
 }
+
+/// Home voice command: whole words only ("latest" must not open Testing).
+String? parseVoiceModeCommand(String? spoken) {
+  if (spoken == null) return null;
+  final tokens = spoken
+      .toLowerCase()
+      .replaceAll(RegExp(r'[^a-z\s]'), ' ')
+      .split(RegExp(r'\s+'))
+      .where((t) => t.isNotEmpty);
+  for (final t in tokens) {
+    if (t == 'learning' || t == 'learn') return 'learning';
+  }
+  for (final t in tokens) {
+    if (t == 'testing' || t == 'test') return 'testing';
+  }
+  return null;
+}

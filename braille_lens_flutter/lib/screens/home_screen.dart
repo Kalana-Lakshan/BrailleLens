@@ -4,6 +4,7 @@ import 'package:permission_handler/permission_handler.dart';
 import '../services/audio_service.dart';
 import '../services/bluetooth_service.dart';
 import '../theme/app_theme.dart';
+import '../utils/answer_match.dart';
 import 'learning_screen.dart';
 import 'model_check_screen.dart';
 import 'testing_screen.dart';
@@ -111,14 +112,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       if (!mounted || _navigating) break;
       setState(() => _isListeningForCommand = false);
 
-      if (command != null) {
-        if (command.contains('learn')) {
-          await _navigateTo('learning');
-          break;
-        } else if (command.contains('test')) {
-          await _navigateTo('testing');
-          break;
-        }
+      final mode = parseVoiceModeCommand(command);
+      if (mode != null) {
+        await _navigateTo(mode);
+        break;
       }
 
       // Brief gap before re-opening mic
