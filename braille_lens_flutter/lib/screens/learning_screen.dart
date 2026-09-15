@@ -295,7 +295,7 @@ class _LearningScreenState extends State<LearningScreen> {
   }
 
   Widget _buildImageArea() {
-    if (_stage == _LearningStage.fingerResult && _fingerJpeg != null) {
+    if (_fingerJpeg != null) {
       return _FrozenImageView(
         jpeg: _fingerJpeg!,
         cellMap: _mappedCellsForFingerFrame(),
@@ -303,12 +303,8 @@ class _LearningScreenState extends State<LearningScreen> {
         fingertip: _fingertip,
       );
     }
-    if (_prescanJpeg != null && _cellMap != null) {
-      return _FrozenImageView(
-        jpeg: _prescanJpeg!,
-        cellMap: _cellMap,
-      );
-    }
+    // Live preview for stage 1 and for aiming the finger (stage 2).
+    // Do not keep showing the hand-free still or the learner cannot see the finger.
     if (_cameraReady && _camera.controller != null) {
       return ColoredBox(
         color: Colors.black,
