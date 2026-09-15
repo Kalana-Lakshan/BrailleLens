@@ -26,6 +26,7 @@ class AudioService {
       await _tts.setSpeechRate(0.48);
       await _tts.setVolume(1.0);
       await _tts.setPitch(1.0);
+      await _tts.awaitSpeakCompletion(true);
     } catch (e) {
       debugPrint('[AudioService] TTS init error: $e');
     }
@@ -192,22 +193,27 @@ class AudioService {
   }
 
   /// Continuous listen that ends when the user says **"stop"** or [timeout] elapses.
-  /// The word "stop" is stripped from the returned string.
-  /// Useful for Testing Mode where no visible stop button exists.
-  Future<String?> listenUntilStop({
+  /// The word "stop" is stripped from [ListenOutcome.words].
+  Future<ListenOutcome> listenUntilStop({
     Duration timeout = const Duration(seconds: 12),
   }) async {
     final available = await initStt();
-    if (!available) return null;
+    if (!available) {
+      return const ListenOutcome(words: null, stoppedByKeyword: false, timedOut: false, sttUnavailable: true);
+    }
 
-    final completer = Completer<String?>();
+    final completer = Completer<ListenOutcome>();
     Timer? timer;
     String latestWords = '';
 
     timer = Timer(timeout, () {
       if (!completer.isCompleted) {
         _speech.stop();
-        completer.complete(latestWords.isNotEmpty ? latestWords : null);
+        completer.complete(ListenOutcome(
+          words: latestWords.isNotEmpty ? latestWords : null,
+          stoppedByKeyword: false,
+          timedOut: true,
+        ));
       }
     });
 
@@ -216,13 +222,16 @@ class AudioService {
         onResult: (result) {
           final words = result.recognizedWords.toLowerCase().trim();
 
-          // "stop" keyword terminates the session
           if (words.contains('stop')) {
             timer?.cancel();
             if (!completer.isCompleted) {
               _speech.stop();
               final cleaned = words.replaceAll('stop', '').trim();
-              completer.complete(cleaned.isNotEmpty ? cleaned : null);
+              completer.complete(ListenOutcome(
+                words: cleaned.isNotEmpty ? cleaned : null,
+                stoppedByKeyword: true,
+                timedOut: false,
+              ));
             }
             return;
           }
@@ -240,7 +249,14 @@ class AudioService {
     } catch (e) {
       debugPrint('[AudioService] listenUntilStop error: $e');
       timer.cancel();
-      if (!completer.isCompleted) completer.complete(null);
+      if (!completer.isCompleted) {
+        completer.complete(const ListenOutcome(
+          words: null,
+          stoppedByKeyword: false,
+          timedOut: false,
+          sttUnavailable: true,
+        ));
+      }
     }
 
     return completer.future;
@@ -257,4 +273,19 @@ class AudioService {
     _speech.stop();
     _player.dispose();
   }
+}
+
+/// Result of [AudioService.listenUntilStop].
+class ListenOutcome {
+  final String? words;
+  final bool stoppedByKeyword;
+  final bool timedOut;
+  final bool sttUnavailable;
+
+  const ListenOutcome({
+    required this.words,
+    required this.stoppedByKeyword,
+    required this.timedOut,
+    this.sttUnavailable = false,
+  });
 }
