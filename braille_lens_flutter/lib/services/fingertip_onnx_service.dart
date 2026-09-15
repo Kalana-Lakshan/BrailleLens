@@ -83,10 +83,17 @@ class FingertipOnnxService {
       return null;
     }
 
-    dynamic outValue = outputs['output0']?.value;
-    outValue ??= outputs.values.first?.value;
-    for (final o in outputs.values) {
-      o?.release();
+    dynamic outValue;
+    if (outputs is Map) {
+      outValue = outputs['output0']?.value ?? outputs.values.first?.value;
+      for (final o in outputs.values) {
+        o?.release();
+      }
+    } else {
+      outValue = outputs[0]?.value ?? outputs[0];
+      for (final o in outputs) {
+        o?.release();
+      }
     }
 
     final rows = _parseOutputRows(outValue);
