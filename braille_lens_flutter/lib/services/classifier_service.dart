@@ -100,7 +100,17 @@ class ClassifierService {
       }
     }
 
-    return _runInference(inputFloatList);
+    var pred = await _runInference(inputFloatList);
+    if (pred.confidence < 0.45) {
+      for (var i = 0; i < inputFloatList.length; i++) {
+        inputFloatList[i] = -inputFloatList[i];
+      }
+      final inverted = await _runInference(inputFloatList);
+      if (inverted.confidence > pred.confidence) {
+        pred = inverted;
+      }
+    }
+    return pred;
   }
 
   Future<PredictionResult> _runInference(Float32List inputFloatList) async {
