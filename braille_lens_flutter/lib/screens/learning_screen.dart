@@ -93,6 +93,7 @@ class _LearningScreenState extends State<LearningScreen> {
     });
 
     final jpeg = await _camera.captureJpeg();
+    if (!mounted) return;
     if (jpeg == null) {
       setState(() {
         _busy = false;
@@ -117,6 +118,7 @@ class _LearningScreenState extends State<LearningScreen> {
       final h = decoded?.height ?? map.imageHeight;
       final fixed = CellMap(cells: map.cells, imageWidth: w, imageHeight: h);
 
+      if (!mounted) return;
       setState(() {
         _prescanJpeg = jpeg;
         _cellMap = fixed;
@@ -129,6 +131,7 @@ class _LearningScreenState extends State<LearningScreen> {
         '${fixed.cells.length} cells found. Place your finger on a character and tap capture.',
       );
     } on PrescanUnavailableException catch (e) {
+      if (!mounted) return;
       setState(() {
         _busy = false;
         _statusLine = e.message;
@@ -137,6 +140,7 @@ class _LearningScreenState extends State<LearningScreen> {
         'Page scan failed. Hold the page steady with good lighting and try again.',
       );
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _busy = false;
         _statusLine = 'Prescan error: $e';
@@ -152,6 +156,7 @@ class _LearningScreenState extends State<LearningScreen> {
     });
 
     final jpeg = await _camera.captureJpeg();
+    if (!mounted) return;
     if (jpeg == null) {
       setState(() {
         _busy = false;
@@ -161,7 +166,9 @@ class _LearningScreenState extends State<LearningScreen> {
     }
 
     FingertipDetection? tip = await _fingertipOnnx.detect(jpeg);
+    if (!mounted) return;
     tip ??= await _promptTapFingertip(jpeg);
+    if (!mounted) return;
 
     if (tip == null) {
       setState(() {
@@ -440,7 +447,7 @@ class _LearningScreenState extends State<LearningScreen> {
   }
 }
 
-class _FrozenImageView extends StatelessWidget {
+class _FrozenImageView extends StatefulWidget {
   final Uint8List jpeg;
   final CellMap? cellMap;
   final BrailleCell? highlighted;
@@ -454,9 +461,22 @@ class _FrozenImageView extends StatelessWidget {
   });
 
   @override
+  State<_FrozenImageView> createState() => _FrozenImageViewState();
+}
+
+class _FrozenImageViewState extends State<_FrozenImageView> {
+  late final Future<ui.Image> _decoded;
+
+  @override
+  void initState() {
+    super.initState();
+    _decoded = _decode(widget.jpeg);
+  }
+
+  @override
   Widget build(BuildContext context) {
     return FutureBuilder<ui.Image>(
-      future: _decode(jpeg),
+      future: _decoded,
       builder: (context, snap) {
         if (!snap.hasData) {
           return const Center(child: CircularProgressIndicator(color: AppTheme.primaryYellow));
@@ -465,8 +485,8 @@ class _FrozenImageView extends StatelessWidget {
         return LayoutBuilder(
           builder: (context, constraints) {
             final size = Size(constraints.maxWidth, constraints.maxHeight);
-            final imgW = cellMap?.imageWidth ?? image.width;
-            final imgH = cellMap?.imageHeight ?? image.height;
+            final imgW = widget.cellMap?.imageWidth ?? image.width;
+            final imgH = widget.cellMap?.imageHeight ?? image.height;
 
             return Stack(
               fit: StackFit.expand,
@@ -475,23 +495,23 @@ class _FrozenImageView extends StatelessWidget {
                   painter: _ImagePainter(image),
                   size: size,
                 ),
-                if (cellMap != null)
+                if (widget.cellMap != null)
                   CustomPaint(
                     painter: CellOverlayPainter(
-                      cells: cellMap!.cells,
-                      highlighted: highlighted,
+                      cells: widget.cellMap!.cells,
+                      highlighted: widget.highlighted,
                       imageWidth: imgW,
                       imageHeight: imgH,
                     ),
                     size: size,
                   ),
-                if (fingertip != null)
+                if (widget.fingertip != null)
                   CustomPaint(
                     painter: FingertipOverlayPainter(
-                      tipBox: fingertip!.box,
-                      contactPoint: fingertip!.contactPoint,
-                      imageWidth: fingertip!.imageWidth,
-                      imageHeight: fingertip!.imageHeight,
+                      tipBox: widget.fingertip!.box,
+                      contactPoint: widget.fingertip!.contactPoint,
+                      imageWidth: widget.fingertip!.imageWidth,
+                      imageHeight: widget.fingertip!.imageHeight,
                     ),
                     size: size,
                   ),
@@ -560,19 +580,15 @@ class _TapFingertipDialogState extends State<_TapFingertipDialog> {
             ? const Center(child: CircularProgressIndicator())
             : GestureDetector(
                 onTapDown: (d) {
-                  final box = context.findRenderObject() as RenderBox?;
-                  if (box == null || _image == null) return;
-                  final local = box.globalToLocal(d.globalPosition);
-                  final scale = 280 / _image!.width;
-                  final scaleY = 360 / _image!.height;
-                  final s = scale < scaleY ? scale : scaleY;
-                  final dw = _image!.width * s;
-                  final dh = _image!.height * s;
-                  final ox = (280 - dw) / 2;
-                  final oy = (360 - dh) / 2;
-                  final ix = ((local.dx - ox) / s).clamp(0, _image!.width.toDouble());
-                  final iy = ((local.dy - oy) / s).clamp(0, _image!.height.toDouble());
-                  Navigator.pop(context, Offset(ix, iy));
+                  if (_image == null) return;
+                  final mapped = ImageFit.viewToImage(
+                    d.localPosition,
+                    const Size(280, 360),
+                    _image!.width,
+                    _image!.height,
+                  );
+                  if (mapped == null) return;
+                  Navigator.pop(context, mapped);
                 },
                 child: CustomPaint(
                   painter: _ImagePainter(_image!),
