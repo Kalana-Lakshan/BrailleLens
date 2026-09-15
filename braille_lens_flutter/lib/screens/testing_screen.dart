@@ -371,7 +371,7 @@ class _TestingScreenState extends State<TestingScreen>
     return Semantics(
       label: 'Testing Mode. Scan the page, cover a cell, then speak the character. Double-tap to exit.',
       child: GestureDetector(
-        onDoubleTap: _exitScreen,
+        onDoubleTap: _phase == _TestPhase.quiz ? _exitScreen : null,
         child: Scaffold(
           backgroundColor: Colors.black,
           body: Stack(

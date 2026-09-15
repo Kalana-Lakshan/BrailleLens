@@ -20,7 +20,7 @@ enum _LearningStage { prescan, fingerResult }
 
 /// Two-stage Learning Mode:
 /// 1. Capture hand-free page → prescan builds CellMap (yellow boxes).
-/// 2. Capture finger on page → fingertip hit-test → show Sinhala letter from map.
+/// 2. Capture finger on page → fingertip hit-test → show English letter from map.
 ///
 /// Covered-character identification uses **geometry only** (no CNN on finger photo).
 class LearningScreen extends StatefulWidget {
@@ -79,6 +79,7 @@ class _LearningScreenState extends State<LearningScreen> {
   Future<void> _exit() async {
     if (_isExiting) return;
     setState(() => _isExiting = true);
+    widget.audioService.stopListening();
     await widget.audioService.stopSpeech();
     await widget.audioService.hapticLight();
     await widget.audioService.speak('Returning to main menu.');
@@ -186,6 +187,7 @@ class _LearningScreenState extends State<LearningScreen> {
       fingertipBox: tip.box,
     );
 
+    if (!mounted) return;
     setState(() {
       _fingerJpeg = jpeg;
       _fingertip = tip;
@@ -284,9 +286,7 @@ class _LearningScreenState extends State<LearningScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onDoubleTap: _exit,
-      child: Scaffold(
+    return Scaffold(
         backgroundColor: Colors.black,
         body: Stack(
           fit: StackFit.expand,
@@ -297,8 +297,7 @@ class _LearningScreenState extends State<LearningScreen> {
             if (_busy) const ColoredBox(color: Color(0x88000000), child: Center(child: CircularProgressIndicator(color: AppTheme.primaryYellow))),
           ],
         ),
-      ),
-    );
+      );
   }
 
   Widget _buildImageArea() {
