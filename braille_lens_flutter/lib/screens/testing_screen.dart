@@ -8,10 +8,11 @@ import '../services/audio_service.dart';
 import '../services/camera_service.dart';
 import '../services/classifier_service.dart';
 import '../services/covered_cell_service.dart';
-import '../services/coordinate_mapper.dart';
 import '../services/fingertip_onnx_service.dart';
+import '../services/frame_registration.dart';
 import '../services/prescan_bridge.dart';
 import '../theme/app_theme.dart';
+import '../utils/dot_sequence.dart';
 import '../utils/image_decode.dart';
 import '../widgets/frozen_image_view.dart';
 import '../widgets/tap_fingertip_dialog.dart';
@@ -202,10 +203,10 @@ class _TestingScreenState extends State<TestingScreen> {
       _fingerJpeg = null;
       _fingertip = null;
       _covered = null;
-      _statusLine = 'Find the cell with ${target.dots}, then tap Detect.';
+      _statusLine = 'Find the cell with ${compactDotSequence(target.dots)}, then tap Detect.';
     });
     widget.audioService.speak('සොයන්න ${target.si}');
-    widget.audioService.speak('Find the cell with ${target.dots}.');
+    widget.audioService.speak('Find the cell with ${compactDotSequence(target.dots)}.');
   }
 
   Future<void> _checkFinger() async {
@@ -235,12 +236,23 @@ class _TestingScreenState extends State<TestingScreen> {
       return;
     }
 
+    FrameRegistrationResult? reg;
+    if (_prescanJpeg != null) {
+      reg = await FrameRegistration.estimate(
+        referenceJpeg: _prescanJpeg!,
+        liveJpeg: jpeg,
+        liveMask: tip.box,
+      );
+    }
+
     final result = _coveredCell.resolve(
       tipInFingerImage: tip.contactPoint,
       cellMap: _cellMap!,
       fingerImageWidth: tip.imageWidth,
       fingerImageHeight: tip.imageHeight,
       fingertipBox: tip.box,
+      homography: reg?.homography,
+      alignMode: reg?.alignMode ?? 'scale',
     );
 
     final target = _target!;
@@ -255,8 +267,8 @@ class _TestingScreenState extends State<TestingScreen> {
       if (matched) _correct++;
       _busy = false;
       _statusLine = result.hasHit
-          ? '${result.cell!.detectedCellLabel} detected under finger'
-          : 'No cell under fingertip — try again';
+          ? '${result.compactDots} · ${result.headline}'
+          : result.subtitle;
     });
 
     if (matched) {
@@ -295,35 +307,6 @@ class _TestingScreenState extends State<TestingScreen> {
     );
   }
 
-  CellMap? _mappedCellsForFingerFrame() {
-    final map = _cellMap;
-    final tip = _fingertip;
-    if (map == null || tip == null) return map;
-    final mapped = map.cells.map((c) {
-      final r = CoordinateMapper.mapCellToFingerImage(
-        cell: c,
-        prescanWidth: map.imageWidth,
-        prescanHeight: map.imageHeight,
-        fingerImageWidth: tip.imageWidth,
-        fingerImageHeight: tip.imageHeight,
-      );
-      return BrailleCell(
-        id: c.id,
-        x0: r.left,
-        y0: r.top,
-        x1: r.right,
-        y1: r.bottom,
-        char: c.char,
-        pattern: c.pattern,
-        code: c.code,
-        conf: c.conf,
-        line: c.line,
-        col: c.col,
-      );
-    }).toList();
-    return CellMap(cells: mapped, imageWidth: tip.imageWidth, imageHeight: tip.imageHeight);
-  }
-
   @override
   void dispose() {
     _fingertipOnnx.dispose();
@@ -360,8 +343,6 @@ class _TestingScreenState extends State<TestingScreen> {
     if (_fingerJpeg != null) {
       return FrozenImageView(
         jpeg: _fingerJpeg!,
-        cellMap: _mappedCellsForFingerFrame(),
-        highlighted: _covered?.cell,
         fingertip: _fingertip,
       );
     }
@@ -463,8 +444,13 @@ class _TestingScreenState extends State<TestingScreen> {
               const Text('FIND', style: TextStyle(color: Colors.white70, fontSize: 12, letterSpacing: 1.1)),
               const SizedBox(height: 4),
               Text(
-                target?.si ?? '—',
+                compactDotSequence(target?.dots),
                 style: TextStyle(fontSize: 56, fontWeight: FontWeight.bold, color: resultColor),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                target?.si ?? '—',
+                style: const TextStyle(color: Colors.white70, fontSize: 18, fontWeight: FontWeight.w600),
               ),
               if (_lastCorrect != null) ...[
                 const SizedBox(height: 4),
@@ -488,14 +474,6 @@ class _TestingScreenState extends State<TestingScreen> {
                 style: TextStyle(color: Colors.white.withValues(alpha: 0.45), fontSize: 12),
               ),
             ],
-            if (_cellMap != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: Text(
-                  'Stage 1: ${_cellMap!.cells.length} cells @ ${_cellMap!.imageWidth}x${_cellMap!.imageHeight}px',
-                  style: TextStyle(color: Colors.white.withValues(alpha: 0.35), fontSize: 11),
-                ),
-              ),
             const SizedBox(height: 16),
             SizedBox(
               width: double.infinity,

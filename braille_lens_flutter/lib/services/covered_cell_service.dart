@@ -1,6 +1,8 @@
 import 'dart:ui';
 
 import '../models/braille_cell.dart';
+import '../utils/dot_sequence.dart';
+import '../utils/homography.dart';
 import 'cell_hit_test.dart';
 import 'coordinate_mapper.dart';
 
@@ -10,12 +12,14 @@ class CoveredCellResult {
   final Offset tipInPrescan;
   final Offset tipInFingerImage;
   final Rect? fingertipBox;
+  final String alignMode;
 
   const CoveredCellResult({
     required this.cell,
     required this.tipInPrescan,
     required this.tipInFingerImage,
     this.fingertipBox,
+    this.alignMode = 'scale',
   });
 
   bool get hasHit => cell != null;
@@ -27,10 +31,13 @@ class CoveredCellResult {
     return c.displayLabel;
   }
 
+  /// Raised-dot sequence for the bottom terminal (e.g. 124, 34).
+  String get compactDots => compactDotSequence(cell?.pattern);
+
   String get subtitle {
     final c = cell;
-    if (c == null) return 'No cell under fingertip';
-    return '${c.detectedCellLabel} · dots ${c.patternLabel} · ${(c.conf * 100).round()}% confident';
+    if (c == null) return 'no cell under tip · align: $alignMode';
+    return '${headline} · align: $alignMode';
   }
 }
 
@@ -38,21 +45,26 @@ class CoveredCellResult {
 class CoveredCellService {
   /// [tipInFingerImage] — contact point in stage-2 JPEG pixel coordinates.
   /// [cellMap] — stage-1 prescan with labels already assigned.
+  /// [homography] — optional live→prescan 3x3; otherwise independent X/Y scale.
   CoveredCellResult resolve({
     required Offset tipInFingerImage,
     required CellMap cellMap,
     required int fingerImageWidth,
     required int fingerImageHeight,
     Rect? fingertipBox,
+    Homography? homography,
+    String alignMode = 'scale',
     double marginFrac = 0.12,
   }) {
-    final tipInPrescan = CoordinateMapper.mapFingerTipToPrescan(
-      tipInFingerImage: tipInFingerImage,
-      prescanWidth: cellMap.imageWidth,
-      prescanHeight: cellMap.imageHeight,
-      fingerImageWidth: fingerImageWidth,
-      fingerImageHeight: fingerImageHeight,
-    );
+    final tipInPrescan = homography != null
+        ? homography.transform(tipInFingerImage)
+        : CoordinateMapper.mapFingerTipToPrescan(
+            tipInFingerImage: tipInFingerImage,
+            prescanWidth: cellMap.imageWidth,
+            prescanHeight: cellMap.imageHeight,
+            fingerImageWidth: fingerImageWidth,
+            fingerImageHeight: fingerImageHeight,
+          );
 
     final hit = CellHitTest.hitTest(
       tipInPrescan,
@@ -66,6 +78,7 @@ class CoveredCellService {
       tipInPrescan: tipInPrescan,
       tipInFingerImage: tipInFingerImage,
       fingertipBox: fingertipBox,
+      alignMode: homography != null ? 'homography' : alignMode,
     );
   }
 }

@@ -7,8 +7,8 @@ import '../models/braille_cell.dart';
 import '../services/audio_service.dart';
 import '../services/camera_service.dart';
 import '../services/covered_cell_service.dart';
-import '../services/coordinate_mapper.dart';
 import '../services/fingertip_onnx_service.dart';
+import '../services/frame_registration.dart';
 import '../services/prescan_bridge.dart';
 import '../theme/app_theme.dart';
 import '../utils/image_decode.dart';
@@ -170,22 +170,34 @@ class _LearningScreenState extends State<LearningScreen> {
       return;
     }
 
+    FrameRegistrationResult? reg;
+    if (_prescanJpeg != null) {
+      reg = await FrameRegistration.estimate(
+        referenceJpeg: _prescanJpeg!,
+        liveJpeg: jpeg,
+        liveMask: tip.box,
+      );
+    }
+
     final result = _coveredCell.resolve(
       tipInFingerImage: tip.contactPoint,
       cellMap: _cellMap!,
       fingerImageWidth: tip.imageWidth,
       fingerImageHeight: tip.imageHeight,
       fingertipBox: tip.box,
+      homography: reg?.homography,
+      alignMode: reg?.alignMode ?? 'scale',
     );
 
+    if (!mounted) return;
     setState(() {
       _fingerJpeg = jpeg;
       _fingertip = tip;
       _covered = result;
       _busy = false;
       _statusLine = result.hasHit
-          ? '${result.cell!.detectedCellLabel} detected under finger'
-          : 'No cell under fingertip — rescan page or adjust finger';
+          ? '${result.compactDots} · ${result.headline}'
+          : result.subtitle;
     });
 
     if (result.hasHit) {
@@ -238,39 +250,6 @@ class _LearningScreenState extends State<LearningScreen> {
       _statusLine = null;
     });
     widget.audioService.speak('Rescanning page. Capture when ready.');
-  }
-
-  CellMap? _mappedCellsForFingerFrame() {
-    final map = _cellMap;
-    final tip = _fingertip;
-    if (map == null || tip == null) return map;
-    final mapped = map.cells.map((c) {
-      final r = CoordinateMapper.mapCellToFingerImage(
-        cell: c,
-        prescanWidth: map.imageWidth,
-        prescanHeight: map.imageHeight,
-        fingerImageWidth: tip.imageWidth,
-        fingerImageHeight: tip.imageHeight,
-      );
-      return BrailleCell(
-        id: c.id,
-        x0: r.left,
-        y0: r.top,
-        x1: r.right,
-        y1: r.bottom,
-        char: c.char,
-        pattern: c.pattern,
-        code: c.code,
-        conf: c.conf,
-        line: c.line,
-        col: c.col,
-      );
-    }).toList();
-    return CellMap(
-      cells: mapped,
-      imageWidth: tip.imageWidth,
-      imageHeight: tip.imageHeight,
-    );
   }
 
   @override
@@ -331,8 +310,6 @@ class _LearningScreenState extends State<LearningScreen> {
     if (_stage == _LearningStage.fingerResult && _fingerJpeg != null) {
       return FrozenImageView(
         jpeg: _fingerJpeg!,
-        cellMap: _mappedCellsForFingerFrame(),
-        highlighted: _covered?.cell,
         fingertip: _fingertip,
       );
     }
@@ -463,11 +440,6 @@ class _LearningScreenState extends State<LearningScreen> {
 
   Widget _buildBottomPanel() {
     final covered = _covered;
-    final headline = covered?.headline ?? '—';
-    final subtitle = covered?.subtitle ??
-        (_cellMap != null
-            ? '${_cellMap!.cells.length} cells ready'
-            : 'Capture a hand-free page photo');
 
     return Positioned(
       left: 0,
@@ -492,33 +464,26 @@ class _LearningScreenState extends State<LearningScreen> {
               const Padding(
                 padding: EdgeInsets.only(bottom: 8),
                 child: Text(
-                  '👆 FINGER TRACKED',
+                  'FINGER TRACKED',
                   style: TextStyle(color: Color(0xFF00E5FF), fontWeight: FontWeight.bold),
                 ),
               ),
-            if (covered?.hasHit == true) ...[
-              const Text(
-                'SINHALA CHARACTER',
-                style: TextStyle(color: Colors.white70, fontSize: 12, letterSpacing: 1.1),
+            Text(
+              covered?.hasHit == true ? covered!.compactDots : '—',
+              style: const TextStyle(
+                fontSize: 56,
+                fontWeight: FontWeight.bold,
+                color: AppTheme.primaryYellow,
               ),
-              const SizedBox(height: 4),
-              Text(
-                headline,
-                style: const TextStyle(fontSize: 56, fontWeight: FontWeight.bold, color: AppTheme.primaryYellow),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                'Detected ${covered!.cell!.detectedCellLabel}',
-                style: const TextStyle(color: Color(0xFF00E5FF), fontWeight: FontWeight.w600),
-              ),
-            ] else
-              Text(
-                headline,
-                style: const TextStyle(fontSize: 42, fontWeight: FontWeight.bold, color: AppTheme.primaryYellow),
-              ),
+            ),
             const SizedBox(height: 6),
             Text(
-              subtitle,
+              covered?.hasHit == true
+                  ? covered!.subtitle
+                  : (covered?.subtitle ??
+                      (_cellMap != null
+                          ? 'Place a finger, then tap capture'
+                          : 'Capture a hand-free page photo')),
               textAlign: TextAlign.center,
               style: const TextStyle(color: Colors.white70, fontSize: 15),
             ),
@@ -530,14 +495,6 @@ class _LearningScreenState extends State<LearningScreen> {
                 style: TextStyle(color: Colors.white.withValues(alpha: 0.45), fontSize: 12),
               ),
             ],
-            if (_cellMap != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: Text(
-                  'Stage 1: ${_cellMap!.cells.length} cells @ ${_cellMap!.imageWidth}x${_cellMap!.imageHeight}px',
-                  style: TextStyle(color: Colors.white.withValues(alpha: 0.35), fontSize: 11),
-                ),
-              ),
             const SizedBox(height: 16),
             SizedBox(
               width: double.infinity,
