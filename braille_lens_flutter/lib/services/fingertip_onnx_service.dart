@@ -1,6 +1,4 @@
 import 'dart:math';
-import 'dart:typed_data';
-import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -8,6 +6,7 @@ import 'package:image/image.dart' as img;
 import 'package:onnxruntime/onnxruntime.dart';
 
 import '../config/app_config.dart';
+import '../utils/image_decode.dart';
 
 /// YOLO26n fingertip detector — stage 2 only (where the finger is).
 /// Covered character comes from prescan hit-test, not this model.
@@ -60,7 +59,7 @@ class FingertipOnnxService {
     final session = _session;
     if (session == null) return null;
 
-    final decoded = img.decodeImage(jpegBytes);
+    final decoded = decodeUpright(jpegBytes);
     if (decoded == null) return null;
 
     final origW = decoded.width;
@@ -83,43 +82,27 @@ class FingertipOnnxService {
       return null;
     }
 
-    dynamic outValue;
-    if (outputs is Map) {
-      outValue = outputs['output0']?.value ?? outputs.values.first?.value;
-      for (final o in outputs.values) {
-        o?.release();
-      }
-    } else {
-      outValue = outputs[0]?.value ?? outputs[0];
-      for (final o in outputs) {
-        o?.release();
-      }
+    final dynamic outValue = outputs[0]?.value;
+    for (final o in outputs) {
+      o?.release();
     }
 
     final rows = _parseOutputRows(outValue);
     const confThresh = 0.25;
     Map<String, dynamic>? best;
     for (final row in rows) {
-      if (row.length < 5) continue;
-      var x1 = row[0];
-      var y1 = row[1];
-      var x2 = row[2];
-      var y2 = row[3];
-      final conf = row.length >= 5 ? row[4] : 0.0;
-      final cls = row.length >= 6 ? row[5].round() : 0;
+      if (row.length < 6) continue;
+      final conf = (row[4] as num).toDouble();
+      final cls = (row[5] as num).toInt();
       if (conf < confThresh || cls != 0) continue;
-      if (x2 < x1 || y2 < y1) {
-        final cx = row[0];
-        final cy = row[1];
-        final w = row[2];
-        final h = row[3];
-        x1 = cx - w / 2;
-        y1 = cy - h / 2;
-        x2 = cx + w / 2;
-        y2 = cy + h / 2;
-      }
       if (best == null || conf > (best['conf'] as double)) {
-        best = {'x1': x1, 'y1': y1, 'x2': x2, 'y2': y2, 'conf': conf};
+        best = {
+          'x1': row[0],
+          'y1': row[1],
+          'x2': row[2],
+          'y2': row[3],
+          'conf': conf,
+        };
       }
     }
     if (best == null) return null;
@@ -161,30 +144,11 @@ class FingertipOnnxService {
     _ready = false;
   }
 
-    List<List<double>> _parseOutputRows(dynamic value) {
+  List<List<dynamic>> _parseOutputRows(dynamic value) {
     if (value is! List || value.isEmpty) return [];
-    dynamic node = value;
-    if (node.length == 1 && node[0] is List) {
-      node = node[0];
-    }
-    if (node is! List || node.isEmpty) return [];
-    if (node[0] is! List) return [];
-
-    final asRows = <List<double>>[];
-    for (final r in node) {
-      if (r is List && r.isNotEmpty && r[0] is num) {
-        asRows.add(r.map((e) => (e as num).toDouble()).toList());
-      }
-    }
-    if (asRows.isEmpty) return [];
-
-    // Ultralytics ONNX is often [C, N] (e.g. 6 x 8400), not [N, C].
-    if (asRows.length <= 16 && asRows.first.length > 32) {
-      final c = asRows.length;
-      final n = asRows.first.length;
-      return List.generate(n, (i) => List.generate(c, (k) => asRows[k][i]));
-    }
-    return asRows;
+    final outer = value[0];
+    if (outer is! List) return [];
+    return outer.map((r) => r is List ? r : <dynamic>[]).toList();
   }
 
   Float32List _toTensor(img.Image rgb, int size) {

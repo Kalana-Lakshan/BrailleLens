@@ -89,6 +89,8 @@ class BrailleCell {
     if (pattern == '0' || pattern.isEmpty) return 'no dots';
     return pattern;
   }
+
+  String get detectedCellLabel => code == 0 ? 'Unknown cell' : 'Cell $code';
 }
 
 /// All cells detected during stage-1 prescan.

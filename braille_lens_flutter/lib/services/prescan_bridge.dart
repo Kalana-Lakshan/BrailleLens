@@ -1,17 +1,18 @@
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 
 import '../models/braille_cell.dart';
+import 'classifier_service.dart';
 import 'prescan_onnx_service.dart';
 
 /// Stage-1 prescan: detect all Braille cells and label each crop.
 ///
 /// Order:
-/// 1. On-device ONNX (`braille_model.onnx` + dot grid) — **default for phone**
+/// 1. On-device ONNX (`braille_cell_yolo26n.onnx` detector + `braille_cnn.onnx`
+///    classifier) — **default for phone**
 /// 2. Native MethodChannel `prescanPage`
 /// 3. HTTP PC server (`prescan_server.py`) if [prescanServerUrl] is set
 class PrescanBridge {
@@ -22,9 +23,13 @@ class PrescanBridge {
 
   static Future<bool> ensureOnDeviceReady() => _onDevice.initialize();
 
+  /// The on-device classifier's loaded labels (e.g. for Testing Mode to
+  /// draw a random target character from), without loading a second model.
+  static ClassifierService get classifier => _onDevice.classifier;
+
   Future<CellMap> prescanPage(
     Uint8List jpegBytes, {
-    String lang = 'en',
+    String lang = 'si',
     String backend = 'dnn',
     void Function(int done, int total)? onProgress,
   }) async {
@@ -87,7 +92,7 @@ class PrescanBridge {
     }
 
     throw PrescanUnavailableException(
-      'On-device prescan failed. Check lighting and that braille_model.onnx is bundled. '
+      'On-device prescan failed. Check lighting and that braille_cnn.onnx is bundled. '
       'Optional: set PrescanBridge.prescanServerUrl for PC server.',
     );
   }

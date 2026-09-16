@@ -30,7 +30,7 @@ class CoveredCellResult {
   String get subtitle {
     final c = cell;
     if (c == null) return 'No cell under fingertip';
-    return '${c.displayLabel} · ${c.patternLabel} · ${(c.conf * 100).round()}%';
+    return '${c.detectedCellLabel} · dots ${c.patternLabel} · ${(c.conf * 100).round()}% confident';
   }
 }
 

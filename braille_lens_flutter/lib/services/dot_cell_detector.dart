@@ -3,15 +3,13 @@ import 'dart:typed_data';
 
 import 'package:image/image.dart' as img;
 
-import '../models/braille_cell.dart';
-
 /// Finds Braille dot blobs on a page photo and groups them into cell boxes.
 /// Pure Dart — no YOLO. Used with [ClassifierService] for on-device prescan.
 class DotCellDetector {
   /// Max width for detection (faster on phone); boxes are scaled back to full res.
   static const int maxDetectWidth = 1280;
 
-  static List<_Dot> findDots(img.Image gray) {
+  static List<Dot> findDots(img.Image gray) {
     final w = gray.width;
     final h = gray.height;
     final pixels = gray.getBytes(order: img.ChannelOrder.rgb);
@@ -50,7 +48,7 @@ class DotCellDetector {
     return dots;
   }
 
-  static List<_Dot> _componentsFromMask(
+  static List<Dot> _componentsFromMask(
     int w,
     int h,
     Uint8List rgb,
@@ -68,7 +66,7 @@ class DotCellDetector {
     return _labelComponents(mask, w, h);
   }
 
-  static List<_Dot> _labelComponents(List<bool> mask, int w, int h) {
+  static List<Dot> _labelComponents(List<bool> mask, int w, int h) {
     final labels = List<int>.filled(w * h, 0);
     var next = 1;
     final sums = <int, List<double>>{};
@@ -107,12 +105,12 @@ class DotCellDetector {
     }
 
     return sums.entries
-        .map((e) => _Dot(e.value[0], e.value[1], sqrt(e.value[2] / pi)))
+        .map((e) => Dot(e.value[0], e.value[1], sqrt(e.value[2] / pi)))
         .toList();
   }
 
-  static List<_Dot> _filterComponents(
-    List<_Dot> raw,
+  static List<Dot> _filterComponents(
+    List<Dot> raw,
     int w,
     int h,
     double minA,
@@ -130,15 +128,15 @@ class DotCellDetector {
   }
 
   /// Group dots into cell bounding boxes (reading order).
-  static List<RectL> dotsToCellBoxes(List<_Dot> dots) {
+  static List<RectL> dotsToCellBoxes(List<Dot> dots) {
     if (dots.length < 4) return [];
 
-    final sorted = List<_Dot>.from(dots)..sort((a, b) => a.y.compareTo(b.y));
+    final sorted = List<Dot>.from(dots)..sort((a, b) => a.y.compareTo(b.y));
     final radii = dots.map((d) => d.radius).toList()..sort();
     final medR = radii[radii.length ~/ 2];
     final lineGap = medR * 4.5;
 
-    final lines = <List<_Dot>>[];
+    final lines = <List<Dot>>[];
     for (final d in sorted) {
       if (lines.isEmpty || d.y - lines.last.last.y > lineGap) {
         lines.add([d]);
@@ -152,7 +150,7 @@ class DotCellDetector {
 
     for (final line in lines) {
       line.sort((a, b) => a.x.compareTo(b.x));
-      var group = <_Dot>[line.first];
+      var group = <Dot>[line.first];
       for (var i = 1; i < line.length; i++) {
         if (line[i].x - group.last.x > cellGap) {
           boxes.add(_boxFromDots(group, medR));
@@ -166,7 +164,7 @@ class DotCellDetector {
     return boxes;
   }
 
-  static RectL _boxFromDots(List<_Dot> g, double medR) {
+  static RectL _boxFromDots(List<Dot> g, double medR) {
     var x0 = g.map((d) => d.x).reduce(min);
     var x1 = g.map((d) => d.x).reduce(max);
     var y0 = g.map((d) => d.y).reduce(min);
@@ -217,11 +215,11 @@ class DotCellDetector {
   }
 }
 
-class _Dot {
+class Dot {
   final double x;
   final double y;
   final double radius;
-  _Dot(this.x, this.y, this.radius);
+  Dot(this.x, this.y, this.radius);
 }
 
 class RectL {

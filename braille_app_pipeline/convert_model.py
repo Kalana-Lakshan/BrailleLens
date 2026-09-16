@@ -38,6 +38,20 @@ def convert():
         dynamic_axes={'input': {0: 'batch_size'}, 'output': {0: 'batch_size'}}
     )
     print(f"Successfully exported ONNX model to {onnx_path}")
+
+    # The onnxruntime build bundled in the Flutter `onnxruntime` package
+    # rejects ONNX IR version 10+ ("Unsupported model IR version: 10, max
+    # supported IR version: 9"). Recent torch.onnx.export builds (the
+    # dynamo-based exporter) emit IR 10 regardless of the requested
+    # opset_version above -- clamp it back down. opset 12 is well within
+    # IR 9's range, so this is safe. Same fix as braille_cnn/export_onnx.py.
+    import onnx
+    m = onnx.load(onnx_path)
+    if m.ir_version > 9:
+        original_ir_version = m.ir_version
+        m.ir_version = 9
+        onnx.save_model(m, onnx_path, save_as_external_data=False)
+        print(f"Clamped ONNX IR version to 9 (was {original_ir_version})")
     
     # Generate labels.txt
     labels = [chr(ord('a') + i) for i in range(26)]

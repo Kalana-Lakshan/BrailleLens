@@ -3,28 +3,20 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
-import '../utils/image_fit.dart';
+import 'frozen_image_view.dart';
 
-Future<Offset?> showTapFingertipDialog({
-  required BuildContext context,
-  required Uint8List jpeg,
-}) {
-  return showDialog<Offset>(
-    context: context,
-    barrierDismissible: false,
-    builder: (ctx) => _TapFingertipDialog(jpeg: jpeg),
-  );
-}
-
-class _TapFingertipDialog extends StatefulWidget {
+/// Fallback when the ONNX fingertip model is missing/fails: shows the just-
+/// captured photo and lets the user tap where their fingertip is, returning
+/// that point in the photo's own pixel coordinates (or null if dismissed).
+class TapFingertipDialog extends StatefulWidget {
   final Uint8List jpeg;
-  const _TapFingertipDialog({required this.jpeg});
+  const TapFingertipDialog({super.key, required this.jpeg});
 
   @override
-  State<_TapFingertipDialog> createState() => _TapFingertipDialogState();
+  State<TapFingertipDialog> createState() => _TapFingertipDialogState();
 }
 
-class _TapFingertipDialogState extends State<_TapFingertipDialog> {
+class _TapFingertipDialogState extends State<TapFingertipDialog> {
   ui.Image? _image;
 
   @override
@@ -36,8 +28,7 @@ class _TapFingertipDialogState extends State<_TapFingertipDialog> {
   Future<void> _load() async {
     final codec = await ui.instantiateImageCodec(widget.jpeg);
     final frame = await codec.getNextFrame();
-    if (!mounted) return;
-    setState(() => _image = frame.image);
+    if (mounted) setState(() => _image = frame.image);
   }
 
   @override
@@ -52,37 +43,26 @@ class _TapFingertipDialogState extends State<_TapFingertipDialog> {
             ? const Center(child: CircularProgressIndicator())
             : GestureDetector(
                 onTapDown: (d) {
-                  if (_image == null) return;
-                  final mapped = ImageFit.viewToImage(
-                    d.localPosition,
-                    const Size(280, 360),
-                    _image!.width,
-                    _image!.height,
-                  );
-                  if (mapped == null) return;
-                  Navigator.pop(context, mapped);
+                  final box = context.findRenderObject() as RenderBox?;
+                  if (box == null || _image == null) return;
+                  final local = box.globalToLocal(d.globalPosition);
+                  final scale = 280 / _image!.width;
+                  final scaleY = 360 / _image!.height;
+                  final s = scale < scaleY ? scale : scaleY;
+                  final dw = _image!.width * s;
+                  final dh = _image!.height * s;
+                  final ox = (280 - dw) / 2;
+                  final oy = (360 - dh) / 2;
+                  final ix = ((local.dx - ox) / s).clamp(0, _image!.width.toDouble());
+                  final iy = ((local.dy - oy) / s).clamp(0, _image!.height.toDouble());
+                  Navigator.pop(context, Offset(ix.toDouble(), iy.toDouble()));
                 },
                 child: CustomPaint(
-                  painter: _StillPainter(_image!),
+                  painter: ImagePainter(_image!),
                   size: const Size(280, 360),
                 ),
               ),
       ),
     );
   }
-}
-
-class _StillPainter extends CustomPainter {
-  final ui.Image image;
-  _StillPainter(this.image);
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final src = Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble());
-    final dst = ImageFit.fittedRect(size, image.width / image.height);
-    canvas.drawImageRect(image, src, dst, Paint());
-  }
-
-  @override
-  bool shouldRepaint(_StillPainter old) => old.image != image;
 }
