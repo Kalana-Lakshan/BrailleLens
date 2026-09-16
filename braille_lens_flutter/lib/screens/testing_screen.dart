@@ -10,7 +10,6 @@ import '../services/glass_device_service.dart';
 import '../services/classifier_service.dart';
 import '../services/covered_cell_service.dart';
 import '../services/fingertip_onnx_service.dart';
-import '../services/frame_registration.dart';
 import '../services/prescan_bridge.dart';
 import '../theme/app_theme.dart';
 import '../utils/dot_sequence.dart';
@@ -269,23 +268,20 @@ class _TestingScreenState extends State<TestingScreen> {
       return;
     }
 
-    FrameRegistrationResult? reg;
-    if (_prescanJpeg != null) {
-      reg = await FrameRegistration.estimate(
-        referenceJpeg: _prescanJpeg!,
-        liveJpeg: jpeg,
-        liveMask: tip.box,
-      );
+    if (mounted) {
+      setState(() => _statusLine = 'Aligning this frame with the scanned page…');
     }
+    final liveCells = await _prescanBridge.detectCellBoxes(jpeg);
 
-    final result = _coveredCell.resolve(
+    final result = await _coveredCell.resolveAligned(
+      fingerJpeg: jpeg,
       tipInFingerImage: tip.contactPoint,
       cellMap: _cellMap!,
       fingerImageWidth: tip.imageWidth,
       fingerImageHeight: tip.imageHeight,
+      fingerFrameCells: liveCells,
       fingertipBox: tip.box,
-      homography: reg?.homography,
-      alignMode: reg?.alignMode ?? 'scale',
+      prescanJpeg: _prescanJpeg,
     );
 
     final target = _target!;
@@ -374,6 +370,8 @@ class _TestingScreenState extends State<TestingScreen> {
     );
   }
 
+  /// Cell boxes belong to stage 1 only — see the note on Learning Mode's
+  /// image area.
   Widget _buildImageArea() {
     if (_fingerJpeg != null) {
       return FrozenImageView(
@@ -381,7 +379,7 @@ class _TestingScreenState extends State<TestingScreen> {
         fingertip: _fingertip,
       );
     }
-    if (_prescanJpeg != null && _cellMap != null) {
+    if (_stage == _TestStage.prescan && _prescanJpeg != null && _cellMap != null) {
       return FrozenImageView(jpeg: _prescanJpeg!, cellMap: _cellMap);
     }
     return _camera.buildPreview();

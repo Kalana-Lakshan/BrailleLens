@@ -8,15 +8,31 @@ class CellHitTest {
   /// Return the cell under [tip] in prescan pixel coordinates.
   ///
   /// [skipEmpty] — prefer real Braille cells over synthetic code-0 gaps.
+  ///
+  /// [nearestWithinCells] — how far outside every box the tip may still land
+  /// and be resolved, in multiples of a cell width. A finger pad covers a cell
+  /// far more generously than the single contact point the detector reports,
+  /// so demanding the point fall inside a box rejects plenty of genuine
+  /// touches. Set to 0 to require a strict containment hit.
   static BrailleCell? hitTest(
     Offset tip,
     CellMap cellMap, {
     double marginFrac = 0.12,
     bool skipEmpty = true,
+    double nearestWithinCells = 1.0,
   }) {
     if (cellMap.cells.isEmpty) return null;
 
     var hits = cellMap.cells.where((c) => _contains(c, tip, marginFrac)).toList();
+
+    if (hits.isEmpty && nearestWithinCells > 0) {
+      final radius = _medianCellWidth(cellMap.cells) * nearestWithinCells;
+      if (radius > 0) {
+        hits = cellMap.cells
+            .where((c) => (c.center - tip).distance <= radius)
+            .toList();
+      }
+    }
     if (hits.isEmpty) return null;
 
     if (skipEmpty) {
@@ -32,6 +48,16 @@ class CellHitTest {
       return da.compareTo(db);
     });
     return hits.first;
+  }
+
+  /// Typical cell width, used as the unit for distance tolerances.
+  static double medianCellWidth(CellMap cellMap) => _medianCellWidth(cellMap.cells);
+
+  static double _medianCellWidth(List<BrailleCell> cells) {
+    if (cells.isEmpty) return 0;
+    final widths = cells.map((c) => c.x1 - c.x0).where((w) => w > 0).toList()..sort();
+    if (widths.isEmpty) return 0;
+    return widths[widths.length ~/ 2];
   }
 
   static bool _contains(BrailleCell cell, Offset tip, double marginFrac) {

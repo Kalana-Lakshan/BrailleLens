@@ -9,7 +9,6 @@ import '../services/camera_source.dart';
 import '../services/glass_device_service.dart';
 import '../services/covered_cell_service.dart';
 import '../services/fingertip_onnx_service.dart';
-import '../services/frame_registration.dart';
 import '../services/prescan_bridge.dart';
 import '../theme/app_theme.dart';
 import '../utils/image_decode.dart';
@@ -22,7 +21,10 @@ enum _LearningStage { prescan, fingerResult }
 /// 1. Capture hand-free page → prescan builds CellMap (yellow boxes).
 /// 2. Capture finger on page → fingertip hit-test → show Sinhala letter from map.
 ///
-/// Covered-character identification uses **geometry only** (no CNN on finger photo).
+/// Covered-character identification uses **geometry only**: the finger frame
+/// is aligned onto the prescan and the label is read off the prescan map. The
+/// CNN never sees the finger frame, where the hand hides the very dots that
+/// would have to be classified.
 class LearningScreen extends StatefulWidget {
   final AudioService audioService;
 
@@ -211,23 +213,20 @@ class _LearningScreenState extends State<LearningScreen> {
       return;
     }
 
-    FrameRegistrationResult? reg;
-    if (_prescanJpeg != null) {
-      reg = await FrameRegistration.estimate(
-        referenceJpeg: _prescanJpeg!,
-        liveJpeg: jpeg,
-        liveMask: tip.box,
-      );
+    if (mounted) {
+      setState(() => _statusLine = 'Aligning this frame with the scanned page…');
     }
+    final liveCells = await _prescanBridge.detectCellBoxes(jpeg);
 
-    final result = _coveredCell.resolve(
+    final result = await _coveredCell.resolveAligned(
+      fingerJpeg: jpeg,
       tipInFingerImage: tip.contactPoint,
       cellMap: _cellMap!,
       fingerImageWidth: tip.imageWidth,
       fingerImageHeight: tip.imageHeight,
+      fingerFrameCells: liveCells,
       fingertipBox: tip.box,
-      homography: reg?.homography,
-      alignMode: reg?.alignMode ?? 'scale',
+      prescanJpeg: _prescanJpeg,
     );
 
     if (!mounted) return;
@@ -349,12 +348,19 @@ class _LearningScreenState extends State<LearningScreen> {
     );
   }
 
+  /// Cell boxes belong to stage 1 only. In stage 2 they would be drawn where
+  /// the *scan* saw cells, which is not where the cells are in the frame the
+  /// learner is looking at — so stage 2 shows the live view while aiming and
+  /// the captured frame with just the fingertip marker afterwards.
   Widget _buildImageArea() {
-    if (_stage == _LearningStage.fingerResult && _fingerJpeg != null) {
-      return FrozenImageView(
-        jpeg: _fingerJpeg!,
-        fingertip: _fingertip,
-      );
+    if (_stage == _LearningStage.fingerResult) {
+      if (_fingerJpeg != null) {
+        return FrozenImageView(
+          jpeg: _fingerJpeg!,
+          fingertip: _fingertip,
+        );
+      }
+      return _camera.buildPreview();
     }
     if (_prescanJpeg != null && _cellMap != null) {
       return FrozenImageView(
