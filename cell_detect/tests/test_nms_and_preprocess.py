@@ -9,12 +9,14 @@ from cell_detect.preprocess import apply_clahe, deskew_page, remap_boxes, _order
 
 
 def test_cd01_iou_identical_and_disjoint():
+    """Check IoU is 1.0 for the same box and 0.0 for two boxes that do not overlap."""
     box = (0.0, 0.0, 10.0, 10.0)
     assert _iou(box, box) == 1.0
     assert _iou(box, (20.0, 20.0, 30.0, 30.0)) == 0.0
 
 
 def test_cd02_iou_partial_overlap():
+    """Check two 10x10 boxes that overlap on a 5x10 strip have IoU 50/150."""
     a = (0.0, 0.0, 10.0, 10.0)
     b = (5.0, 0.0, 15.0, 10.0)
     # intersection 50, union 150
@@ -22,6 +24,7 @@ def test_cd02_iou_partial_overlap():
 
 
 def test_cd03_merge_detections_keeps_higher_conf():
+    """Check NMS keeps the 0.9 overlapping box and the far 0.8 box; drops the 0.4 duplicate."""
     dets = [
         {"xyxy": (0.0, 0.0, 10.0, 10.0), "conf": 0.4},
         {"xyxy": (1.0, 1.0, 11.0, 11.0), "conf": 0.9},
@@ -34,6 +37,7 @@ def test_cd03_merge_detections_keeps_higher_conf():
 
 
 def test_cd04_empty_image_has_no_page_quad():
+    """Check a flat grey image has no page outline, so deskew must no-op (inverse is None)."""
     blank = np.full((120, 160, 3), 128, dtype=np.uint8)
     warped, inv = deskew_page(blank, min_area_frac=0.25)
     assert inv is None
@@ -41,6 +45,7 @@ def test_cd04_empty_image_has_no_page_quad():
 
 
 def test_cd05_clahe_preserves_shape():
+    """Check CLAHE may change pixels but width, height, and channels stay the same."""
     img = np.zeros((32, 32, 3), dtype=np.uint8)
     img[8:24, 8:24] = 200
     out = apply_clahe(img, clip_limit=2.0)
@@ -48,6 +53,7 @@ def test_cd05_clahe_preserves_shape():
 
 
 def test_cd06_order_corners_tl_tr_br_bl():
+    """Check four unordered corners are sorted to top-left, top-right, bottom-right, bottom-left."""
     pts = np.array([[10, 0], [0, 0], [10, 10], [0, 10]], dtype=np.float32)
     ordered = _order_corners(pts)
     assert list(ordered[0]) == [0.0, 0.0]
@@ -57,6 +63,7 @@ def test_cd06_order_corners_tl_tr_br_bl():
 
 
 def test_cd07_remap_boxes_identity():
+    """Check mapping boxes through an identity matrix leaves xyxy unchanged."""
     ident = np.eye(3, dtype=np.float32)
     boxes = [(2.0, 4.0, 8.0, 12.0)]
     out = remap_boxes(boxes, ident)

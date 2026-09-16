@@ -1,4 +1,8 @@
-"""DI-* data-integrity cases for data_pipeline (SRS FR 10). No UI, no DBMS."""
+"""DI-* data-integrity cases for data_pipeline (SRS FR 10). No UI, no DBMS.
+
+Each function below is a runnable pytest case. The docstring on a helper or
+test states what that function checks.
+"""
 
 from __future__ import annotations
 
@@ -20,6 +24,7 @@ from data_pipeline.contracts import (
 
 
 def _row(**overrides) -> dict:
+    """Build one fake Gold manifest row (page 1, code 19). Pass overrides to make it invalid."""
     base = dict(
         source="gold",
         image_path="Gold Dataset/pg-1.jpeg",
@@ -43,10 +48,12 @@ def _row(**overrides) -> dict:
 
 
 def test_di01_cellrow_matches_manifest_columns():
+    """Check CellRow field names match MANIFEST_COLUMNS so the CSV schema cannot drift."""
     assert [f for f in CellRow.__dataclass_fields__] == MANIFEST_COLUMNS
 
 
 def test_di02_dot_string_roundtrip_and_blank():
+    """Check '1345' matches six 0/1 flags, blank is code 0, and code 63 is all six dots."""
     assert dot_string_to_code("1345") == dots_to_code((1, 0, 1, 1, 1, 0))
     assert code_to_dot_string(0) == "0"
     assert dot_string_to_code("") == 0
@@ -54,6 +61,7 @@ def test_di02_dot_string_roundtrip_and_blank():
 
 
 def test_di03_bad_dot_string_raises():
+    """Check illegal annotations (dot 7, repeated digit) raise ValueError instead of a wrong code."""
     with pytest.raises(ValueError):
         dot_string_to_code("17")
     with pytest.raises(ValueError):
@@ -61,12 +69,14 @@ def test_di03_bad_dot_string_raises():
 
 
 def test_di04_validate_rejects_code_outside_0_63():
+    """Check validate_manifest flags code 99 (only 0-63 are legal 6-dot cells)."""
     frame = pd.DataFrame([_row(code=99, dots="125")])
     problems = validate_manifest(frame)
     assert any("0-63" in p for p in problems)
 
 
 def test_di05_validate_detects_page_group_leakage():
+    """Check the same page_group in train and test is reported as leakage (would inflate accuracy)."""
     frame = pd.DataFrame(
         [
             _row(split="train"),
@@ -79,6 +89,7 @@ def test_di05_validate_detects_page_group_leakage():
 
 
 def test_di06_clean_drops_inverted_out_of_page_and_duplicates():
+    """Check clean() drops inverted, off-page, duplicate, and dots/code-mismatch rows; one valid row remains."""
     rows = [
         _row(),  # keep
         _row(x0=50.0, x1=40.0, y0=10.0, y1=40.0),  # inverted
@@ -98,6 +109,7 @@ def test_di06_clean_drops_inverted_out_of_page_and_duplicates():
 
 
 def test_di07_clean_then_validate_no_leak_on_disjoint_groups():
+    """Check two different page groups (train vs test) pass cleaning with no leakage."""
     frame = pd.DataFrame(
         [
             _row(page_group="gold:pg-1", split="train"),
@@ -116,6 +128,7 @@ def test_di07_clean_then_validate_no_leak_on_disjoint_groups():
 
 
 def test_di08_manifest_roundtrip_preserves_columns(tmp_path):
+    """Check write/read CSV keeps contract column order and code 19."""
     path = tmp_path / "manifest.csv"
     write_manifest([_row()], path)
     frame = read_manifest(path)

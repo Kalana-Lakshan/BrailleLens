@@ -7,6 +7,7 @@ import 'package:braille_lens_flutter/services/coordinate_mapper.dart';
 import 'package:braille_lens_flutter/services/covered_cell_service.dart';
 import 'package:braille_lens_flutter/theme/app_theme.dart';
 
+/// One space cell and one ක cell on a 720x1280 prescan frame.
 CellMap _sampleMap() {
   return const CellMap(
     imageWidth: 720,
@@ -28,12 +29,14 @@ CellMap _sampleMap() {
 }
 
 void main() {
+  // Tip at (120,220) sits inside the ක box; hit id must be 1.
   test('FT-FL-01 hit_test finds cell under tip', () {
     final hit = CellHitTest.hitTest(const Offset(120, 220), _sampleMap());
     expect(hit?.char, 'ක');
     expect(hit?.id, 1);
   });
 
+  // A far tip, and a tip on an empty CellMap, must not invent a character.
   test('FT-FL-02 hit_test miss and empty map', () {
     expect(CellHitTest.hitTest(const Offset(500, 500), _sampleMap()), isNull);
     expect(
@@ -45,6 +48,7 @@ void main() {
     );
   });
 
+  // When the tip sits on both a synthetic space and a letter, prefer ත.
   test('FT-FL-03 skipEmpty prefers letter over synthetic space', () {
     final map = const CellMap(
       imageWidth: 100,
@@ -58,6 +62,7 @@ void main() {
     expect(hit?.char, 'ත');
   });
 
+  // Overlapping A and B still return one of those letters (nearest centre).
   test('FT-FL-04 overlap chooses nearest centre', () {
     final map = const CellMap(
       imageWidth: 200,
@@ -72,6 +77,7 @@ void main() {
     expect(['A', 'B'], contains(hit!.char));
   });
 
+  // Half-size finger photo tip (360,640) scales 2x into the 720x1280 prescan.
   test('FT-FL-05 coordinate mapper scales to prescan frame', () {
     final tip = CoordinateMapper.mapFingerTipToPrescan(
       tipInFingerImage: const Offset(360, 640),
@@ -84,6 +90,7 @@ void main() {
     expect(tip.dy, 1280);
   });
 
+  // Prescan width 0 must not divide by zero; return the original tip.
   test('FT-FL-06 invalid mapper sizes return original tip', () {
     final tip = CoordinateMapper.mapFingerTipToPrescan(
       tipInFingerImage: const Offset(10, 20),
@@ -95,6 +102,7 @@ void main() {
     expect(tip, const Offset(10, 20));
   });
 
+  // Full lookup: finger-photo tip -> prescan -> headline ත.
   test('FT-FL-07 covered cell service end-to-end', () {
     final map = const CellMap(
       imageWidth: 720,
@@ -122,6 +130,7 @@ void main() {
     expect(result.headline, 'ත');
   });
 
+  // JSON round-trip must keep cell count, ක on id 1, and image width.
   test('DI-FL-01 CellMap JSON round-trip does not drop cells', () {
     final original = _sampleMap();
     final copy = CellMap.fromJson(original.toJson());
@@ -130,6 +139,7 @@ void main() {
     expect(copy.imageWidth, 720);
   });
 
+  // Theme yellow on black must meet WCAG 7:1 contrast (SRS UI).
   test('UI-FL-01 yellow on black meets WCAG 7:1', () {
     final l1 = AppTheme.backgroundBlack.computeLuminance();
     final l2 = AppTheme.primaryYellow.computeLuminance();

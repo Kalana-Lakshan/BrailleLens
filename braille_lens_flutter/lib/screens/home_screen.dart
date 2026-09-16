@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../services/audio_service.dart';
 import '../services/bluetooth_service.dart';
 import '../theme/app_theme.dart';
+import '../utils/answer_match.dart';
 import 'learning_screen.dart';
 import 'model_check_screen.dart';
 import 'testing_screen.dart';
@@ -62,6 +64,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   // ── Initialization ────────────────────────────────────────────────────────────
 
   Future<void> _initialize() async {
+    await Permission.camera.request();
+    await Permission.microphone.request();
+    if (!mounted) return;
+
     // Run BT scan in background — update indicator when done
     _btService.scanForGlasses().then((found) {
       if (!mounted) return;
@@ -106,14 +112,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       if (!mounted || _navigating) break;
       setState(() => _isListeningForCommand = false);
 
-      if (command != null) {
-        if (command.contains('learn')) {
-          await _navigateTo('learning');
-          break;
-        } else if (command.contains('test')) {
-          await _navigateTo('testing');
-          break;
-        }
+      final mode = parseVoiceModeCommand(command);
+      if (mode != null) {
+        await _navigateTo(mode);
+        break;
       }
 
       // Brief gap before re-opening mic
@@ -149,11 +151,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
     if (mounted) {
       setState(() => _navigating = false);
-      // Re-start voice loop on return
       await Future.delayed(const Duration(milliseconds: 600));
+      if (!mounted || _navigating) return;
       await _audioService.speak(
         "Back at main menu. Say 'Learning' or 'Testing', or tap a side.",
       );
+      if (!mounted || _navigating) return;
       _startVoiceCommandLoop();
     }
   }
@@ -205,7 +208,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     onTap: () => _navigateTo('learning'),
                     child: _ModeZone(
                       title: 'LEARNING\nMODE',
-                      subtitle: 'Two-photo scan · Sinhala output',
+                      subtitle: 'Two-photo scan · English letters',
                       icon: Icons.school_rounded,
                       gradientBegin: AppTheme.learningZoneBlue,
                       gradientEnd: AppTheme.learningZoneBlue,
