@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:ui' show Rect;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -26,6 +27,18 @@ class PrescanBridge {
   /// The on-device classifier's loaded labels (e.g. for Testing Mode to
   /// draw a random target character from), without loading a second model.
   static ClassifierService get classifier => _onDevice.classifier;
+
+  /// Stage-2 geometry: where the cells are in the *finger* frame. Empty when
+  /// the on-device detector is unavailable, in which case callers fall back
+  /// to pixel-feature registration.
+  Future<List<Rect>> detectCellBoxes(Uint8List jpegBytes) async {
+    try {
+      return await _onDevice.detectCellBoxes(jpegBytes);
+    } catch (e) {
+      debugPrint('[PrescanBridge] finger-frame detect failed: $e');
+      return const [];
+    }
+  }
 
   Future<CellMap> prescanPage(
     Uint8List jpegBytes, {
@@ -104,4 +117,4 @@ class PrescanUnavailableException implements Exception {
   @override
   String toString() => message;
 }
-
+

@@ -11,7 +11,7 @@ import 'cell_overlay_painter.dart';
 /// Renders a frozen (already-captured) JPEG with the cell-map boxes and/or
 /// fingertip marker overlaid — shared between Learning and Testing Mode's
 /// "here's what Stage 1 / Stage 2 saw" view.
-class FrozenImageView extends StatelessWidget {
+class FrozenImageView extends StatefulWidget {
   final Uint8List jpeg;
   final CellMap? cellMap;
   final BrailleCell? highlighted;
@@ -26,9 +26,35 @@ class FrozenImageView extends StatelessWidget {
   });
 
   @override
+  State<FrozenImageView> createState() => _FrozenImageViewState();
+}
+
+class _FrozenImageViewState extends State<FrozenImageView> {
+  /// Decoded once per JPEG. Decoding inside build would restart on every
+  /// parent setState, blinking the spinner over an image that never changed.
+  late Future<ui.Image> _decoded;
+
+  @override
+  void initState() {
+    super.initState();
+    _decoded = _decode(widget.jpeg);
+  }
+
+  @override
+  void didUpdateWidget(FrozenImageView old) {
+    super.didUpdateWidget(old);
+    if (!identical(old.jpeg, widget.jpeg)) {
+      _decoded = _decode(widget.jpeg);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final cellMap = widget.cellMap;
+    final fingertip = widget.fingertip;
+
     return FutureBuilder<ui.Image>(
-      future: _decode(jpeg),
+      future: _decoded,
       builder: (context, snap) {
         if (!snap.hasData) {
           return const Center(child: CircularProgressIndicator(color: Color(0xFFFFD700)));
@@ -50,8 +76,8 @@ class FrozenImageView extends StatelessWidget {
                 if (cellMap != null)
                   CustomPaint(
                     painter: CellOverlayPainter(
-                      cells: cellMap!.cells,
-                      highlighted: highlighted,
+                      cells: cellMap.cells,
+                      highlighted: widget.highlighted,
                       imageWidth: imgW,
                       imageHeight: imgH,
                     ),
@@ -60,10 +86,10 @@ class FrozenImageView extends StatelessWidget {
                 if (fingertip != null)
                   CustomPaint(
                     painter: FingertipOverlayPainter(
-                      tipBox: fingertip!.box,
-                      contactPoint: fingertip!.contactPoint,
-                      imageWidth: fingertip!.imageWidth,
-                      imageHeight: fingertip!.imageHeight,
+                      tipBox: fingertip.box,
+                      contactPoint: fingertip.contactPoint,
+                      imageWidth: fingertip.imageWidth,
+                      imageHeight: fingertip.imageHeight,
                     ),
                     size: size,
                   ),

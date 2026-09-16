@@ -1,3 +1,5 @@
+import 'dart:ui' show Rect;
+
 import 'package:flutter/foundation.dart';
 import 'package:image/image.dart' as img;
 
@@ -26,6 +28,15 @@ class PrescanOnnxService {
   Future<bool> initialize() async {
     final results = await Future.wait([_cnn.initialize(), _detector.initialize()]);
     return results.every((ok) => ok);
+  }
+
+  /// Cell boxes only — detector, no classifier. Stage 2 uses this on the
+  /// finger frame purely as geometry to align against the stage-1 map; the
+  /// labels still come from the prescan, where no hand covers the dots.
+  Future<List<Rect>> detectCellBoxes(Uint8List jpegBytes) async {
+    if (!_detector.isReady && !await _detector.initialize()) return const [];
+    final dets = await _detector.detect(jpegBytes);
+    return dets.map((d) => d.box).toList();
   }
 
   /// Build [CellMap] from a full-page JPEG: detect every cell box, classify
