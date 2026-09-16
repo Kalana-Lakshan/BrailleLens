@@ -381,18 +381,25 @@ class GlassBridge(context: Context, messenger: BinaryMessenger) :
          * The physical frame button. This is the event Dart maps onto the same
          * handler as the on-screen capture button.
          *
-         * Note: the glasses only hand this to the app instead of taking their
-         * own photo when "custom take photo behavior" is enabled on the device
-         * — the reference app exposes it as a setting.
+         * Fires unconditionally: the SDK reads the action byte off the vendor
+         * packet and dispatches ACTION_TAKE_PHOTO (1) straight here, routing
+         * every *other* action value to onReceivedDeviceAction instead. There
+         * is no config flag gating it — SmartWearConfig carries only device
+         * type and audio format, and setSmartWearDeviceParam takes nothing
+         * else. So if the button appears dead, the cause is upstream (callback
+         * not registered, or the link down), not a missing setting.
          */
         override fun onDeviceTriggeredTakePhoto() {
             emit("type" to "BUTTON_CLICKED")
         }
 
+        /**
+         * Every device action *except* ACTION_TAKE_PHOTO, which the SDK
+         * delivers through onDeviceTriggeredTakePhoto above. Surfaced so an
+         * unexpected action shows up in logs rather than vanishing.
+         */
         override fun onReceivedDeviceAction(action: Int) {
-            if (action == SmartWearConstants.DeviceAction.ACTION_TAKE_PHOTO.toInt()) {
-                emit("type" to "BUTTON_CLICKED")
-            }
+            Log.d(TAG, "device action $action")
         }
 
         override fun onStartReceiveUserVoice() =
@@ -440,13 +447,16 @@ class GlassBridge(context: Context, messenger: BinaryMessenger) :
                 emitError("Glasses refused the live stream", "LIVE_STREAM")
                 return
             }
+            // Same URL shape the Realtek reference app plays:
+            // rtsp://<device ip>:554, no path component.
             val ip = access?.ipAddress
             emit(
                 "type" to "LIVE_STREAM",
                 "channel" to channel.toInt(),
                 "ssid" to access?.ssid,
                 "password" to access?.password,
-                "rtspUrl" to if (ip.isNullOrEmpty()) "" else "rtsp://$ip/live",
+                "ipAddress" to ip,
+                "rtspUrl" to if (ip.isNullOrEmpty()) "" else "rtsp://$ip:554",
             )
         }
 

@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:media_kit/media_kit.dart';
+import 'package:media_kit_video/media_kit_video.dart';
 
 import '../theme/app_theme.dart';
 import 'camera_service.dart';
@@ -92,20 +94,29 @@ class PhoneCameraSource implements CameraSource {
 
 /// Frames from the AI Glass.
 ///
-/// Preview is the RTSP live feed, surfaced by the native bridge as a stream of
-/// JPEG frames ([GlassDeviceService.videoFrames]) so the Dart side needs no
-/// video plugin. Capture asks the glasses for a full-resolution still rather
-/// than grabbing a preview frame — the live feed is downscaled and would cost
-/// the dot detector real accuracy.
+/// Preview is the RTSP feed the glasses publish at `rtsp://<ip>:554` once the
+/// native bridge has started a live session — the same URL the Realtek
+/// reference app plays. It is rendered with `media_kit` (libmpv), which does
+/// the H.264 depacketise and decode, so nothing here needs a custom native
+/// decoder.
+///
+/// Capture deliberately does *not* grab a preview frame: it asks the glasses
+/// for a full-resolution still over the vendor channel, because the live feed
+/// is downscaled and would cost the dot detector real accuracy.
 class GlassCameraSource implements CameraSource {
   final GlassDeviceService _glass;
 
   GlassCameraSource([GlassDeviceService? glass])
       : _glass = glass ?? GlassDeviceService.instance;
 
-  Uint8List? _latestFrame;
-  StreamSubscription<GlassVideoFrame>? _frameSub;
-  final ValueNotifier<int> _frameTick = ValueNotifier<int>(0);
+  StreamSubscription<GlassLiveStream>? _streamSub;
+  Player? _player;
+  VideoController? _videoController;
+
+  /// Rebuilds the preview when the player is created or the URL changes.
+  final ValueNotifier<int> _playerTick = ValueNotifier<int>(0);
+
+  String? _rtspUrl;
   String? _lastError;
   bool _streaming = false;
 
@@ -125,16 +136,49 @@ class GlassCameraSource implements CameraSource {
       return false;
     }
 
-    _frameSub ??= _glass.videoFrames.listen((f) {
-      _latestFrame = f.jpeg;
-      _frameTick.value++;
-    });
+    // The URL is only known once the device reports the session is up, so
+    // subscribe before asking for it.
+    _streamSub ??= _glass.liveStreams.listen(_onLiveStream);
 
     _streaming = await _glass.startLiveStream();
     if (!_streaming) {
       _lastError = _glass.lastError ?? 'Could not start the glasses live feed';
     }
     return _streaming;
+  }
+
+  void _onLiveStream(GlassLiveStream e) {
+    if (e.rtspUrl.isEmpty) {
+      // Happens in AP mode when the device reports no routable address; the
+      // feed is up but nothing outside the SDK player can reach it.
+      _lastError = 'Live feed has no reachable address';
+      _playerTick.value++;
+      return;
+    }
+    if (e.rtspUrl == _rtspUrl && _player != null) return;
+    _rtspUrl = e.rtspUrl;
+    unawaited(_openPlayer(e.rtspUrl));
+  }
+
+  Future<void> _openPlayer(String url) async {
+    try {
+      // Small buffer: this is a viewfinder, so latency matters far more than
+      // smoothing over a dropped frame.
+      final player = _player ??
+          Player(
+            configuration: const PlayerConfiguration(
+              bufferSize: 2 * 1024 * 1024,
+            ),
+          );
+      _player = player;
+      _videoController ??= VideoController(player);
+      await player.open(Media(url), play: true);
+      _lastError = null;
+    } catch (e) {
+      _lastError = 'Could not play the glasses feed: $e';
+      debugPrint('[GlassCameraSource] $_lastError');
+    }
+    _playerTick.value++;
   }
 
   @override
@@ -184,65 +228,82 @@ class GlassCameraSource implements CameraSource {
   @override
   Widget buildPreview() {
     return ValueListenableBuilder<int>(
-      valueListenable: _frameTick,
+      valueListenable: _playerTick,
       builder: (context, _, __) {
-        final frame = _latestFrame;
-        if (frame == null) {
-          // No decoded frame yet. The RTSP session is up (the bridge emitted
-          // LIVE_STREAM) but the H.264 -> JPEG decode path is not wired, so
-          // say so plainly rather than spinning forever: capture works
-          // regardless, because stills come over the vendor channel at full
-          // resolution rather than out of this feed.
-          return const ColoredBox(
-            color: Colors.black,
-            child: Center(
-              child: Padding(
-                padding: EdgeInsets.all(24),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.visibility_off_outlined,
-                        color: AppTheme.primaryYellow, size: 40),
-                    SizedBox(height: 12),
-                    Text(
-                      'GLASSES CAMERA ACTIVE',
-                      style: TextStyle(
-                        color: AppTheme.primaryYellow,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 1.1,
-                      ),
-                    ),
-                    SizedBox(height: 6),
-                    Text(
-                      'Live preview is not available yet — capture still works.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: Colors.white70, fontSize: 13),
-                    ),
-                  ],
-                ),
-              ),
-            ),
+        final controller = _videoController;
+        if (controller == null) {
+          return _placeholder(
+            _lastError ?? 'Starting the glasses live feed…',
+            spinning: _lastError == null,
           );
         }
         return ColoredBox(
           color: Colors.black,
-          child: Center(
-            child: Image.memory(
-              frame,
-              gaplessPlayback: true,
-              fit: BoxFit.contain,
-            ),
+          child: Video(
+            controller: controller,
+            fit: BoxFit.contain,
+            controls: NoVideoControls,
           ),
         );
       },
     );
   }
 
+  /// Shown while the RTSP session is coming up, or when it cannot be reached.
+  /// Capture works either way, so the copy says so rather than implying the
+  /// glasses are unusable.
+  Widget _placeholder(String message, {required bool spinning}) {
+    return ColoredBox(
+      color: Colors.black,
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (spinning)
+                const CircularProgressIndicator(color: AppTheme.primaryYellow)
+              else
+                const Icon(Icons.videocam_off_outlined,
+                    color: AppTheme.primaryYellow, size: 40),
+              const SizedBox(height: 12),
+              const Text(
+                'GLASSES CAMERA ACTIVE',
+                style: TextStyle(
+                  color: AppTheme.primaryYellow,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1.1,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                message,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.white70, fontSize: 13),
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                'Capture still works.',
+                style: TextStyle(color: Colors.white38, fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Future<void> dispose() async {
-    await _frameSub?.cancel();
-    _frameSub = null;
-    _frameTick.dispose();
+    await _streamSub?.cancel();
+    _streamSub = null;
+    _playerTick.dispose();
+    // Dispose the player before telling the device to stop, so libmpv is not
+    // left reading from a socket that is about to close.
+    await _player?.dispose();
+    _player = null;
+    _videoController = null;
+    _rtspUrl = null;
     if (_streaming) {
       await _glass.stopLiveStream();
       _streaming = false;

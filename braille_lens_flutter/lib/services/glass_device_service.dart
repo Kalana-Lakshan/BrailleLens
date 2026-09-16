@@ -286,6 +286,10 @@ class GlassDeviceService extends ChangeNotifier {
   /// capture button so both run one path.
   Stream<GlassButtonClicked> get buttonClicks => _only<GlassButtonClicked>();
   Stream<GlassMicData> get micData => _only<GlassMicData>();
+
+  /// Emitted once the device reports a live session is up, carrying the
+  /// `rtsp://<ip>:554` URL the preview player opens.
+  Stream<GlassLiveStream> get liveStreams => _only<GlassLiveStream>();
   Stream<GlassVideoFrame> get videoFrames => _only<GlassVideoFrame>();
   Stream<GlassPhotoCaptured> get photos => _only<GlassPhotoCaptured>();
   Stream<GlassScanResult> get scanResults => _only<GlassScanResult>();
