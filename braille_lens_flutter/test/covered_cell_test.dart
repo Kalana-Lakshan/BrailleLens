@@ -6,6 +6,7 @@ import 'package:braille_lens_flutter/services/cell_hit_test.dart';
 import 'package:braille_lens_flutter/services/coordinate_mapper.dart';
 import 'package:braille_lens_flutter/services/covered_cell_service.dart';
 import 'package:braille_lens_flutter/theme/app_theme.dart';
+import 'package:braille_lens_flutter/utils/homography.dart';
 
 /// One space cell and one ක cell on a 720x1280 prescan frame.
 CellMap _sampleMap() {
@@ -128,6 +129,50 @@ void main() {
     );
     expect(result.hasHit, isTrue);
     expect(result.headline, 'ත');
+    expect(result.compactDots, '23');
+    expect(result.alignMode, 'scale');
+  });
+
+  test('homography maps finger tip into the cell', () {
+    final map = const CellMap(
+      imageWidth: 720,
+      imageHeight: 1280,
+      cells: [
+        BrailleCell(
+          id: 5,
+          x0: 300,
+          y0: 500,
+          x1: 340,
+          y1: 540,
+          char: 'ත',
+          code: 6,
+          pattern: 'dots 2, 3',
+        ),
+      ],
+    );
+    const h = Homography([
+      1, 0, 50,
+      0, 1, 0,
+      0, 0, 1,
+    ]);
+    final miss = CoveredCellService().resolve(
+      tipInFingerImage: const Offset(270, 520),
+      cellMap: map,
+      fingerImageWidth: 720,
+      fingerImageHeight: 1280,
+    );
+    expect(miss.hasHit, isFalse);
+
+    final hit = CoveredCellService().resolve(
+      tipInFingerImage: const Offset(270, 520),
+      cellMap: map,
+      fingerImageWidth: 720,
+      fingerImageHeight: 1280,
+      homography: h,
+    );
+    expect(hit.hasHit, isTrue);
+    expect(hit.alignMode, 'homography');
+    expect(hit.compactDots, '23');
   });
 
   // JSON round-trip must keep cell count, ක on id 1, and image width.
