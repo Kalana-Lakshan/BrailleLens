@@ -50,6 +50,35 @@ class CellHitTest {
     return hits.first;
   }
 
+  /// Cell whose *centre* is closest to [point], within [withinCells] cell
+  /// widths, or null if nothing is that close.
+  ///
+  /// For a [point] that is itself a mapped cell centre, centre-to-centre is
+  /// the truer test: box containment would hand the answer to a neighbour as
+  /// soon as the mapping drifts past the box edge, while the nearest centre
+  /// stays correct until the drift approaches half a cell.
+  static BrailleCell? nearestCell(
+    Offset point,
+    CellMap cellMap, {
+    double withinCells = 0.75,
+    bool skipEmpty = true,
+  }) {
+    final radius = _medianCellWidth(cellMap.cells) * withinCells;
+    if (radius <= 0) return null;
+
+    var candidates =
+        cellMap.cells.where((c) => (c.center - point).distance <= radius).toList();
+    if (candidates.isEmpty) return null;
+    if (skipEmpty) {
+      final letters = candidates.where((c) => c.code != 0).toList();
+      if (letters.isNotEmpty) candidates = letters;
+    }
+    candidates.sort((a, b) => (a.center - point)
+        .distanceSquared
+        .compareTo((b.center - point).distanceSquared));
+    return candidates.first;
+  }
+
   /// Typical cell width, used as the unit for distance tolerances.
   static double medianCellWidth(CellMap cellMap) => _medianCellWidth(cellMap.cells);
 

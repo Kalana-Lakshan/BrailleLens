@@ -207,6 +207,67 @@ void main() {
     );
   });
 
+  // The finger frame's own boxes answer "which cell is the tip on" exactly,
+  // so the mapping only has to pick that box's counterpart in the prescan.
+  test('finger-frame boxes carry the tip to the right prescan cell', () {
+    final service = CoveredCellService();
+    final map = const CellMap(
+      imageWidth: 720,
+      imageHeight: 1280,
+      cells: [
+        BrailleCell(id: 0, x0: 300, y0: 500, x1: 340, y1: 540, char: 'ක', code: 19, pattern: '125'),
+        BrailleCell(id: 1, x0: 360, y0: 500, x1: 400, y1: 540, char: 'ත', code: 6, pattern: '23'),
+      ],
+    );
+    // The finger frame sits 18px right and 9px down of the prescan.
+    final fingerBoxes = [
+      const Rect.fromLTRB(318, 509, 358, 549),
+      const Rect.fromLTRB(378, 509, 418, 549),
+    ];
+
+    // Tip is on the left edge of the ත box — the placement a drifting
+    // transform is most likely to misread.
+    const tip = Offset(380, 530);
+    final touched = service.cellUnderTipInFingerFrame(
+      tipInFingerImage: tip,
+      fingerFrameCells: fingerBoxes,
+      fingerImageWidth: 720,
+      fingerImageHeight: 1280,
+    );
+    expect(touched?.id, 1);
+
+    // A transform 21px out horizontally: half a cell, so mapping the tip
+    // alone drops it into the neighbouring ක.
+    const drifted = Homography([
+      1, 0, -45,
+      0, 1, -15,
+      0, 0, 1,
+    ]);
+    final fromPoint = service.resolve(
+      tipInFingerImage: tip,
+      cellMap: map,
+      fingerImageWidth: 720,
+      fingerImageHeight: 1280,
+      homography: drifted,
+    );
+    expect(fromPoint.headline, 'ක');
+
+    // Carrying the touched box's centre across instead keeps ත.
+    final fromBox = service.resolve(
+      tipInFingerImage: tip,
+      cellMap: map,
+      fingerImageWidth: 720,
+      fingerImageHeight: 1280,
+      homography: drifted,
+      alignMode: 'cells+box',
+      probeInFingerImage: touched!.center,
+      matchNearestCentre: true,
+    );
+    expect(fromBox.headline, 'ත');
+    expect(fromBox.compactDots, '23');
+    expect(fromBox.alignMode, 'cells+box');
+  });
+
   test('median cell width ignores the outliers', () {
     expect(CellHitTest.medianCellWidth(_sampleMap()), 40);
   });
