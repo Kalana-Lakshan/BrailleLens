@@ -107,12 +107,19 @@ void main() {
       expect(hit.code, 13);
     });
 
-    test('finger in the gap between two cells (outside margin) resolves to nothing', () {
+    test('finger in the gap between two cells resolves to the nearer one', () {
       final page = _gridPage();
-      // Midway between col=0 (cx=50) and col=1 (cx=130) on row 0: x=90, well
-      // outside both cells' 40px box + 12% margin (cells end at x=70/x=110).
-      final hit = CellHitTest.hitTest(const Offset(90, 50), page);
-      expect(hit, isNull);
+      // x=85 on row 0 is outside both boxes and their 12% margins (cells end
+      // at x=70 and start at x=110), but a finger pad there still covers
+      // col=0, whose centre is 35px off against col=1's 45px.
+      expect(CellHitTest.hitTest(const Offset(85, 50), page)?.char, 'A');
+      // Callers that want the old all-or-nothing answer can still ask.
+      expect(
+        CellHitTest.hitTest(const Offset(85, 50), page, nearestWithinCells: 0),
+        isNull,
+      );
+      // More than a cell away from anything is still nothing.
+      expect(CellHitTest.hitTest(const Offset(250, 190), page), isNull);
     });
 
     test('finger just inside the margin resolves to the nearer cell', () {

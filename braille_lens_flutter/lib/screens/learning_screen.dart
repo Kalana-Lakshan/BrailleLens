@@ -348,19 +348,17 @@ class _LearningScreenState extends State<LearningScreen> {
     );
   }
 
-  /// Cell boxes belong to stage 1 only. In stage 2 they would be drawn where
-  /// the *scan* saw cells, which is not where the cells are in the frame the
-  /// learner is looking at — so stage 2 shows the live view while aiming and
-  /// the captured frame with just the fingertip marker afterwards.
+  /// The cell boxes belong to the page they were found on, so they are drawn
+  /// over the prescan and nowhere else. Drawing them over the finger frame
+  /// would put them where the *scan* saw cells rather than where the cells
+  /// are in the picture being shown, which reads as a broken detector even
+  /// when the lookup underneath is right.
   Widget _buildImageArea() {
-    if (_stage == _LearningStage.fingerResult) {
-      if (_fingerJpeg != null) {
-        return FrozenImageView(
-          jpeg: _fingerJpeg!,
-          fingertip: _fingertip,
-        );
-      }
-      return _camera.buildPreview();
+    if (_fingerJpeg != null) {
+      return FrozenImageView(
+        jpeg: _fingerJpeg!,
+        fingertip: _fingertip,
+      );
     }
     if (_prescanJpeg != null && _cellMap != null) {
       return FrozenImageView(

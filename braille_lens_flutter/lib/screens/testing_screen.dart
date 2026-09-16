@@ -370,8 +370,7 @@ class _TestingScreenState extends State<TestingScreen> {
     );
   }
 
-  /// Cell boxes belong to stage 1 only — see the note on Learning Mode's
-  /// image area.
+  /// Boxes over the prescan only — see the note on Learning Mode's image area.
   Widget _buildImageArea() {
     if (_fingerJpeg != null) {
       return FrozenImageView(
@@ -379,7 +378,7 @@ class _TestingScreenState extends State<TestingScreen> {
         fingertip: _fingertip,
       );
     }
-    if (_stage == _TestStage.prescan && _prescanJpeg != null && _cellMap != null) {
+    if (_prescanJpeg != null && _cellMap != null) {
       return FrozenImageView(jpeg: _prescanJpeg!, cellMap: _cellMap);
     }
     return _camera.buildPreview();
