@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
+import '../services/audio_routing_service.dart';
 import '../services/audio_service.dart';
 import '../services/bluetooth_service.dart';
 import '../theme/app_theme.dart';
@@ -66,18 +67,34 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   Future<void> _initialize() async {
     await Permission.camera.request();
     await Permission.microphone.request();
+    // API 31+ gates Classic discovery/connect behind these; without them the
+    // glasses bridge can see no bonded devices at all.
+    await Permission.bluetoothScan.request();
+    await Permission.bluetoothConnect.request();
     if (!mounted) return;
 
     // Run BT scan in background — update indicator when done
-    _btService.scanForGlasses().then((found) {
+    _btService.scanForGlasses().then((found) async {
       if (!mounted) return;
       setState(() {
         _isCheckingBluetooth = false;
         _btState = _btService.state;
       });
+
+      // Move the mic and prompt playback onto the glasses headset when one is
+      // there, and back to the phone when it is not.
+      final route = await AudioRoutingService.instance
+          .syncToGlasses(glassesConnected: found);
+      if (!mounted) return;
+
       if (found) {
         _audioService.hapticDouble();
-        _audioService.speak('BrailleLens glasses connected.');
+        final battery = _btService.batteryLevel;
+        final level = battery >= 0 ? ' Battery $battery percent.' : '';
+        final audio = route == AudioRoute.glasses
+            ? ' Audio is on your glasses.'
+            : ' Audio stays on the phone.';
+        _audioService.speak('BrailleLens glasses connected.$level$audio');
       } else {
         _audioService.hapticLight();
       }
@@ -169,6 +186,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     _glowCtrl.dispose();
     _audioService.dispose();
     _btService.dispose();
+    // Drop the SCO link so the glasses mic does not stay hot after exit.
+    AudioRoutingService.instance.enablePhoneRoute();
     super.dispose();
   }
 

@@ -65,3 +65,7 @@ finger_cell_track/runs/
 finger_cell_track/weights/
 finger_cell_track/**/*.pt
 finger_cell_track/**/*.zip
+
+# Gradle build output (Flutter only ignores braille_lens_flutter/build)
+braille_lens_flutter/android/build/
+braille_lens_flutter/android/*/build/

@@ -1,11 +1,12 @@
+import 'dart:async';
 import 'dart:typed_data';
 
-import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 
 import '../models/braille_cell.dart';
 import '../services/audio_service.dart';
-import '../services/camera_service.dart';
+import '../services/camera_source.dart';
+import '../services/glass_device_service.dart';
 import '../services/covered_cell_service.dart';
 import '../services/fingertip_onnx_service.dart';
 import '../services/frame_registration.dart';
@@ -32,10 +33,16 @@ class LearningScreen extends StatefulWidget {
 }
 
 class _LearningScreenState extends State<LearningScreen> {
-  final CameraService _camera = CameraService();
+  /// Glasses when connected, phone camera otherwise — swaps itself if the
+  /// glasses drop mid-session.
+  final CameraSourceController _camera = CameraSourceController();
   final PrescanBridge _prescanBridge = PrescanBridge();
   final FingertipOnnxService _fingertipOnnx = FingertipOnnxService();
   final CoveredCellService _coveredCell = CoveredCellService();
+
+  /// Frame-button presses, routed to [_onCapturePressed] so the hardware
+  /// button and the on-screen control run one path.
+  StreamSubscription<GlassButtonClicked>? _glassButtonSub;
 
   _LearningStage _stage = _LearningStage.prescan;
   bool _cameraReady = false;
@@ -57,22 +64,54 @@ class _LearningScreenState extends State<LearningScreen> {
 
   Future<void> _boot() async {
     await _camera.initialize();
+
+    // The frame button and the on-screen button both land on
+    // _onCapturePressed, so the two controls can never diverge.
+    _glassButtonSub = GlassDeviceService.instance.buttonClicks.listen((_) {
+      widget.audioService.hapticLight();
+      _onCapturePressed();
+    });
+    _camera.addListener(_onCameraSourceChanged);
+
     final cnnReady = await PrescanBridge.ensureOnDeviceReady();
     final tipReady = await _fingertipOnnx.initialize();
     if (!mounted) return;
     setState(() {
-      _cameraReady = true;
+      _cameraReady = _camera.isReady;
       _statusLine = [
+        'Camera: ${_camera.label}',
         cnnReady ? 'CNN: braille_cnn.onnx' : 'CNN failed',
         tipReady
             ? 'YOLO: ${_fingertipOnnx.loadedAsset?.split('/').last}'
             : 'YOLO failed — tap fingertip',
       ].join(' · ');
     });
+
+    final trigger = _camera.usingGlasses
+        ? 'press the button on your glasses'
+        : 'tap capture';
     await widget.audioService.speak(
       'Learning Mode. Stage 1: hold the Braille page still with no finger, '
-      'then tap capture. Stage 2: place your finger on a cell and tap capture.',
+      'then $trigger. Stage 2: place your finger on a cell and $trigger again.',
     );
+  }
+
+  /// The camera source swapped underneath us (glasses connected or dropped).
+  /// Prescan state is deliberately kept — only the viewfinder changes.
+  void _onCameraSourceChanged() {
+    if (!mounted) return;
+    setState(() => _cameraReady = _camera.isReady);
+  }
+
+  /// Single capture entry point shared by the on-screen button and the
+  /// glasses frame button.
+  Future<void> _onCapturePressed() async {
+    if (_busy || _isExiting) return;
+    if (_stage == _LearningStage.prescan) {
+      await _capturePrescan();
+    } else {
+      await _captureFinger();
+    }
   }
 
   Future<void> _exit() async {
@@ -85,7 +124,7 @@ class _LearningScreenState extends State<LearningScreen> {
   }
 
   Future<void> _capturePrescan() async {
-    if (_busy || !_cameraReady) return;
+    if (_busy) return;
     setState(() {
       _busy = true;
       _statusLine = 'Scanning the page for Braille cells…';
@@ -95,8 +134,9 @@ class _LearningScreenState extends State<LearningScreen> {
     if (jpeg == null) {
       setState(() {
         _busy = false;
-        _statusLine = 'Camera capture failed';
+        _statusLine = _camera.source?.lastError ?? 'Camera capture failed';
       });
+      await widget.audioService.speak('Capture failed. Try again.');
       return;
     }
 
@@ -154,8 +194,9 @@ class _LearningScreenState extends State<LearningScreen> {
     if (jpeg == null) {
       setState(() {
         _busy = false;
-        _statusLine = 'Camera capture failed';
+        _statusLine = _camera.source?.lastError ?? 'Camera capture failed';
       });
+      await widget.audioService.speak('Capture failed. Try again.');
       return;
     }
 
@@ -254,6 +295,8 @@ class _LearningScreenState extends State<LearningScreen> {
 
   @override
   void dispose() {
+    _glassButtonSub?.cancel();
+    _camera.removeListener(_onCameraSourceChanged);
     _fingertipOnnx.dispose();
     _camera.dispose();
     super.dispose();
@@ -319,13 +362,7 @@ class _LearningScreenState extends State<LearningScreen> {
         cellMap: _cellMap,
       );
     }
-    if (_cameraReady && _camera.controller != null) {
-      return ColoredBox(
-        color: Colors.black,
-        child: Center(child: CameraPreview(_camera.controller!)),
-      );
-    }
-    return const Center(child: CircularProgressIndicator(color: AppTheme.primaryYellow));
+    return _camera.buildPreview();
   }
 
   /// Small rounded badge with just enough backing to stay legible over a
@@ -499,9 +536,7 @@ class _LearningScreenState extends State<LearningScreen> {
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
-                onPressed: _busy
-                    ? null
-                    : (_stage == _LearningStage.prescan ? _capturePrescan : _captureFinger),
+                onPressed: (_busy || !_cameraReady) ? null : _onCapturePressed,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppTheme.primaryYellow,
                   foregroundColor: Colors.black,

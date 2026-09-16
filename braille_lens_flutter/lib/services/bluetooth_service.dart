@@ -1,72 +1,104 @@
 import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
+import 'glass_device_service.dart';
+
+/// Connection states surfaced to the home-screen indicator.
 enum BluetoothConnectionState { checking, connected, notFound, unavailable }
 
-/// Represents a discovered BrailleLens wearable device.
+/// A discovered BrailleLens wearable device.
 class BrailleDevice {
   final String id;
   final String name;
   const BrailleDevice({required this.id, required this.name});
 }
 
-/// Mock Bluetooth service that simulates a hardware scan for BrailleLens glasses.
+/// Thin adapter that keeps the existing HomeScreen indicator API while the real
+/// work happens in [GlassDeviceService].
 ///
-/// Integration Hook: Replace [scanForGlasses] with real BLE scanning using
-/// `flutter_blue_plus` or `flutter_bluetooth_serial` when physical hardware
-/// is available. The rest of the app (HomeScreen BT indicator) will work
-/// unchanged because it only reads [state] and [connectedDevice].
+/// The mock scan this class used to perform is gone: [scanForGlasses] now does
+/// a real discovery-and-connect against the AI Glass over the Realtek vendor
+/// channel. Kept as a separate type so `home_screen.dart` did not have to
+/// change shape; new code should talk to [GlassDeviceService] directly and read
+/// its richer state (battery, mic, live feed).
 class BluetoothService {
-  BluetoothConnectionState _state = BluetoothConnectionState.checking;
-  BrailleDevice? _connectedDevice;
+  final GlassDeviceService _glass;
+  StreamSubscription<GlassEvent>? _sub;
 
-  BluetoothConnectionState get state => _state;
-  BrailleDevice? get connectedDevice => _connectedDevice;
-  bool get isConnected => _state == BluetoothConnectionState.connected;
+  /// Fired whenever the underlying connection state changes, so a screen can
+  /// refresh its indicator without polling.
+  final ValueNotifier<BluetoothConnectionState> stateListenable =
+      ValueNotifier<BluetoothConnectionState>(BluetoothConnectionState.checking);
 
-  /// Simulates a Bluetooth LE scan for BrailleLens glasses.
+  BluetoothService({GlassDeviceService? glass})
+      : _glass = glass ?? GlassDeviceService.instance {
+    _sub = _glass.events.listen((e) {
+      if (e is GlassConnectionChanged) stateListenable.value = state;
+    });
+  }
+
+  BluetoothConnectionState get state => switch (_glass.state) {
+        GlassConnectionState.connected => BluetoothConnectionState.connected,
+        GlassConnectionState.scanning ||
+        GlassConnectionState.connecting ||
+        GlassConnectionState.idle =>
+          BluetoothConnectionState.checking,
+        GlassConnectionState.unavailable =>
+          BluetoothConnectionState.unavailable,
+        GlassConnectionState.disconnected => BluetoothConnectionState.notFound,
+      };
+
+  BrailleDevice? get connectedDevice {
+    final d = _glass.device;
+    if (d == null || !_glass.isConnected) return null;
+    return BrailleDevice(id: d.address, name: d.name);
+  }
+
+  bool get isConnected => _glass.isConnected;
+
+  /// Battery percentage of the connected glasses, or -1 when unknown.
+  int get batteryLevel => _glass.batteryLevel;
+
+  /// Scans for AI Glass and connects to the first match.
   ///
-  /// Current behavior (mock): always returns [BluetoothConnectionState.notFound]
-  /// after a short simulated scan delay.
-  ///
-  /// To simulate a successful connection during development, change the block
-  /// marked "MOCK" below.
+  /// [scanDuration] bounds discovery only; the connect handshake gets its own
+  /// timeout inside [GlassDeviceService.connect].
   Future<bool> scanForGlasses({
-    Duration scanDuration = const Duration(seconds: 3),
+    Duration scanDuration = const Duration(seconds: 8),
   }) async {
-    _state = BluetoothConnectionState.checking;
-    debugPrint('[BluetoothService] Scanning for BrailleLens glasses...');
+    debugPrint('[BluetoothService] scanning for AI Glass…');
 
-    // Simulate scan network delay
-    await Future.delayed(scanDuration);
+    if (!await _glass.initialize()) {
+      debugPrint('[BluetoothService] glasses bridge unavailable');
+      stateListenable.value = state;
+      return false;
+    }
 
-    // ── MOCK BLOCK ────────────────────────────────────────────────────────────
-    // Change _state = BluetoothConnectionState.connected and set _connectedDevice
-    // to simulate a paired device. Leave as-is for frontend-only mode.
-    _state = BluetoothConnectionState.notFound;
-    _connectedDevice = null;
+    final found = await _glass.scanForGlasses(timeout: scanDuration);
+    if (found.isEmpty) {
+      debugPrint('[BluetoothService] no glasses found');
+      stateListenable.value = state;
+      return false;
+    }
 
-    // Example of what a real connection result would look like:
-    // _state = BluetoothConnectionState.connected;
-    // _connectedDevice = const BrailleDevice(
-    //   id: 'BL:00:11:22:33:44',
-    //   name: 'BrailleLens Glasses v1',
-    // );
-    // ── END MOCK BLOCK ────────────────────────────────────────────────────────
-
+    final ok = await _glass.connect(address: found.first.address);
     debugPrint(
-      '[BluetoothService] Scan complete — state: ${_state.name}',
+      '[BluetoothService] connect to ${found.first.name}: '
+      '${ok ? 'connected' : 'failed'}',
     );
-    return isConnected;
+    stateListenable.value = state;
+    return ok;
   }
 
   Future<void> disconnect() async {
-    _state = BluetoothConnectionState.notFound;
-    _connectedDevice = null;
-    debugPrint('[BluetoothService] Disconnected.');
+    await _glass.disconnect();
+    stateListenable.value = state;
   }
 
   void dispose() {
-    disconnect();
+    _sub?.cancel();
+    _sub = null;
+    stateListenable.dispose();
   }
 }
