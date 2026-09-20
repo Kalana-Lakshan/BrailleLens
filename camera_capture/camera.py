@@ -16,14 +16,13 @@ from typing import Optional
 
 import cv2
 import numpy as np
-import torch
 from PIL import Image
 
 _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from braille_cnn.infer_page import load_model, run_auto_transcribe  # noqa: E402
+# torch / infer_page load lazily so helper unit tests run without a DL stack.
 
 
 # ------------------------------------------------------------------ helpers
@@ -188,6 +187,9 @@ def run_camera(args) -> None:
                 f"Checkpoint not found: {args.checkpoint}\n"
                 "Train first: py -3.11 -m braille_cnn.finetune_dbsi --scratch --dbsi-root \"data DBSI/data\""
             )
+        import torch
+        from braille_cnn.infer_page import load_model
+
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         model = load_model(args.checkpoint, device)
         print(f"Model loaded on {device}.")
@@ -257,6 +259,8 @@ def run_camera(args) -> None:
 
         if should_infer:
             try:
+                from braille_cnn.infer_page import run_auto_transcribe
+
                 pil_image = _frame_to_gray_pil(frame)
                 last_result = run_auto_transcribe(pil_image, args, model=model, device=device)
                 last_lines = _overlay_status_lines(last_result, motion)
