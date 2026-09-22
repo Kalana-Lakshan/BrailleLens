@@ -1,0 +1,306 @@
+
+&lt;Project Name&gt;
+&lt;Iteration/ Master&gt; Test Plan
+Version &lt;1.0&gt;
+
+[Note: The following template is provided for use with the Rational Unified Process. Text enclosed in square brackets and displayed in blue italics (style=InfoBlue) is included to provide guidance to the author and should be deleted before publishing the document. A paragraph entered following this style will automatically be set to normal (style=Body Text).]
+
+Revision History
+Date
+Version
+Description
+Author
+&lt;dd/mmm/yy&gt;
+&lt;x.x&gt;
+&lt;details&gt;
+&lt;name&gt;
+
+Table of Contents
+ TOC \o "1-3" 1.	Evaluation Mission and Test Motivation	 PAGEREF _Toc425437064 \h 3
+2.	Target Test Items	 PAGEREF _Toc425437065 \h 3
+3.	Test Approach	 PAGEREF _Toc425437066 \h 3
+3.1	Testing Techniques and Types	 PAGEREF _Toc425437067 \h 3
+3.1.1	Data and Database Integrity Testing	 PAGEREF _Toc425437068 \h 3
+3.1.2	Function Testing	 PAGEREF _Toc425437069 \h 4
+3.1.3	User Interface Testing	 PAGEREF _Toc425437070 \h 5
+3.1.4	Performance Profiling	 PAGEREF _Toc425437071 \h 6
+3.1.5	Load Testing	 PAGEREF _Toc425437072 \h 7
+3.1.6	Security and Access Control Testing	 PAGEREF _Toc425437073 \h 8
+3.1.7	Failover and Recovery Testing	 PAGEREF _Toc425437074 \h 9
+3.1.8	Configuration Testing	 PAGEREF _Toc425437075 \h 11
+4.	Deliverables	 PAGEREF _Toc425437076 \h 12
+4.1	Test Evaluation Summaries	 PAGEREF _Toc425437077 \h 12
+4.2	Reporting on Test Coverage	 PAGEREF _Toc425437078 \h 12
+5.	Risks, Dependencies, Assumptions, and Constraints	 PAGEREF _Toc425437079 \h 12
+6.      References
+
+&lt;Iteration/ Master&gt; Test Plan
+Evaluation Mission and Test Motivation
+ [Provide an overview of the mission and motivation for the testing that will be conducted in this iteration.]
+ [Provide a brief description of the background surrounding why the test effort defined by this Test Plan will be undertaken. Include information such as the key problem being solved, the major benefits of the solution, the planned architecture of the solution, and a brief history of the project..]
+ [Provide a brief statement that defines the mission for the evaluation effort in the current iteration. This statement might incorporate one or more concerns including:
+find as many bugs as possible
+find important problems, assess perceived quality risks
+advise about perceived project risks
+certify to a standard
+verify a specification (requirements, design or claims)
+advise about product quality, satisfy stakeholders
+advise about testing
+fulfill process mandates ]
+
+Target Test Items
+The listing below identifies those test itemssoftware, hardware, and supporting product elements that have been identified as targets for testing. This list represents what items will be tested. 
+[Provide a high level list of the major target test items. This list should include both items produced directly by the project development team, and items that those products rely on; for example, basic processor hardware, peripheral devices, operating systems, third-party products or components, and so forth. Consider grouping the list by category and assigning relative importance to each motivator.]
+
+Test Approach
+[The Test Approach presents the recommended strategy for designing and implementing the required tests. Sections  REF _Ref524432434 \r \h 2,  REF _Ref524432434 \h Target Test Items, and Test Deliverables , identified what items will be tested and what types of tests would be performed. This section describes how the tests will be realized. 
+One aspect to consider for the test approach is the techniques to be used. This should include an outline of how each technique can be implemented, both from a manual and/or an automated perspective, and the criterion for knowing that the technique is useful and successful. For each technique, provide a description of the technique and define why it is an important part of the test approach by briefly outlining how it helps achieve the Evaluation Mission or addresses the Test Motivators.
+Another aspect to discuss in this section is the Fault or Failure models that are applicable and ways to approach evaluating them.
+As you define each aspect of the approach, you should update Section Test Environment Configuration, to document the test environment configuration and other resources that will be needed to implement each aspect.]
+Testing Techniques and Types
+Data and Database Integrity Testing
+[The databases and the database processes should be tested as an independent subsystem. This testing should test the subsystems without the target-of-test’s User Interface as the interface to the data. Additional research into the DataBase Management System (DBMS) needs to be performed to identify the tools and techniques that may exist to support the testing identified in the following table.]
+Technique Objective:
+[Exercise database access methods and processes independent of the UI so you can observe and log incorrect functioning target behavior or data corruption.]
+Technique:
+     [Invoke each database access method and process, seeding each with 	valid and invalid data or requests for data.
+   	 Inspect the database to ensure the data has been populated as 	intended and all database events have occurred properly, or review the 	returned data to ensure that the correct data was retrieved for the 	correct reasons.]
+Oracles:
+[Outline one or more strategies that can be used by the technique to accurately observe the outcomes of the test. The oracle combines elements of both the method by which the observation can be made and the characteristics of specific outcome that indicate probable success or failure. Ideally, oracles will be self-verifying, allowing automated tests to make an initial assessment of test pass or failure, however, be careful to mitigate the risks inherent in automated results determination.]
+Required Tools:
+[The technique requires the following tools:
+Test Script Automation Tool
+base configuration imager and restorer
+backup and recovery tools
+installation-monitoring tools (registry, hard disk, CPU, memory, and so forth)
+database SQL utilities and tools
+Data-generation tools]
+Success Criteria:
+[The technique supports the testing of all key database access methods and processes.]
+Special Considerations:
+[Testing may require a DBMS development environment or drivers to enter or modify data directly in the databases.
+Processes should be invoked manually.
+Small or minimally sized databases (limited number of records) should be used to increase the visibility of any non-acceptable events.]
+
+Function Testing
+[Function testing of the target-of-test should focus on any requirements for test that can be traced directly to use cases or business functions and business rules. The goals of these tests are to verify proper data acceptance, processing, and retrieval, and the appropriate implementation of the business rules. This type of testing is based upon black box techniques; that is verifying the application and its internal processes by interacting with the application via the Graphical User Interface (GUI) and analyzing the output or results. The following table identifies an outline of the testing recommended for each application.]
+Technique Objective:
+[Exercise target-of-test functionality, including navigation, data entry, processing, and retrieval to observe and log target behavior.]
+Technique:
+[Execute each use-case scenario’s individual use-case flows or functions and features, using valid and invalid data, to verify that:
+	 the expected results occur when valid data is used
+	 the appropriate error or warning messages are displayed when 	invalid data is used
+  	each business rule is properly applied]
+Oracles:
+[Outline one or more strategies that can be used by the technique to accurately observe the outcomes of the test. The oracle combines elements of both the method by which the observation can be made and the characteristics of specific outcome that indicate probable success or failure. Ideally, oracles will be self-verifying, allowing automated tests to make an initial assessment of test pass or failure, however, be careful to mitigate the risks inherent in automated results determination.]
+Required Tools:
+[The technique requires the following tools:
+Test Script Automation Tool
+base configuration imager and restorer
+backup and recovery tools
+installation-monitoring tools (registry, hard disk, CPU, memory, and so forth)
+Data-generation tools]
+Success Criteria:
+[The technique supports the testing of:
+   	all key use-case scenarios
+  	all key features]
+Special Considerations:
+[Identify or describe those items or issues (internal or external) that impact the implementation and execution of  function test.]
+User Interface Testing
+[User Interface (UI) testing verifies a user’s interaction with the software. The goal of UI testing is to ensure that the UI provides the user with the appropriate access and navigation through the functions of the target-of-test. In addition, UI testing ensures that the objects within the UI function as expected and conform to corporate or industry standards.]
+Technique Objective:
+[Exercise the following to observe and log standards conformance and target behavior:
+Navigation through the target-of-test reflecting business functions and requirements, including window-to-window, field-to- 	field, and use of access methods (tab keys, mouse movements, accelerator keys).
+Window objects and characteristics can be exercised–such as menus, size, position, state, and focus.]
+Technique:
+[Create or modify tests for each window to verify proper navigation and object states for each application window and object.]
+Oracles:
+[Outline one or more strategies that can be used by the technique to accurately observe the outcomes of the test. The oracle combines elements of both the method by which the observation can be made and the characteristics of specific outcome that indicate probable success or failure. Ideally, oracles will be self-verifying, allowing automated tests to make an initial assessment of test pass or failure, however, be careful to mitigate the risks inherent in automated results determination.]
+Required Tools:
+[The technique requires the Test Script Automation Tool.]
+Success Criteria:
+[The technique supports the testing of each major screen or window that will be used extensively by the end user.]
+Special Considerations:
+[Not all properties for custom and third-party objects can be accessed.]
+
+Performance Profiling 
+[Performance profiling is a performance test in which response times, transaction rates, and other time-sensitive requirements are measured and evaluated. The goal of Performance Profiling is to verify performance requirements have been achieved. Performance profiling is implemented and executed to profile and tune a target-of-test's performance behaviors as a function of conditions such as workload or hardware configurations.
+Note:  Transactions in the following table refer to “logical business transactions”. These transactions are defined as specific use cases that an actor of the system is expected to perform using the target-of-test, such as add or modify a given contract.]
+Technique Objective:
+[Exercise behaviors for designated functional transactions or business functions under the following conditions to observe and log target behavior and application performance data:
+	normal anticipated workload
+	anticipated worst-case workload]
+Technique:
+	[Use Test Procedures developed for Function or Business Cycle 	Testing.
+	Modify data files to increase the number of transactions or the scripts 	to increase the number of iterations that occur in each transaction.
+	Scripts should be run on one machine (best case to benchmark single 	user, single transaction) and should be repeated with multiple clients (virtual or actual, see Special Considerations below).]
+Oracles:
+[Outline one or more strategies that can be used by the technique to accurately observe the outcomes of the test. The oracle combines elements of both the method by which the observation can be made and the characteristics of specific outcome that indicate probable success or failure. Ideally, oracles will be self-verifying, allowing automated tests to make an initial assessment of test pass or failure, however, be careful to mitigate the risks inherent in automated results determination.]
+Required Tools:
+[The technique requires the following tools: 
+Test Script Automation Tool 
+an application performance profiling tool, such as Rational Quantify 
+installation-monitoring tools (registry, hard disk, CPU, memory, and so on 
+resource-constraining tools; for example, Canned Heat]
+Success Criteria:
+The technique supports testing:
+  	 Single Transaction or single user:  Successful emulation of the	transaction scripts without any failures due to test implementation 	problems.]
+	Multiple transactions or multiple users:  Successful emulation of the	workload without any failures due to test implementation 	problems.]
+Special Considerations:
+[Comprehensive performance testing includes having a background workload on the server. 
+There are several methods that can be used to perform this, including:  
+ 	“Drive transactions” directly to the server, usually in the form of 	Structured Query Language (SQL) calls.
+	Create “virtual” user load to simulate many clients, usually several 	hundred. Remote Terminal Emulation tools are used to accomplish 	this load. This technique can also be used to load the network with 	“traffic”.
+	Use multiple physical clients, each running test scripts, to place a load 	on the system. 
+Performance testing should be performed on a dedicated machine or at a dedicated time. This permits full control and accurate measurement.
+The databases used for Performance Testing should be either actual size or scaled equally.]
+Load Testing
+[Load testing is a performance test that subjects the target-of-test to varying workloads to measure and evaluate the performance behaviors and abilities of the target-of-test to continue to function properly under these different workloads.  The goal of load testing is to determine and ensure that the system functions properly beyond the expected maximum workload. Additionally, load testing evaluates the performance characteristics, such as response times, transaction rates, and other time-sensitive issues).]
+[Note:  Transactions in the following table refer to “logical business transactions”.  These transactions are defined as specific functions that an end user of the system is expected to perform using the application, such as add or modify a given contract.]
+Technique Objective:
+[Exercise designated transactions or business cases under varying workload conditions to observe and log target behavior and system performance data.]
+Technique:
+	[Use Transaction Test Scripts developed for Function or Business 	Cycle Testing as a basis, but remember to remove unnecessary 	interactions and delays.
+	Modify data files to increase the number of transactions or the tests to 	increase the number of times each transaction occurs.
+	Workloads should include (for example, Daily, Weekly, Monthly and so forth) Peak loads.
+	Workloads should represent both Average as well as Peak loads.
+	Workloads should represent both Instantaneous and Sustained Peaks.
+	The Workloads should be executed under different Test Environment 	Configurations.]
+Oracles:
+[Outline one or more strategies that can be used by the technique to accurately observe the outcomes of the test. The oracle combines elements of both the method by which the observation can be made and the characteristics of specific outcome that indicate probable success or failure. Ideally, oracles will be self-verifying, allowing automated tests to make an initial assessment of test pass or failure, however, be careful to mitigate the risks inherent in automated results determination.]
+Required Tools:
+[The technique requires the following tools:
+Test Script Automation Tool
+Transaction Load Scheduling and control tool
+installation-monitoring tools (registry, hard disk, CPU, memory, and so on) 
+resource-constraining tools (for example, Canned Heat)
+Data-generation tools]
+Success Criteria:
+[The technique supports the testing of Workload Emulation, which is the successful emulation of the workload without any failures due to test implementation problems.]
+Special Considerations:
+	[Load testing should be performed on a dedicated machine or at a 	dedicated time. This permits full control and accurate measurement.
+	The databases used for load testing should be either actual size or 	scaled equally.]
+
+Security and Access Control Testing
+[Security and Access Control Testing focuses on two key areas of security:  
+	Application-level security, including access to the Data or Business Functions
+	System-level Security, including logging into or remotely accessing to the system.
+Based on the security you want, application-level security ensures that actors are restricted to specific functions or use cases, or they are limited in the data that is available to them. For example, everyone may be permitted to enter data and create new accounts, but only managers can delete them. If there is security at the data level, testing ensures that “user type one” can see all customer information, including financial data, however, “user two” only sees the demographic data for the same client.
+System-level security ensures that only those users granted access to the system are capable of accessing the applications and only through the appropriate gateways.]
+Technique Objective:
+[Exercise the target-of-test under the following conditions to observe and log target behavior:
+Application-level Security:  an actor can access only those functions or data for which their user type is provided permissions.
+System-level Security:  only those actors with access to the system and applications are permitted to access them.
+Technique:
+[Application-level Security:  Identify and list each user type and the functions or data each type has permissions for.]
+Create tests for each user type and verify each permission by creating transactions specific to each user type.
+Modify user type and re-run tests for same users. In each case, verify those additional functions or data are correctly available or denied.
+System-level Access: [See Special Considerations below]
+Oracles:
+[Outline one or more strategies that can be used by the technique to accurately observe the outcomes of the test. The oracle combines elements of both the method by which the observation can be made and the characteristics of specific outcome that indicate probable success or failure. Ideally, oracles will be self-verifying, allowing automated tests to make an initial assessment of test pass or failure, however, be careful to mitigate the risks inherent in automated results determination.]
+Required Tools:
+[The technique requires the following tools:
+Test Script Automation Tool
+“Hacker” security breach and probing tools
+OS Security Admin Tools]
+Success Criteria:
+[The technique supports the testing of for each known actor type the appropriate functions or data affected by security settings can be tested.]
+Special Considerations:
+[Access to the system must be reviewed or discussed with the appropriate network or systems administrator. This testing may not be required as it may be a function of network or systems administration.]
+Failover and Recovery Testing
+[Failover and recovery testing ensures that the target-of-test can successfully failover and recover from a variety of hardware, software or network malfunctions with undue loss of data or data integrity. 
+For those systems that must be kept running failover testing ensures that, when a failover condition occurs, the alternate or backup systems properly “take over” for the failed system without any loss of data or transactions.
+Recovery testing is an antagonistic test process in which the application or system is exposed to extreme conditions, or simulated conditions, to cause a failure, such as device Input/Output (I/O) failures, or invalid database pointers and keys. Recovery processes are invoked, and the application or system is monitored and inspected to verify proper application, or system, and data recovery has been achieved.]
+
+Technique Objective:
+[Simulate the failure conditions and exercise the recovery processes (manual and automated) to restore the database, applications, and system to a desired, known, state. The following types of conditions are included in the testing to observe and log target behavior after recovery:
+	power interruption to the client 
+	power interruption to the server
+	communication interruption via network servers
+	interruption, communication, or power loss to DASD (Dynamic Access 	Storage Devices) and DASD controllers
+	incomplete cycles (data filter processes interrupted, data 	synchronization processes interrupted)
+	invalid database pointers or keys
+	invalid or corrupted data elements in database]
+Technique:
+[The tests already created for Function and Business Cycle testing can be used as a basis for creating a series of transactions to support failover and recovery testing, primarily to define the tests to be run to test that recovery was successful.
+	Power interruption to the client:  power the PC down.
+	Power interruption to the server: simulate or initiate power down procedures for the server.
+	Interruption via network servers:  simulate or initiate 	communication loss with the network (physically disconnect 	communication wires or power down network servers or routers).
+	Interruption, communication, or power loss to DASD and DASD controllers: simulate or physically eliminate communication with one or more DASDs or controllers.
+Once the above conditions or simulated conditions are achieved, additional transactions should be executed and, upon reaching this second test point state, recovery procedures should be invoked.
+Testing for incomplete cycles uses the same technique as described above except that the database processes themselves should be aborted or prematurely terminated.
+Testing for the following conditions requires that a known database state be achieved. 
+Several database fields, pointers, and keys should be corrupted manually and directly within the database (via database tools). Additional transactions should be executed using the tests from Application Function and Business Cycle Testing and full cycles executed.]
+Oracles:
+[Outline one or more strategies that can be used by the technique to accurately observe the outcomes of the test. The oracle combines elements of both the method by which the observation can be made and the characteristics of specific outcome that indicate probable success or failure. Ideally, oracles will be self-verifying, allowing automated tests to make an initial assessment of test pass or failure, however, be careful to mitigate the risks inherent in automated results determination.]
+Required Tools:
+[The technique requires the following tools:
+base configuration imager and restorer
+installation monitoring tools (registry, hard disk, CPU, memory, and so on)
+backup and recovery tools]
+Success Criteria:
+The technique supports the testing of:
+One or more simulated disasters involving one or more combinations of the application, database, and system.
+One or more simulated recoveries involving one or more combinations of the application, database, and system to a known desired state.]
+Special Considerations:
+[Recovery testing is highly intrusive. Procedures to disconnect cabling (simulating power or communication loss) may not be desirable or feasible. Alternative methods, such as diagnostic software tools may be required.
+Resources from the Systems (or Computer Operations), Database, and Networking groups are required.
+These tests should be run after hours or on an isolated machine.]
+Configuration Testing
+[Configuration testing verifies the operation of the target-of-test on different software and hardware configurations. In most production environments, the particular hardware specifications for the client workstations, network connections, and database servers vary. Client workstations may have different software loadedfor example, applications, drivers, and so onand, at any one time, many different combinations may be active using different resources.]
+Technique Objective:
+[Exercise the target-of-test on the required hardware and software configurations to observe and log target behavior under different configurations and identify changes in configuration state.]
+Technique:
+[Use Function Test scripts.
+Open and close various non-target-of-test related software, such as Microsoft Excel and Word applications, either as part of the test or prior to the start of the test.
+Execute selected transactions to simulate actors interacting with the target-of-test and the non-target-of-test software.
+Repeat the above process, minimizing the available conventional memory on the client workstation.]
+Oracles:
+[Outline one or more strategies that can be used by the technique to accurately observe the outcomes of the test. The oracle combines elements of both the method by which the observation can be made and the characteristics of specific outcome that indicate probable success or failure. Ideally, oracles will be self-verifying, allowing automated tests to make an initial assessment of test pass or failure, however, be careful to mitigate the risks inherent in automated results determination.]
+Required Tools:
+[The technique requires the following tools:
+base configuration imager and restore
+installation monitoring tools (registry, hard disk, CPU, memory, and so on)]
+Success Criteria:
+[The technique supports the testing of one or more combinations of the target test items running in expected, supported deployment environments.]
+Special Considerations:
+[What non-target-of-test software is needed, is available, and what is accessible on the desktop?
+What applications are typically used? 
+What data are the applications running; for example, a large spreadsheet opened in Excel or a 100-page document in Word?
+The entire system’s netware, network servers, databases, and so on, also needs to be documented as part of this test.]  
+Deliverables
+[In this section, list the various artifacts that will be created by the test effort that are useful deliverables to the various stakeholders of the test effort. Don’t list all work products; only list those that give direct, tangible benefit to a stakeholder and those by which you want the success of the test effort to be measured.]
+Test Evaluation Summaries
+[Provide a brief outline of both the form and content of the test evaluation summaries, and indicate how frequently they will be produced.]
+Reporting on Test Coverage
+[Provide a brief outline of both the form and content of the reports used to measure the extent of testing, and indicate how frequently they will be produced. Give an indication as to the method and tools used to record, measure, and report on the extent of testing.] 
+Risks, Dependencies, Assumptions, and Constraints
+[List any risks that may affect the successful execution of this Test Plan, and identify mitigation and contingency strategies for each risk. Also indicate a relative ranking for both the likelihood of occurrence and the impact if the risk is realized.] 
+Risk
+Mitigation Strategy
+Contingency (Risk is realized)
+Prerequisite entry criteria is not met.
+&lt;Tester&gt; will define the prerequisites that must be met before Load Testing can start.
+
+&lt;Customer&gt; will endeavor to meet prerequisites indicated by &lt;Tester&gt;.
+Meet outstanding prerequisites
+Consider Load Test Failure
+Test data proves to be inadequate.
+&lt;Customer&gt; will ensure a full set of suitable and protected test data is available.
+&lt;Tester&gt; will indicate what is required and will verify the suitability of test data.
+Redefine test data
+Review Test Plan and modify
+components (that is, scripts)
+Consider Load Test Failure
+Database requires refresh.
+&lt;System Admin&gt; will endeavor to ensure the Database is regularly refreshed as required by &lt;Tester&gt;.
+Restore data and restart
+Clear Database
+References
+Indicate the tool references (name, available at &lt;&lt;URL&gt;&gt;) used for testing 
+Refer any data/ information in a standard format (eg. IEEE referencing style)
+For different algorithms/ techniques/ theories you can refer text books. 
+For tools you can refer web pages. 
+For similar work you can refer research paper articles that describe the work.
+You may include white paper articles for the description of technologies; web URL for the tool references. When you refer such a web page, you have to indicate the (Accessed on &lt;&lt;date&gt;&gt;)
+

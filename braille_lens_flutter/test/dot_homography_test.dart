@@ -38,12 +38,15 @@ void main() {
   });
 
   test('RANSAC homography recovers a known translation', () {
+    // Use a 2-D grid — collinear points make the 4-point DLT degenerate.
     final src = <Offset>[];
     final dst = <Offset>[];
-    for (var i = 0; i < 20; i++) {
-      final p = Offset(i * 3.0, i * 2.0);
-      src.add(p);
-      dst.add(Offset(p.dx + 7, p.dy - 4));
+    for (var y = 0; y < 5; y++) {
+      for (var x = 0; x < 5; x++) {
+        final p = Offset(x * 10.0, y * 8.0);
+        src.add(p);
+        dst.add(Offset(p.dx + 7, p.dy - 4));
+      }
     }
     final h = ransacHomography(src, dst, minInliers: 12, seed: 1);
     expect(h, isNotNull);

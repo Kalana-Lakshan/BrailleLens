@@ -1,5 +1,5 @@
 import 'dart:math' as math;
-import 'dart:ui';
+import 'dart:ui' show Offset, Rect;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:braille_lens_flutter/models/braille_cell.dart';

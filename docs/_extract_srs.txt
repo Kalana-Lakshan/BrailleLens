@@ -1,0 +1,414 @@
+
+
+Software Requirements
+Specification
+ 
+for
+ 
+Interactive Braille Learning using AI powered Smart Glasses and Computer Vision
+ 
+ 
+Version 1.0
+ 
+                                              
+
+  Prepared by - Kuruppu H.A.       - 230359M
+                                                                       Lakshan H.M.K.    - 230365D
+                                                                   Lawanya K.K.H.G.- 230373B
+ 
+Group – 15
+ 
+
+Revision History
+Date
+Version
+Description
+Author
+30/07/2026
+1.0
+Initial version of the Software Requirements Specification
+Kuruppu H.A. - 230359M 
+Lakshan H.M.K. - 230365D 
+Lawanya K.K.H.G. - 230373B 
+
+Table of Content
+
+ TOC \h \u \z \t &quot;Heading 1,1,Heading 2,2,Heading 3,3,Heading 4,4,Heading 5,5,Heading 6,6,&quot;1. Introduction	5
+1.1 Purpose	5
+1.2 Scope	5
+1.3 Definitions, Acronyms, and Abbreviations	6
+1.4 References	8
+1.5 Overview	8
+2. Overall Description	9
+2.1 Product Perspective	9
+2.2 Product Functions	9
+2.3 User Characteristics	10
+2.4 Constraints	10
+2.5 Assumptions and Dependencies	10
+2.6 Requirements Subsets	11
+3. Specific Requirements	11
+3.1 Functionality	11
+3.1.1 Functional Requirement 1: Accessible Dual-Interface Mode Selection	11
+3.1.2 Functional Requirement 2: Audio &amp; Earcon Cue Engine	12
+3.1.3 Functional Requirement 3: Continuous Camera Streaming &amp; Learning Engine	12
+3.1.4 Functional Requirement 4: Earcon-Guided Testing &amp; Evaluation Mode	13
+3.2 Usability	13
+3.2.1 Usability Requirement 1: Zero-Training Task Completion	13
+3.2.2 Usability Requirement 2: WCAG 2.1 AAA High-Contrast Accessibility	13
+3.2.3 Usability Requirement 3: Non-Visual Multimodal Feedback	14
+3.3 Reliability	14
+3.3.1 Reliability Requirement 1: Availability &amp; Offline Operation	14
+3.3.2 Reliability Requirement 2: Speech Recognition Accuracy	14
+3.3.3 Reliability Requirement 3: Fault Tolerance &amp; Degraded Mode	15
+3.4 Performance and Security	15
+3.4.1 Performance Requirement 1: Low-Latency Audio &amp; Feedback Response	15
+3.4.2 Performance Requirement 2: Camera Stream Frame Rate	15
+3.4.3 Performance Requirement 3: Resource Utilization	15
+3.4.4 Security Requirement 1: On-Device Data Privacy &amp; Volatile Processing	16
+3.5 Supportability	16
+3.5.1 Supportability Requirement 1: Modular Service-Oriented Architecture	16
+3.5.2 Supportability Requirement 2: Static Analysis &amp; Coding Standards Compliance	16
+3.5.3 Supportability Requirement 3: Platform &amp; Dependency Upgradeability	17
+3.6 Design Constraints	17
+3.6.1 Design Constraint 1: Standards Compliance (WCAG AAA &amp; IEEE)	17
+3.6.2 Design Constraint 2: Software Stack &amp; Framework Limitations	17
+3.6.3 Design Constraint 3: Hardware &amp; Peripheral Limitations	17
+3.7 On-line User Documentation and Help System Requirements	18
+3.7.1 Auditory Onboarding Prompt &amp; Gesture Help	18
+3.7.2 Screen Reader Accessibility Semantics	18
+3.8 Purchased Components	18
+3.8.1 Purchased Components &amp; Licensing	18
+3.9 Interfaces	19
+3.9.1 User Interfaces	19
+3.9.2 Hardware Interfaces	20
+3.9.3 Software Interfaces	20
+3.9.4 Communications Interfaces	20
+3.10 Database Requirements	21
+3.11 Licensing, Legal, Copyright, and Other Notices	21
+3.12 Applicable Standards	21
+4. Supporting Information	22
+4.1 Appendices Statement	22
+4.2 IEEE References	22
+
+1. Introduction
+1.1 Purpose
+The purpose of this Software Requirements Specification is to formally specify the external behavior, functional requirements, and non-functional quality attributes of the Interactive Braille Learning and Self-Assessment Application. This document serves as the technical contract between the software development team, project mentors, and domain stakeholders. It explicitly details the system architecture required to run real-time computer vision, hand tracking, and speech interaction locally on a wearable edge-computing platform. The intended audience includes software engineers, quality assurance testers, embedded systems specialists, and academic evaluators.
+
+1.2 Scope
+This software subsystem applies to the wearable educational application deployed on the NUS AiSee Smart Glasses.
+ 
+While Braille serves as the primary reading and writing system for visually impaired individuals, independent self-paced learning is heavily constrained by an inability to visually self-verify character recognition and a global scarcity of trained human instructors. This software resolves these barriers by transforming wearable smart glasses into an interactive, hands-free educational tutor. Specifically, the software will:
+
+Track Hand &amp; Fingertip Movement: Process the smart glasses' egocentric camera video feed at &gt;= 24 frames per second (FPS) to pinpoint the learner's index fingertip in real time.
+
+Detect Tactile Reading Events: Programmatically register a touch event when the user's index finger remains stationary over a tactile character for &gt;= 200 ms.
+
+Localize &amp; Crop Braille Cells: Automatically extract and normalize the exact 2x3 dot grid currently beneath the learner's fingertip.
+
+Classify Across 64 Characters: Evaluate the cropped image tensor using a fine-tuned Convolutional Neural Network (CNN) capable of distinguishing all 64 possible 6-dot binary combinations.
+
+Provide Real-Time Voice Guidance (Learning Mode): Read the touched Braille character aloud immediately using Text-to-Speech (TTS) audio synthesis.
+
+Evaluate Spoken Responses (Testing Mode): Activate the wearable microphone to record the learner's verbal guess, transcribe it via Speech-to-Text (STT) engines, check it against the computer vision model's ground-truth prediction, and deliver instant auditory feedback.
+
+Log Performance Metrics: Record timestamped character accuracy and response latency data to track learner progression over time.
+
+1.3 Definitions, Acronyms, and Abbreviations
+
+Term / Acronym
+Definition
+AiSee Glasses
+A head-mounted smart wearable platform developed by NUS, equipped with an RGB camera, microphone, and onboard near-ear audio speakers.
+Braille Cell
+A tactile reading unit consisting of a 2x3 matrix of six embossed dots, capable of representing 64 unique binary configurations.
+Egocentric Vision
+First-person computer vision captured directly from the optical viewpoint of a user's head-mounted wearable device.
+CNN
+Convolutional Neural Network; a deep learning model architecture optimized for visual pattern recognition and character classification.
+MediaPipe
+An open-source, cross-platform machine learning framework utilized for high-speed, real-time hand landmark and fingertip tracking.
+TTS / STT
+Text-to-Speech (audio voice synthesis) and Speech-to-Text (voice recognition and acoustic transcription).
+ONNX Runtime
+An open-source scoring engine designed to accelerate deep learning model inference on resource-constrained edge computing processors.
+CLAHE
+Contrast Limited Adaptive Histogram Equalization; an image preprocessing technique applied to normalize localized lighting and dot shadows across varying camera angles.
+Touch Event
+A programmatic trigger occurring when the tracking subsystem detects the index fingertip remaining stationary over a physical Braille cell for &gt;= 200 ms.
+Earcon
+A brief, distinctive audio tone or synthetic sound cue used to communicate system states (e.g., error alerts, mode toggles, or cell lock confirmations).
+CellMap
+Prescanned grid of Braille cell bounding boxes and labels for one page
+Page prescan
+One-time hand-free capture used top
+ build the CellMap
+TipYOLO / YOLO26n
+Domain fine-tuned object detector for index fingertip in egocentric view
+SkinContourTip
+Classical CV fingertip estimator using skin segmentation and contour geometry
+Homography registration
+ORB feature matching + RANSAC to align live frames to the prescan reference
+DotNeuralNet
+Third-party YOLO cell detector; fallback when in-house cell YOLO is unavailable
+FallbackTip
+Composite backend: YOLO primary, SkinContour on miss
+1.4 References
+[1] Flutter, ONNX Runtime, and associated packages (flutter_tts, speech_to_text, camera, onnxruntime). [Online]. Available: https://flutter.dev; https://onnxruntime.ai 
+[2] F. Zhang, V. Bazarevsky, A. Vakunov, A. Tkachenka, G. Sung, C.-L. Chang, and M. Grundmann, &quot;MediaPipe Hands: On-device Real-Time Hand Tracking,&quot; arXiv:2006.10214, 2020. https://arxiv.org/abs/2006.10214 
+[3] National University of Singapore, &quot;NUS researchers develop AI-powered 'eye' for visually impaired people to 'see' objects,&quot; NUS News. https://news.nus.edu.sg/ai-powered-eye-for-visually-impaired-people/ 
+[4] W3C, &quot;Understanding Success Criterion 1.4.6: Contrast (Enhanced),&quot; Web Content Accessibility Guidelines (WCAG) 2.1. https://www.w3.org/WAI/WCAG21/Understanding/contrast-minimum.html 
+[5] ONNX Runtime Documentation, Microsoft. https://onnxruntime.ai/docs/ 
+[6] IEEE Std 830-1998, &quot;IEEE Recommended Practice for Software Requirements Specifications,&quot; IEEE, 1998. [Online]. Available: https://standards.ieee.org/ieee/830/1222/
+[7] ISO/IEC/IEEE 29148:2018, &quot;Systems and Software Engineering — Life Cycle Processes — Requirements Engineering,&quot; ISO/IEC/IEEE, 2018. [Online]. Available: https://standards.ieee.org/standard/29148-2018.html
+[8] K. Zuiderveld, &quot;Contrast Limited Adaptive Histogram Equalization,&quot; in Graphics Gems IV, San Diego, CA: Academic Press, 1994, pp. 474–485.
+[9] Google, &quot;Get Started on Android with TalkBack,&quot; Android Accessibility Help. [Online]. Available: https://support.google.com/accessibility/android/answer/6283677
+[10] Apple Inc., &quot;Turn on and Practice VoiceOver on iPhone,&quot; Apple Support. [Online]. Available: https://support.apple.com/guide/iphone/turn-on-and-practice-voiceover-iph3e2e415f/ios
+
+1.5 Overview
+The remainder of this Software Requirements Specification is structured according to the IEEE 830 standard as follows:
+Section 2 (Overall Description): Establishes the product perspective, outlining the hardware operating environment on the smart glasses, major system capabilities, user profile characteristics, embedded design constraints, and system assumptions.
+Section 3 (Specific Requirements): Formally details the specific external interfaces (audio, hardware, software, and communications), itemizes the detailed functional requirements organized by system features, and establishes crucial non-functional quality attributes including end-to-end processing latency (&lt; 500 ms), thermal throttling limits, and data privacy safeguards.
+Section 4 (Supporting Information): Provides appendices, index references, and supplementary analysis models supporting the software architecture.
+
+2. Overall Description
+2.1 Product Perspective 
+The BrailleLens mobile client is an independent, edge-based software system designed to bridge visual wearable hardware (such as smart glasses) with real-time, offline accessibility feedback. Rather than operating as a cloud-dependent system, BrailleLens serves as a local, hands-free processing client. It handles continuous camera frame ingestion, user speech recognition, audio tone generation, and high-contrast user interface displays entirely on the user's mobile device.
+
+2.2 Product Functions
+The primary functions of the BrailleLens mobile client include:
+Dual-Interface Mode Selection: Providing immediate, non-visual menu navigation using 50/50 split-screen touch targets and voice recognition commands (&quot;Learning&quot; or &quot;Testing&quot;).
+Continuous Camera Stream Preview: Initializing and rendering live rear-camera feeds for real-time visual alignment.
+Earcon Audio Signaling: Generating high-contrast, low-latency synthetic audio chimes (.wav earcons) to signal system states (e.g., microphone activation, recording termination, evaluation success/error).
+Hands-Free Testing Loop: Prompting users with Braille characters, capturing spoken answers via an offline microphone loop, evaluating answers against expected targets, and providing instant auditory and haptic feedback.
+Continuous Audio Simulation (Learning Mode): Delivering spoken character feedback at periodic intervals without requiring physical shutter clicks.
+2.3 User Characteristics 
+Primary Users (Visually Impaired Learners): Individuals with severe low vision or total blindness. They rely on auditory cues (speech synthesis and earcons), haptic vibrations, and large physical touch targets rather than precision visual UI elements.
+Secondary Users (Educators / Sighted Assistants): Teachers and parents who assist learners. They benefit from WCAG AAA high-contrast visual displays (Deep Blue and Dark Teal panel backgrounds with ultra-bright yellow accent elements, as implemented in the Home Screen) to monitor interaction states visually.
+2.4 Constraints
+100% Offline Requirement: The system must execute all speech recognition, speech synthesis, camera processing, and audio playback locally without relying on active internet connections or cloud APIs.
+Hardware &amp; Audio Latency: Audio feedback loops must trigger within 100–200 milliseconds to maintain a fluid, natural interaction pace.
+Device Storage &amp; Power: Mobile battery usage and RAM consumption must be optimized during continuous camera preview and background audio listening cycles.
+2.5 Assumptions and Dependencies
+Platform Dependencies: The mobile device must support Flutter 3.x execution, a functioning rear camera, a microphone array, and local Text-to-Speech / Speech-to-Text operating system packages.
+Permissions: The user or assistant must grant the application camera and microphone runtime permissions upon initial launch.
+Speech Recognition Packs: It is assumed that offline speech recognition language files (e.g., Google Offline Speech Recognition) are installed on the host Android or iOS device.
+2.6 Requirements Subsets
+The initial release (Phase 1) focuses on the core frontend architecture: high-contrast UI, full-screen touch zones, earcon audio generation, offline TTS/STT loops, and live camera streaming with mock inference integration hooks. On-device machine learning classifier integration (e.g., custom 64-class ONNX/TFLite models) and hardware Bluetooth binding will be deployed in subsequent system updates (Phase 2).
+3. Specific Requirements 
+3.1 Functionality
+3.1.1 Functional Requirement 1: Accessible Dual-Interface Mode Selection
+Description: Upon application launch, the system initializes an accessible interface allowing users to navigate to Learning Mode or Testing Mode using either full-screen touch targets or voice commands.
+Summary Workflow:
+The app plays an auditory TTS prompt introducing the menu options.
+The screen splits into two equal, high-contrast touch zones (Left: Learning Mode, Right: Testing Mode).
+An offline listener scans for vocal commands (&quot;learning&quot; or &quot;testing&quot;).
+Selecting a mode triggers synchronized audio (TTS), tactile (vibration), and visual feedback.
+
+3.1.2 Functional Requirement 2: Audio &amp; Earcon Cue Engine
+Description: The system utilizes an Earcon Engine - a combination of short synthetic audio tones and offline Text-to-Speech to communicate system states non-visually.
+Summary Workflow:
+Plays pre-rendered audio chimes for operational events: Mic Open, Mic Close, Success, and Error.
+Delivers spoken guidance completely offline at a steady rate (150 wpm).
+Listens for the keyword &quot;stop&quot; during speech capture to immediately abort action and return to the main menu.
+
+3.1.3 Functional Requirement 3: Continuous Camera Streaming &amp; Learning Engine
+Description: Learning Mode maintains a continuous video feed received from the NUS Smart Glasses via a wireless peer-to-peer stream, providing hands-free periodic audio announcements of detected Braille characters.
+Summary Workflow:
+Establishes a video stream connection with the NUS Smart Glasses and renders the live preview inside a high-contrast yellow border.
+Emits a spoken character prediction via Text-to-Speech (TTS) based on the active frame.
+Allows exiting back to the main menu at any time via a full-screen double-tap gesture.
+
+3.1.4 Functional Requirement 4: Earcon-Guided Testing &amp; Evaluation Mode
+Description: Testing Mode challenges the user to identify a target Braille character captured by the NUS Smart Glasses camera by providing spoken prompts, capturing voice input via the audio interface, and evaluating correctness with audio-haptic feedback.
+Summary Workflow:
+Auditorily prompts the user to state the character under their finger as captured by the smart glasses feed.
+Plays a Mic Open earcon chime and records vocal input for up to 4 seconds before playing a Mic Close earcon chime.
+Evaluates the spoken voice input against the target character:
+Match: Plays a Success earcon, triggers a single haptic pulse, and speaks confirmation.
+Mismatch: Plays an Error earcon, triggers a double-vibration pulse, and speaks the correct answer.
+Silence: Announces no input heard and opens an on-screen keyboard fallback for sighted assistants.
+
+3.1.5 Functional Requirement 5: Page Prescan and Cell-Map Construction
+Description: Before the learner’s finger covers any Braille cells, the system shall capture a hand-free reference frame of the page and build a CellMap—a structured list of detected Braille cell locations and their predicted characters for that page.
+Summary Workflow:
+The system monitors the live camera stream and automatically captures a still frame when the scene is stable and no hand is present (auto-scan), or when the user triggers a manual rescan.
+The captured frame is passed to the page-recognition engine to detect Braille cells (primary: in-house cell YOLO; fallback: DotNeuralNet or classical dot clustering).
+Detected cells are ordered into a page grid and stored temporarily in memory as the CellMap reference for the current session.
+The system signals successful capture (e.g., [PAGE] CAPTURED) so Learning/Testing can begin.
+Pressing R or an equivalent rescan command clears the old CellMap and repeats the prescan workflow.
+
+3.1.6 Functional Requirement 6: Egocentric Fingertip Localization
+Description: The system shall locate the learner’s index fingertip in real time from the egocentric smart-glasses (or device camera) video feed using a dual-backend detector optimized for tactile reading, where the palm is often not visible.
+Summary Workflow:
+Each incoming video frame is processed at ≥ 24 FPS to estimate fingertip position in image coordinates.
+The primary detector (TipYOLO / YOLO26n) returns a bounding box around the index fingertip, trained on general fingertip data plus Braille-domain egocentric photos.
+If YOLO returns no confident detection for that frame, the fallback detector (SkinContourTip) segments skin regions, selects the largest valid finger blob, and estimates the distal contact point at the far end of the contour.
+Detections are smoothed over time (TipEMA) to reject single-frame jumps and teleports.
+MediaPipe Hands may be used as an optional evaluation backend only; it is not the default production path due to low recall when the palm is occluded during reading.
+
+3.1.7 Functional Requirement 7: Live-to-Reference Frame Registration
+Description: As the camera or page moves between the prescan and live reading, the system shall align each live frame to the prescan reference using homography-based registration, so fingertip coordinates remain consistent with the stored CellMap.
+Summary Workflow:
+When a CellMap is created, the prescan frame is stored as the reference image.
+For each subsequent live frame, the system extracts ORB features and estimates a 3×3 homography (RANSAC) mapping live points → reference points.
+The live fingertip position is transformed into reference coordinates before cell hit-testing.
+If registration fails for a frame, the system reuses the last known-good homography rather than dropping tracking immediately.
+Registration status is reported as OK or LOST for debugging and degraded-mode handling.
+
+3.1.8 Functional Requirement 8: Covered-Cell Identification and Dwell Trigger
+Description: The system shall determine which Braille cell is currently under the learner’s fingertip by geometric hit-testing against the CellMap, and shall register a touch event only after the fingertip remains stationary over the same cell for a configurable dwell period.
+Summary Workflow:
+The registered fingertip point is tested against each cell bounding box in the CellMap.
+When the tip lies inside a cell region, a dwell timer starts for that cell.
+If the tip leaves the cell or moves to another cell before the dwell threshold elapses, the timer resets.
+When the tip remains within the same cell for ≥ dwell_ms (default configurable, e.g. 2000–3000 ms), a touch event is fired once for that cell.
+The system outputs the cell’s Braille character (and optional dot code) to Learning Mode (TTS announcement) or Testing Mode (ground truth for spoken answer comparison).
+Duplicate announcements for the same dwell on the same cell are suppressed until the finger moves away.
+
+3.1.9 Functional Requirement 9: Braille Character Recognition Pipeline
+Description: For each identified or cropped Braille cell, the system shall classify the 2×3 dot pattern into one of 64 Braille characters using a two-stage recognition pipeline: cell localization followed by CNN classification, with preprocessing to handle lighting variation.
+Summary Workflow:
+During prescan, cell regions are detected and optionally cropped to a normalized size (e.g. 64×64).
+Each crop is preprocessed (normalization; optional CLAHE for local contrast) before inference.
+A SimpleBrailleCNN (or exported ONNX equivalent on mobile) predicts the 64-class label.
+If the primary cell detector is unavailable, the system falls back to dot detection + grid fitting or DotNeuralNet whole-cell detection.
+The predicted character is attached to the CellMap entry and used as ground truth in Testing Mode and as spoken feedback in Learning Mode.
+
+3.1.10 Functional Requirement 10: Multi-Source Dataset Integration for Model Training
+Description: The system’s computer-vision models shall be trained on integrated, cleaned datasets from multiple sources so that fingertip detection and Braille recognition generalize across public benchmarks and project-specific egocentric captures.
+Summary Workflow:
+Raw annotations from DSBI, Angelina, Roboflow/TI1K fingertip sets, and the project Gold Braille_fingertip collection are merged via a unified manifest.
+Cleaning removes duplicate annotations, invalid labels, and bounding boxes far outside the page boundary; box formats are harmonized to YOLO layout.
+Fingertip YOLO training uses a combined dataset (general fingertip + Braille-domain photos); cell/CNN training uses integrated cell crops with train/val/test splits that prevent page-level leakage.
+Trained weights (.pt / .onnx) are versioned and loaded by the inference services without changing UI or audio modules.
+3.2 Usability 
+3.2.1 Usability Requirement 1: Zero-Training Task Completion
+Description: First-time users (both blind learners and sighted assistants) shall become productive without prior technical training or reading written manuals.
+Metric: A novice user shall be able to launch the app, navigate using spoken commands or full-screen touch targets, and complete an initial interaction loop in under 15 seconds.
+
+3.2.2 Usability Requirement 2: WCAG 2.1 AAA High-Contrast Accessibility
+Description: Visual elements shall adhere strictly to Web Content Accessibility Guidelines (WCAG 2.1 AAA) to accommodate low-vision users and sighted assistants.
+Metric: All text labels, boundaries, and screen zones shall maintain a visual contrast ratio of at least 7:1 against their respective panel backgrounds (Deep Blue #1E3A8A, Dark Teal #064E3B).
+
+3.2.3 Usability Requirement 3: Non-Visual Multimodal Feedback
+Description: System state changes and evaluation results shall never rely solely on visual displays.
+Metric: 100% of operational states, errors, and mode transitions shall provide synchronized feedback via localized Text-to-Speech (TTS), distinct earcon audio chimes, and tactile haptic vibrations.
+
+3.3 Reliability
+3.3.1 Reliability Requirement 1: Availability &amp; Offline Operation
+Description: The mobile system shall maintain continuous operational availability without depending on external cloud services or network connectivity.
+Metric: The app shall achieve 99.9% runtime availability during client execution, operating 100% offline for all core functions (speech synthesis, voice recognition, earcon playback, and camera streaming).
+
+3.3.2 Reliability Requirement 2: Speech Recognition Accuracy
+Description: The offline Speech-to-Text (STT) engine shall accurately transcribe single-letter spoken responses in typical indoor learning environments.
+Metric: The speech engine shall achieve &gt;=90% recognition accuracy for single-letter vocal responses under ambient noise levels up to 50dB.
+
+3.3.3 Reliability Requirement 3: Fault Tolerance &amp; Degraded Mode
+Description: The system shall gracefully handle hardware peripheral disconnects (e.g., smart glasses disconnection, camera failure, or microphone busy states) without crashing.
+Metric: If the smart glasses camera feed is interrupted, the app shall automatically fall back to the phone’s rear camera within 500 ms and play a warning earcon. If voice input fails, an on-screen keyboard fallback shall open within 300 ms.
+
+3.4 Performance and Security
+3.4.1 Performance Requirement 1: Low-Latency Audio &amp; Feedback Response
+Description: Audio feedback, including earcon chimes and Text-to-Speech (TTS) prompts, must trigger near-instantly to maintain a fluid interaction pace for visually impaired users.
+Metric: Earcon tone playback response time shall not exceed 150 ms from the triggering event. TTS spoken prompt generation shall begin within 300 ms.
+3.4.2 Performance Requirement 2: Camera Stream Frame Rate
+Description: The system shall process incoming video streams from the NUS Smart Glasses smoothly without dropping frames or freezing the interface.
+Metric: The live camera stream preview shall maintain a minimum rendering throughput of 24 frames per second (fps).
+3.4.3 Performance Requirement 3: Resource Utilization
+Description: Continuous background services (camera streaming, speech recognition, and audio processing) must operate efficiently to prevent thermal throttling and battery drain.
+Metric: Total RAM usage shall remain below 200 MB, and CPU utilization shall average under 25% during active continuous streaming sessions.
+3.4.4 Security Requirement 1: On-Device Data Privacy &amp; Volatile Processing
+Description: All captured video frames, camera streams, audio buffers, and voice transcriptions shall be processed strictly locally in volatile device memory (RAM).
+Metric: Zero user image, audio, or voice data shall be written to permanent local storage or transmitted over external network protocols, ensuring 100% user privacy.
+
+3.5 Supportability
+3.5.1 Supportability Requirement 1: Modular Service-Oriented Architecture
+Description: Core application functionality shall be decoupled into distinct, independent service classes (AudioService, CameraService, DeviceService).
+Metric:Updating or re-training the integrated local ONNX/TFLite model shall require replacing only the model asset file (.onnx/.tflite) or updating classifier_service.dart, leaving UI screens, accessibility touch targets, and audio feedback loops completely untouched. 
+3.5.2 Supportability Requirement 2: Static Analysis &amp; Coding Standards Compliance
+Description: Source code shall adhere strictly to standard Flutter/Dart linting guidelines to ensure high code readability, maintainability, and consistent architecture across both the mobile frontend and embedded ML inference bridge. 
+Metric: The entire codebase shall pass static analysis via flutter analyze with zero critical warnings or type-safety errors.
+3.5.3 Supportability Requirement 3: Platform &amp; Dependency Upgradeability
+Description: Open-source package dependencies (audioplayers, flutter_tts, speech_to_text, camera) shall be managed using semantic versioning ranges to allow low-effort platform security patches and SDK updates.
+Metric: Updating Flutter SDK minor versions or core plugins shall not break existing non-visual UI components or platform native channels (Android/iOS).
+
+3.6 Design Constraints
+3.6.1 Design Constraint 1: Standards Compliance (WCAG AAA &amp; IEEE)
+Description: The application UI must strictly comply with WCAG 2.1 AAA high-contrast accessibility guidelines, and software requirements documentation must follow IEEE Std 830-1998 / ISO/IEC 29148 specifications.
+Impact: Color schemes are strictly constrained to high-contrast combinations (e.g., black background with yellow accents), and all UI components must support non-visual voice or gesture interactions.
+3.6.2 Design Constraint 2: Software Stack &amp; Framework Limitations
+Description: The client software must be built exclusively using Flutter to ensure a single cross-platform codebase for mobile platforms.
+Impact: All peripheral services, audio drivers, and local machine learning bindings must run natively within the Dart environment without relying on remote cloud runtimes or external web interfaces.
+3.6.3 Design Constraint 3: Hardware &amp; Peripheral Limitations
+Description: The system is constrained by mobile device processor limits, battery health, and wireless streaming bandwidth from the NUS Smart Glasses.
+Impact: Video frame ingestion and local ML inference must run at optimized resolutions (640 times 480 or 1280 times 720) at 24 fps to avoid thermal throttling, excessive battery consumption, or memory leaks on mid-tier mobile hardware.
+
+3.7 On-line User Documentation and Help System Requirements
+3.7.1 Auditory Onboarding Prompt &amp; Gesture Help
+Description: The application shall provide an integrated, hands-free spoken help system that automatically plays an auditory usage guide upon launch and can be re-triggered anytime by executing a full-screen triple-tap gesture.
+Metric: The help system shall verbally guide the user through mode selection, voice command usage (&quot;learning&quot;, &quot;testing&quot;, &quot;stop&quot;), and system earcon tone meanings without needing visual screen assistance.
+3.7.2 Screen Reader Accessibility Semantics
+Description: All UI components, buttons, and state indicators shall be wrapped with native Flutter Semantics tags.
+Metric: Sighted assistants or low-vision users using platform screen readers (Android TalkBack or iOS VoiceOver) shall receive accurate, descriptive screen reading guidance for 100% of rendered visual elements.
+
+3.8 Purchased Components
+3.8.1 Purchased Components &amp; Licensing
+Description: The system contains zero commercial, proprietary paid components, or subscription-based API services.
+Details: All software components -including the Flutter SDK, open-source packages (audioplayers, flutter_tts, speech_to_text, camera), and on-device machine learning inference engines -are distributed under open-source licenses (MIT, BSD-3-Clause, or Apache 2.0) permitting royalty-free deployment and modification.
+
+3.9 Interfaces
+3.9.1 User Interfaces
+Main Home Screen (home_screen.dart):
+Layout &amp; Functionality: Split into two equal 50/50 vertical touch zones.
+Panels &amp; Elements:
+Left Panel (Learning Mode): Deep Blue (#1E3A8A) background with &quot;Learning Mode&quot; text label.
+Right Panel (Testing Mode): Dark Teal (#064E3B) background with &quot;Testing Mode&quot; text label.
+Border Frame: High-contrast yellow (#FFD700) accent border.
+Controls: Tap anywhere on left/right half, or speak &quot;learning&quot; / &quot;testing&quot;.
+Learning Screen (learning_screen.dart):
+Layout &amp; Functionality: Full-screen video preview rendering continuous frames from the NUS Smart Glasses (or device camera fallback).
+Panels &amp; Elements: Central camera view panel, visual yellow boundary, and a top-right on-screen &quot;Back to Menu&quot; button for sighted assistants.
+Testing Screen (testing_screen.dart):
+Layout &amp; Functionality: Interactive evaluation view.
+Panels &amp; Elements: Target character prompt panel, active microphone waveform pulse indicator, and a fallback text entry field with a manual &quot;Submit&quot; button for sighted assistants when voice input is quiet.
+
+3.9.2 Hardware Interfaces
+Camera Sensor: Connects to the device rear camera via the Flutter camera plugin, streaming video frames at 640×480 or 1280×720 resolution at 24 fps.
+Microphone Input: Connects to device microphone array to record 16 kHz mono PCM audio buffers for localized speech recognition.
+Audio &amp; Haptics Output: Drives device built-in speakers, 3.5mm jack, or paired Bluetooth headsets (A2DP profile) for earcon/TTS playback, alongside standard device vibration motors via Flutter HapticFeedback.
+Client Hardware Requirements:
+Processor: Quad-core 1.8 GHz ARM64 processor or higher.
+RAM: Minimum 2 GB (4 GB recommended).
+Storage Space: Minimum 150 MB available internal storage.
+
+3.9.3 Software Interfaces
+Platform Speech Engines: Interfaces natively with Android TextToSpeech (android.speech.tts) and iOS AVSpeechSynthesizer via flutter_tts.
+Platform Speech Recognizers: Interfaces with Android SpeechRecognizer and iOS SFSpeechRecognizer via speech_to_text.
+Local Machine Learning Engine: Connects to the integrated local ONNX/TFLite model via classifier_service.dart for real-time edge character inference.
+
+3.9.4 Communications Interfaces
+
+Wireless Video Stream: P2P video stream interface over local Wi-Fi or USB tethering to receive camera frames from the NUS Smart Glasses.
+Bluetooth Audio Transmission: Standard Bluetooth A2DP / LE Audio protocol connection for transmitting earcons and TTS announcements directly to paired smart glasses or bone-conduction headsets.
+
+3.10 Database Requirements
+
+The system is a lightweight edge client and requires no external database or cloud storage. App state, high-contrast user preferences, and voice volume settings are managed locally in volatile memory and key-value preference pairs (shared_preferences). 
+
+3.11 Licensing, Legal, Copyright, and Other Notices
+Copyright Notice: © 2026 BrailleLens Development Team (Group 15, Dept. of Computer Science &amp; Engineering, University of Moratuwa). All rights reserved.
+Open-Source Compliance: All third-party software dependencies (Flutter SDK, audioplayers, flutter_tts, speech_to_text, camera) are distributed under permissive open-source licenses (MIT, BSD-3-Clause, Apache 2.0). Full license notices are bundled within application assets (LICENSES.txt).
+Disclaimer: BrailleLens is provided &quot;as-is&quot; as an assistive educational tool and is not certified as a medical device.
+
+3.12 Applicable Standards
+IEEE Std 830-1998 / ISO/IEC/IEEE 29148:2018: IEEE Standard for Software Requirements Specifications, Section 3.
+W3C WCAG 2.1 (AAA Conformance): Web Content Accessibility Guidelines, Sections 1.4.3 (Contrast) and 2.1 (Keyboard/Gesture Accessibility).
+Dart 3.x / Flutter SDK Coding Standards: Google Flutter Architecture Guidelines for Strong-Mode Type Safety.
+4. Supporting Information
+4.1 Appendices Statement
+All appendices included in this document (such as UI wireframe mockups and earcon frequency specifications) are provided for structural reference and are to be considered part of the official system requirements.
+4.2 IEEE References
+W3C, &quot;Web Content Accessibility Guidelines (WCAG) 2.1,&quot; W3C Recommendation, June 2018. [Online]. Available: https://www.w3.org/TR/WCAG21/.
+Google LLC, &quot;Flutter Documentation: Building Accessible Apps,&quot; 2026. [Online]. Available: https://docs.flutter.dev/ui/accessibility-and-localization/accessibility. 
+S. Nanayakkara et al., &quot;AiSee: An Affordable Wearable Assistive Device for the Visually Impaired Using Artificial Intelligence and Bone Conduction,&quot; School of Computing, National University of Singapore (NUS), 2024. [Online]. Available: https://news.nus.edu.sg/ai-powered-eye-for-visually-impaired-people/
+

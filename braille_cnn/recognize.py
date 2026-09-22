@@ -18,12 +18,13 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
-import torch
 from PIL import Image
 
-from .infer_page import load_model, run_auto_transcribe
 from .labels import code_to_label
 from .normalize import normalize_crop
+
+# torch / infer_page are imported lazily inside CNN paths so pure helpers
+# (group_into_lines, _drop_ruler_lines) stay testable without a DL stack.
 
 NUM_CLASSES = 64
 IMG_SIZE = 64
@@ -170,6 +171,8 @@ def _resolve_cnn(path: str | Path | None) -> Path:
 
 
 def _classify_boxes(image: Image.Image, boxes: list[tuple], model, device, img_size: int):
+    import torch
+
     if not boxes:
         return [], []
     crops = []
@@ -245,6 +248,9 @@ def recognize_page(
     here is so it can be checked against more real phone photos, not a
     reversal of that finding. Pass apply_clahe=False if it hurts on yours.
     """
+    import torch
+    from .infer_page import load_model, run_auto_transcribe
+
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     pil = _to_pil(image)
@@ -346,6 +352,8 @@ def main() -> None:
     parser.add_argument("--deskew", action=argparse.BooleanOptionalAction, default=True,
                          help="Best-effort perspective deskew before cell detection (see cell_detect/preprocess.py::deskew_page). On by default; safe no-op when no confident page quad is found. Pass --no-deskew to disable")
     args = parser.parse_args()
+
+    import torch
 
     device = torch.device(args.device or ("cuda" if torch.cuda.is_available() else "cpu"))
     cells = recognize_page(
