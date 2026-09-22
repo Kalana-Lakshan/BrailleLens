@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../models/braille_cell.dart';
 import '../services/fingertip_onnx_service.dart';
+import '../utils/image_decode.dart';
 import '../utils/image_fit.dart';
 import 'cell_overlay_painter.dart';
 
@@ -101,11 +102,9 @@ class _FrozenImageViewState extends State<FrozenImageView> {
     );
   }
 
-  Future<ui.Image> _decode(Uint8List bytes) async {
-    final codec = await ui.instantiateImageCodec(bytes);
-    final frame = await codec.getNextFrame();
-    return frame.image;
-  }
+  /// Upright, so the cell boxes and fingertip marker (both in
+  /// `decodeUpright` pixel space) land on the pixels they describe.
+  Future<ui.Image> _decode(Uint8List bytes) => decodeUprightUi(bytes);
 }
 
 class ImagePainter extends CustomPainter {

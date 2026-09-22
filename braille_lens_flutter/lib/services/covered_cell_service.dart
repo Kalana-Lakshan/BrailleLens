@@ -181,6 +181,9 @@ class CoveredCellService {
     Homography? homography,
     String alignMode = 'scale',
     double marginFrac = 0.12,
+    /// Absolute slack for a live capture, where the mapped point carries the
+    /// error of the whole alignment, not just the finger position.
+    double marginPx = 15.0,
     double nearestWithinCells = 1.0,
     Offset? probeInFingerImage,
     bool matchNearestCentre = false,
@@ -203,6 +206,7 @@ class CoveredCellService {
       tipInPrescan,
       cellMap,
       marginFrac: marginFrac,
+      marginPx: marginPx,
       skipEmpty: true,
       nearestWithinCells: nearestWithinCells,
     );

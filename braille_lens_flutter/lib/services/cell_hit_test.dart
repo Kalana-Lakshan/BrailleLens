@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:ui';
 
 import '../models/braille_cell.dart';
@@ -14,16 +15,27 @@ class CellHitTest {
   /// far more generously than the single contact point the detector reports,
   /// so demanding the point fall inside a box rejects plenty of genuine
   /// touches. Set to 0 to require a strict containment hit.
+  ///
+  /// [marginPx] — absolute slack in image pixels, applied alongside
+  /// [marginFrac]; the larger of the two wins. A cell photographed from arm's
+  /// length can be ~20 px wide, where 12% is barely two pixels, while a finger
+  /// pad covers far more than that.
+  ///
+  /// Defaults to 0 so that `nearestWithinCells: 0` still means strict
+  /// containment for callers that ask for it. [CoveredCellService] passes the
+  /// live-capture tolerance.
   static BrailleCell? hitTest(
     Offset tip,
     CellMap cellMap, {
     double marginFrac = 0.12,
+    double marginPx = 0.0,
     bool skipEmpty = true,
     double nearestWithinCells = 1.0,
   }) {
     if (cellMap.cells.isEmpty) return null;
 
-    var hits = cellMap.cells.where((c) => _contains(c, tip, marginFrac)).toList();
+    var hits =
+        cellMap.cells.where((c) => _contains(c, tip, marginFrac, marginPx)).toList();
 
     if (hits.isEmpty && nearestWithinCells > 0) {
       final radius = _medianCellWidth(cellMap.cells) * nearestWithinCells;
@@ -89,11 +101,16 @@ class CellHitTest {
     return widths[widths.length ~/ 2];
   }
 
-  static bool _contains(BrailleCell cell, Offset tip, double marginFrac) {
+  static bool _contains(
+    BrailleCell cell,
+    Offset tip,
+    double marginFrac,
+    double marginPx,
+  ) {
     final w = cell.x1 - cell.x0;
     final h = cell.y1 - cell.y0;
-    final mx = w * marginFrac;
-    final my = h * marginFrac;
+    final mx = math.max(w * marginFrac, marginPx);
+    final my = math.max(h * marginFrac, marginPx);
     return tip.dx >= cell.x0 - mx &&
         tip.dx <= cell.x1 + mx &&
         tip.dy >= cell.y0 - my &&
