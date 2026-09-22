@@ -7,13 +7,14 @@ import '../models/braille_cell.dart';
 import '../services/audio_service.dart';
 import '../services/camera_source.dart';
 import '../services/glass_device_service.dart';
-import '../services/classifier_service.dart';
 import '../services/covered_cell_service.dart';
 import '../services/fingertip_onnx_service.dart';
 import '../services/prescan_bridge.dart';
+import '../services/stt_onnx_service.dart';
+import '../services/voice_capture_service.dart';
 import '../theme/app_theme.dart';
-import '../utils/dot_sequence.dart';
 import '../utils/image_decode.dart';
+import '../utils/sinhala_phonetics.dart';
 import '../widgets/frozen_image_view.dart';
 import '../widgets/tap_fingertip_dialog.dart';
 
@@ -22,11 +23,13 @@ enum _TestStage { prescan, quiz }
 /// Two-stage Testing Mode, same on-device pipeline as Learning Mode:
 /// 1. Capture hand-free page → prescan builds CellMap (yellow boxes).
 ///    Runs once per page; "Rescan" if the page moves.
-/// 2. The app names a random target character from the CNN's own label set.
-///    Learner places a finger on that cell and taps "Detect" — geometry-only
-///    fingertip hit-test (no CNN on the finger photo) resolves the covered
-///    cell, and correctness is `resolved.code == target.code`. Repeats with
-///    a new target each round, reusing the same page map.
+/// 2. The learner puts a finger on any cell and captures. The geometry-only
+///    hit-test resolves which cell that is (no CNN on the finger photo,
+///    where the hand hides the dots), and instead of being told the answer
+///    the learner is asked to say it. The spoken answer is recorded — glasses
+///    mic when connected, phone mic otherwise — transcribed by the on-device
+///    CTC model, and compared against the cell's letter and its Sinhala name.
+///    The page map is kept between rounds, so each press tests a new cell.
 class TestingScreen extends StatefulWidget {
   final AudioService audioService;
 
@@ -59,9 +62,17 @@ class _TestingScreenState extends State<TestingScreen> {
   CoveredCellResult? _covered;
   FingertipDetection? _fingertip;
 
-  List<BrailleLabel> _deck = const [];
-  int _deckIndex = 0;
-  BrailleLabel? _target;
+  final VoiceCaptureService _voice = VoiceCaptureService();
+  final SttOnnxService _stt = SttOnnxService.instance;
+
+  /// The letter resolved under the finger this round, and what the learner
+  /// should say for it (ක → කයන්න).
+  String _targetChar = '';
+  String _targetPhonetic = '';
+  String? _spokenResult;
+  bool _sttReady = false;
+  bool _listening = false;
+
   bool? _lastCorrect; // null = no round evaluated yet this cell map
   int _correct = 0;
   int _total = 0;
@@ -85,33 +96,39 @@ class _TestingScreenState extends State<TestingScreen> {
     final tipReady = await _fingertipOnnx.initialize();
     if (!mounted) return;
 
-    if (cnnReady) {
-      _deck = List.of(PrescanBridge.classifier.labels)
-        ..removeWhere((l) => l.code == 0 || l.si.trim().isEmpty)
-        ..shuffle();
-    }
+    // Speech is only needed in stage 2, but loading it here keeps the first
+    // round from stalling on a cold model load.
+    final sttReady = await _stt.initialize();
+    if (!mounted) return;
 
     setState(() {
       _cameraReady = _camera.isReady;
+      _sttReady = sttReady;
       _statusLine = [
         'Camera: ${_camera.label}',
-        cnnReady ? 'CNN: braille_cnn.onnx (${_deck.length} letters)' : 'CNN failed',
+        cnnReady ? 'CNN: braille_cnn.onnx' : 'CNN failed',
         tipReady
             ? 'YOLO: ${_fingertipOnnx.loadedAsset?.split('/').last}'
             : 'YOLO failed — tap fingertip',
+        sttReady ? 'STT: ${_stt.loadedAsset?.split('/').last}' : 'STT unavailable',
       ].join(' · ');
     });
 
-    if (_deck.isEmpty) {
+    if (!cnnReady) {
       await widget.audioService.speak(
-        'Testing Mode could not load the character set. Check the model files and restart.',
+        'Testing Mode could not load the character models. Check the model files and restart.',
       );
       return;
+    }
+    if (!sttReady) {
+      // Not fatal: the round still resolves the letter and reads it out, it
+      // just cannot score a spoken answer.
+      debugPrint('[Testing] STT unavailable: ${_stt.lastError}');
     }
 
     await widget.audioService.speak(
       'Testing Mode. Stage 1: hold the Braille page still with no finger, '
-      'then tap capture. I will then name a letter for you to find each round.',
+      'then tap capture. Then put a finger on a letter and I will ask you to name it.',
     );
   }
 
@@ -144,7 +161,7 @@ class _TestingScreenState extends State<TestingScreen> {
   // ── Stage 1 ──────────────────────────────────────────────────────────────────
 
   Future<void> _capturePrescan() async {
-    if (_busy || _deck.isEmpty) return;
+    if (_busy) return;
     setState(() {
       _busy = true;
       _statusLine = 'Scanning the page for Braille cells…';
@@ -182,10 +199,10 @@ class _TestingScreenState extends State<TestingScreen> {
         _stage = _TestStage.quiz;
         _busy = false;
       });
-      await widget.audioService.speak(
-        '${fixed.cells.length} cells found.',
+      // "Page scan complete. Now place your finger on a letter."
+      await widget.audioService.speakSinhala(
+        'පිටුව ස්කෑන් කර අවසන්. දැන් ඔබේ ඇඟිල්ල අකුරක් මත තබන්න.',
       );
-      _nextTarget();
     } on PrescanUnavailableException catch (e) {
       setState(() {
         _busy = false;
@@ -210,7 +227,9 @@ class _TestingScreenState extends State<TestingScreen> {
       _fingerJpeg = null;
       _covered = null;
       _fingertip = null;
-      _target = null;
+      _targetChar = '';
+      _targetPhonetic = '';
+      _spokenResult = null;
       _lastCorrect = null;
       _statusLine = null;
     });
@@ -219,31 +238,15 @@ class _TestingScreenState extends State<TestingScreen> {
 
   // ── Stage 2: prompt + check ─────────────────────────────────────────────────
 
-  void _nextTarget() {
-    if (_deck.isEmpty) return;
-    if (_deckIndex >= _deck.length) {
-      _deckIndex = 0;
-      _deck.shuffle();
-    }
-    final target = _deck[_deckIndex];
-    _deckIndex++;
-
-    setState(() {
-      _target = target;
-      _lastCorrect = null;
-      _fingerJpeg = null;
-      _fingertip = null;
-      _covered = null;
-      _statusLine = 'Find the cell with ${compactDotSequence(target.dots)}, then tap Detect.';
-    });
-    widget.audioService.speak('සොයන්න ${target.si}');
-    widget.audioService.speak('Find the cell with ${compactDotSequence(target.dots)}.');
-  }
-
+  /// One round: resolve the cell under the finger, ask the learner to name
+  /// it, record the answer, transcribe it and score it. The page map is kept,
+  /// so the next press tests another cell without rescanning.
   Future<void> _checkFinger() async {
-    if (_busy || _cellMap == null || _target == null) return;
+    if (_busy || _cellMap == null) return;
     setState(() {
       _busy = true;
+      _spokenResult = null;
+      _lastCorrect = null;
       _statusLine = 'Detecting fingertip…';
     });
 
@@ -284,35 +287,102 @@ class _TestingScreenState extends State<TestingScreen> {
       prescanJpeg: _prescanJpeg,
     );
 
-    final target = _target!;
-    final matched = result.hasHit && result.cell!.code == target.code;
-
+    final target = result.hasHit ? result.headline : '';
+    if (!mounted) return;
     setState(() {
       _fingerJpeg = jpeg;
       _fingertip = tip;
       _covered = result;
-      _lastCorrect = matched;
-      _total++;
-      if (matched) _correct++;
+      _targetChar = target;
+      _targetPhonetic = sinhalaLetterName(target);
       _busy = false;
       _statusLine = result.hasHit
-          ? '${result.compactDots} · ${result.headline}'
+          ? '${result.compactDots} · under your finger'
           : result.subtitle;
     });
 
-    if (matched) {
-      await widget.audioService.playSuccessTone();
-      await widget.audioService.hapticDouble();
-      await widget.audioService.speak('නිවැරදියි! ඔබ හඳුනාගත්තේ ${target.si}');
-    } else {
-      await widget.audioService.playErrorTone();
-      await widget.audioService.hapticError();
-      await widget.audioService.speak('වැරදියි. නිවැරදි අක්ෂරය ${target.si}');
+    if (!result.hasHit || target.isEmpty || target == '—') {
+      await widget.audioService.speak('No character found under your finger.');
+      return;
+    }
+    await _askAndScore();
+  }
+
+  /// Prompt → record → transcribe → score.
+  Future<void> _askAndScore() async {
+    // "What is the letter under your finger? Say it aloud."
+    await widget.audioService.speakSinhala(
+      'ඔබේ ඇඟිල්ල යට ඇති අකුර කුමක්ද? ශබ්ද නඟා කියන්න.',
+    );
+
+    if (!_sttReady) {
+      // Without the speech model there is nothing to score against, so read
+      // the answer out instead of failing the learner on a missing asset.
+      if (mounted) {
+        setState(() => _statusLine =
+            'Speech model missing — add sinhala_mms_ctc.onnx to assets/models/');
+      }
+      await widget.audioService.speakSinhala('අක්ෂරය $_targetPhonetic');
+      return;
     }
 
-    await Future.delayed(const Duration(milliseconds: 2000));
+    if (mounted) {
+      setState(() {
+        _listening = true;
+        _statusLine = 'Listening…';
+      });
+    }
+    // Waits for the prompt to finish before opening the mic, so the
+    // recording does not capture the app's own voice.
+    await widget.audioService.playMicOpen();
+    final capture = await _voice.record();
+    await widget.audioService.playMicClose();
+
     if (!mounted) return;
-    _nextTarget();
+    setState(() {
+      _listening = false;
+      _statusLine = 'Checking your answer…';
+    });
+
+    if (!capture.hasAudio) {
+      setState(() => _statusLine = capture.error ?? 'No audio recorded');
+      await widget.audioService.speak('I could not hear you. Try again.');
+      return;
+    }
+
+    final spoken = await _stt.transcribe(capture.samples);
+    final matched = sinhalaAnswerMatches(spoken, _targetChar);
+
+    if (!mounted) return;
+    setState(() {
+      _spokenResult = spoken;
+      _lastCorrect = matched;
+      _total++;
+      if (matched) _correct++;
+      _statusLine = 'You said: ${spoken?.isNotEmpty == true ? spoken : '—'}'
+          ' · ${capture.source.name} mic';
+    });
+
+    if (matched) {
+      await widget.audioService.hapticHeavy();
+      await widget.audioService.playSuccessTone();
+      // "Correct! The letter <name>."
+      await widget.audioService.speakSinhala('නිවැරදියි! අක්ෂරය $_targetPhonetic.');
+    } else {
+      await widget.audioService.hapticError();
+      await widget.audioService.playErrorTone();
+      // "Wrong. You said <x>, but the correct letter is <name>."
+      final said = spoken?.trim().isNotEmpty == true ? spoken!.trim() : '—';
+      await widget.audioService.speakSinhala(
+        'වැරදියි. ඔබ කීවේ $said, නමුත් නිවැරදි අක්ෂරය $_targetPhonetic.',
+      );
+    }
+
+    // Stay in stage 2: the next press tests another cell on the same page.
+    if (mounted) {
+      setState(() => _statusLine =
+          'Move to another cell and press capture for the next letter.');
+    }
   }
 
   /// Fallback when ONNX fingertip model is missing: user taps contact point.
@@ -341,7 +411,9 @@ class _TestingScreenState extends State<TestingScreen> {
     _glassButtonSub?.cancel();
     _camera.removeListener(_onCameraSourceChanged);
     _fingertipOnnx.dispose();
+    _voice.dispose();
     _camera.dispose();
+    // The STT session is app-wide and shared, so it is not disposed here.
     super.dispose();
   }
 
@@ -385,7 +457,9 @@ class _TestingScreenState extends State<TestingScreen> {
   }
 
   Widget _buildTopBar() {
-    final title = _stage == _TestStage.prescan ? '1 · SCAN BRAILLE PAGE' : '2 · FIND THE LETTER';
+    final title = _stage == _TestStage.prescan
+        ? '1 · SCAN BRAILLE PAGE'
+        : '2 · NAME THE LETTER';
 
     return SafeArea(
       child: Container(
@@ -423,7 +497,6 @@ class _TestingScreenState extends State<TestingScreen> {
   }
 
   Widget _buildBottomPanel() {
-    final target = _target;
     final resultColor = _lastCorrect == null
         ? AppTheme.primaryYellow
         : (_lastCorrect! ? const Color(0xFF00E5FF) : const Color(0xFFFF5252));
@@ -467,17 +540,49 @@ class _TestingScreenState extends State<TestingScreen> {
                 ),
               )
             else ...[
-              const Text('FIND', style: TextStyle(color: Colors.white70, fontSize: 12, letterSpacing: 1.1)),
-              const SizedBox(height: 4),
               Text(
-                compactDotSequence(target?.dots),
-                style: TextStyle(fontSize: 56, fontWeight: FontWeight.bold, color: resultColor),
+                _listening ? 'LISTENING…' : 'UNDER YOUR FINGER',
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 12,
+                  letterSpacing: 1.1,
+                ),
               ),
               const SizedBox(height: 4),
               Text(
-                target?.si ?? '—',
-                style: const TextStyle(color: Colors.white70, fontSize: 18, fontWeight: FontWeight.w600),
+                _targetChar.isEmpty ? '—' : _targetChar,
+                style: TextStyle(
+                  fontSize: 56,
+                  fontWeight: FontWeight.bold,
+                  color: resultColor,
+                ),
               ),
+              if (_covered?.hasHit == true) ...[
+                const SizedBox(height: 2),
+                Text(
+                  'dots ${_covered!.compactDots}',
+                  style: const TextStyle(color: Colors.white38, fontSize: 13),
+                ),
+              ],
+              if (_targetPhonetic.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(
+                  _targetPhonetic,
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+              if (_spokenResult != null) ...[
+                const SizedBox(height: 4),
+                Text(
+                  'You said: ${_spokenResult!.isEmpty ? '—' : _spokenResult!}',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white54, fontSize: 14),
+                ),
+              ],
               if (_lastCorrect != null) ...[
                 const SizedBox(height: 4),
                 Text(
@@ -511,7 +616,9 @@ class _TestingScreenState extends State<TestingScreen> {
                   padding: const EdgeInsets.symmetric(vertical: 14),
                 ),
                 child: Text(
-                  _stage == _TestStage.prescan ? 'SCAN BRAILLE PAGE' : 'DETECT & CHECK',
+                  _stage == _TestStage.prescan
+                      ? 'SCAN BRAILLE PAGE'
+                      : 'READ MY FINGER & ASK ME',
                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                 ),
               ),

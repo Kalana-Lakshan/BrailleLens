@@ -51,16 +51,49 @@ class AudioService {
   }
 
   /// Says a Sinhala glyph using the device's Sinhala voice when available.
-  Future<void> speakSinhalaCharacter(String character) async {
+  Future<void> speakSinhalaCharacter(String character) =>
+      speakSinhala(character);
+
+  /// Speaks Sinhala text, then puts the engine back on the app's default
+  /// voice.
+  ///
+  /// Leaving the engine on `si-LK` (as this used to) means every later
+  /// English prompt is read by the Sinhala voice, which mangles it or goes
+  /// silent when only one of the two voices is installed.
+  Future<void> speakSinhala(String text) async {
+    if (text.trim().isEmpty) return;
     try {
       await _tts.stop();
       await _tts.setLanguage('si-LK');
-      await _tts.speak(character);
+      await _tts.speak(text);
     } catch (e) {
       debugPrint('[AudioService] Sinhala TTS error: $e');
-      await speak('Detected character $character');
+      await speak(text);
+    } finally {
+      try {
+        await _tts.setLanguage('en-US');
+      } catch (_) {
+        // Leaving the language unrestored is not worth failing the prompt.
+      }
     }
   }
+
+  /// Chime + light haptic marking the microphone opening, and — importantly —
+  /// waits for the TTS engine to release audio focus first.
+  ///
+  /// Android hands the mic to whoever holds focus; starting a recording while
+  /// the prompt is still playing gets a truncated recording, the prompt
+  /// itself recorded back, or a mic that never opens.
+  Future<void> playMicOpen() async {
+    await stopSpeech();
+    await playStartListeningTone();
+    await hapticLight();
+    // Short settle so the earcon does not bleed into the recording.
+    await Future<void>.delayed(const Duration(milliseconds: 180));
+  }
+
+  /// Closing chime for the microphone.
+  Future<void> playMicClose() => playStopListeningTone();
 
   // ── Earcons ──────────────────────────────────────────────────────────────────
 
