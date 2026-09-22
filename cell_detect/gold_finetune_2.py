@@ -1,0 +1,355 @@
+"""Stage 4a-gold-v2 -- cell-detector fine-tune on Gold pages, with an
+optional synthetic camera-degradation augmentation for the AiSee glasses.
+
+Fork of finetune_gold.py (which stays as-is -- it's the proven, adopted
+fine-tune for phone-camera-quality input, and must not be disturbed). This
+copy adds a --degrade-pages option that simulates the AiSee glasses
+camera's much softer image quality (see DEGRADE_DOWNSCALE below), for
+experimenting with closing that domain gap. Everything else -- dataset
+construction, low-quality-lighting variant handling, CLI shape -- is
+otherwise identical to finetune_gold.py.
+
+Deliberately NOT built on data_pipeline.integrate / clean / reduce: that
+pipeline pulls in every currently-labelled Gold page under its documented
+12-page split (GOLD_PAGE_SPLITS in data_pipeline/integrate.py) and, for a
+detector fine-tune, doesn't need DSBI/Angelina reprocessed at all. This
+script reads a handful of LabelMe JSONs directly and builds a small
+single-class YOLO dataset from exactly the pages given on the command line
+-- fast and CPU-feasible (a few images, a few epochs resuming from an
+existing checkpoint), unlike a from-scratch YOLO run.
+
+    py -3.11 -m cell_detect.gold_finetune_2
+    py -3.11 -m cell_detect.gold_finetune_2 --train-pages 4 5 8 --val-page 9 --test-page 11
+
+Default pages: train=[4,5,8], val=[9], test=[11] (val is used only for
+Ultralytics' own best.pt / early-stopping bookkeeping during fine-tuning;
+--test-page is never touched during training and is the number to trust).
+
+Low-quality (different lighting) variants of the same 12 physical pages live
+in "Gold Dataset/Low quality dataset/" and get annotated separately (not via
+data_pipeline.transfer_gold_labels' homography transfer -- these are hand
+labelled). Any low-quality page whose number is already in --train-pages,
+--val-page, or --test-page is automatically added as an *extra* image
+alongside its high-quality counterpart, in that same split (more images of
+the same physical page's existing train/val/test assignment, never a new
+split decision -- both lighting variants of a page always stay together)
+-- pass --no-low-quality to disable. Doubling val/test this way isn't just
+more data: with only ~2 images per split otherwise, held-out metrics are
+noisy enough that a single page's quirks can swing the number -- see
+reports/eval/gold_cell_detector_finetune.md's pg-10-vs-pg-11 discussion.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import shutil
+from pathlib import Path
+
+import cv2
+import yaml
+
+ROOT = Path(__file__).resolve().parent.parent
+GOLD_DIR = ROOT / "Gold Dataset" / "High quality dataset"
+LOW_GOLD_DIR = ROOT / "Gold Dataset" / "Low quality dataset"
+VARIANT_DIRS = {"high": GOLD_DIR, "low": LOW_GOLD_DIR}
+DEFAULT_BASE_WEIGHTS = ROOT / "cell_detect" / "weights" / "braille_cell_best.pt"
+DEFAULT_OUT_WEIGHTS = ROOT / "cell_detect" / "weights" / "braille_cell_gold_degraded.pt"
+DATASET_ROOT = ROOT / "cell_detect" / "datasets" / "gold_finetune_2"
+
+CLASS_ID = 0
+CLASS_NAME = "braille_cell"
+
+# Simulates the AiSee glasses camera's actual image quality (much softer
+# than our gold pages, all shot on phone cameras) -- calibrated, not
+# guessed, against a real AiSee photo the user provided. On that photo's
+# braille-page region, Laplacian-variance sharpness measured ~33 vs. our
+# phone photos' ~300-350 (a ~9-10x drop), likely a near-field focus
+# mismatch (the same photo's background objects are comparably sharp to
+# our phone shots). Swept downscale-then-upscale-back factors against
+# pg-1.jpeg's own same-region sharpness to find the match: 0.39 lands at
+# 33.1, and the resulting crop's contrast (std 11.3) also lands much closer
+# to the real photo's std 9.8 than the undegraded original's std 14.3 --
+# both measurements independently move the same direction, not just the
+# one being tuned. No extra Gaussian blur needed on top: even sigma=1.0
+# combined with any downscale overshot the target by 10-30x, meaning
+# INTER_CUBIC upscaling from a heavily downscaled image already supplies
+# more smoothing than the real gap needs.
+DEGRADE_DOWNSCALE = 0.39
+
+
+def _degrade_image(src_path: Path, dst_path: Path, downscale: float = DEGRADE_DOWNSCALE) -> None:
+    img = cv2.imread(str(src_path))
+    if img is None:
+        raise FileNotFoundError(f"Could not read image: {src_path}")
+    h, w = img.shape[:2]
+    small = cv2.resize(img, None, fx=downscale, fy=downscale, interpolation=cv2.INTER_AREA)
+    back = cv2.resize(small, (w, h), interpolation=cv2.INTER_CUBIC)
+    dst_path.parent.mkdir(parents=True, exist_ok=True)
+    cv2.imwrite(str(dst_path), back)
+
+
+def _yolo_line(x0: float, y0: float, x1: float, y1: float, img_w: int, img_h: int) -> str | None:
+    x0, y0 = max(x0, 0.0), max(y0, 0.0)
+    x1, y1 = min(x1, float(img_w)), min(y1, float(img_h))
+    if x1 - x0 < 1.0 or y1 - y0 < 1.0:
+        return None
+    xc, yc = (x0 + x1) / 2.0 / img_w, (y0 + y1) / 2.0 / img_h
+    nw, nh = (x1 - x0) / img_w, (y1 - y0) / img_h
+    if not (0.0 < nw <= 1.0 and 0.0 < nh <= 1.0):
+        return None
+    return f"{CLASS_ID} {xc:.6f} {yc:.6f} {nw:.6f} {nh:.6f}"
+
+
+def _page_image(n: int, variant: str = "high") -> Path:
+    # "degraded" reuses the high-quality source image (it's a synthetic
+    # transform of it, not a separately-shot photo) -- degradation itself
+    # happens in _convert_page, after this returns the source to degrade.
+    variant_dir = VARIANT_DIRS["high" if variant == "degraded" else variant]
+    for ext in (".jpeg", ".jpg", ".png"):
+        p = variant_dir / f"pg-{n}{ext}"
+        if p.exists():
+            return p
+    raise FileNotFoundError(f"No image for pg-{n} in {variant_dir}")
+
+
+def _convert_page(n: int, split: str, out_root: Path, variant: str = "high") -> int:
+    # "degraded" reuses the high-quality annotations verbatim -- the
+    # synthetic camera-quality transform doesn't move any cell, only
+    # softens the pixels.
+    variant_dir = VARIANT_DIRS["high" if variant == "degraded" else variant]
+    json_path = variant_dir / f"pg-{n}.json"
+    if not json_path.exists():
+        raise FileNotFoundError(f"No LabelMe json for pg-{n}: {json_path}")
+    img_path = _page_image(n, variant)
+    doc = json.loads(json_path.read_text(encoding="utf-8"))
+    img_w = int(doc.get("imageWidth") or 0)
+    img_h = int(doc.get("imageHeight") or 0)
+
+    lines = []
+    for shape in doc.get("shapes", []):
+        if shape.get("shape_type") != "rectangle":
+            continue
+        (px0, py0), (px1, py1) = shape["points"][:2]
+        x0, x1 = sorted((float(px0), float(px1)))
+        y0, y1 = sorted((float(py0), float(py1)))
+        line = _yolo_line(x0, y0, x1, y1, img_w, img_h)
+        if line:
+            lines.append(line)
+
+    img_dir = out_root / "images" / split
+    lbl_dir = out_root / "labels" / split
+    img_dir.mkdir(parents=True, exist_ok=True)
+    lbl_dir.mkdir(parents=True, exist_ok=True)
+    stem = f"pg-{n}" if variant == "high" else f"pg-{n}-{variant}"
+    if variant == "degraded":
+        _degrade_image(img_path, img_dir / f"{stem}{img_path.suffix}")
+    else:
+        shutil.copy2(img_path, img_dir / f"{stem}{img_path.suffix}")
+    (lbl_dir / f"{stem}.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return len(lines)
+
+
+def build_dataset(
+    train_pages, val_pages, test_pages, out_root: Path,
+    low_quality_pages=(), degrade_pages=(),
+) -> tuple[Path, dict[str, list[int]], dict[str, list[int]]]:
+    if out_root.exists():
+        shutil.rmtree(out_root)
+    counts = {"train": 0, "val": 0, "test": 0}
+    split_for_page: dict[int, str] = {}
+    for split, pages in (("train", train_pages), ("val", val_pages), ("test", test_pages)):
+        for n in pages:
+            counts[split] += _convert_page(n, split, out_root, variant="high")
+            split_for_page[n] = split
+
+    low_used: dict[str, list[int]] = {"train": [], "val": [], "test": []}
+    for n in low_quality_pages:
+        split = split_for_page.get(n)
+        if split is None:
+            continue  # page isn't in any split at all -- nothing to add it alongside
+        counts[split] += _convert_page(n, split, out_root, variant="low")
+        low_used[split].append(n)
+
+    degraded_used: dict[str, list[int]] = {"train": [], "val": [], "test": []}
+    for n in degrade_pages:
+        split = split_for_page.get(n)
+        if split is None:
+            continue
+        counts[split] += _convert_page(n, split, out_root, variant="degraded")
+        degraded_used[split].append(n)
+
+    print(f"Gold fine-tune dataset: train pg-{train_pages} + low pg-{low_used['train']} "
+          f"+ degraded pg-{degraded_used['train']} ({counts['train']} boxes), "
+          f"val pg-{val_pages} + low pg-{low_used['val']} + degraded pg-{degraded_used['val']} "
+          f"({counts['val']} boxes), "
+          f"test pg-{test_pages} + low pg-{low_used['test']} + degraded pg-{degraded_used['test']} "
+          f"({counts['test']} boxes) -- held out, never trained/monitored on")
+
+    data = {
+        "path": str(out_root),
+        "train": "images/train",
+        "val": "images/val",
+        "test": "images/test",
+        "names": {CLASS_ID: CLASS_NAME},
+        "nc": 1,
+    }
+    yaml_path = out_root / "data.yaml"
+    yaml_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    return yaml_path, low_used, degraded_used
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Stage 4a-gold -- fine-tune the cell detector on labelled Gold pages")
+    parser.add_argument("--train-pages", type=int, nargs="+", default=[4, 5, 8])
+    parser.add_argument("--val-page", type=int, nargs="+", default=[9])
+    parser.add_argument("--test-page", type=int, nargs="+", default=[11])
+    parser.add_argument("--base-weights", type=Path, default=DEFAULT_BASE_WEIGHTS)
+    parser.add_argument("--out-weights", type=Path, default=DEFAULT_OUT_WEIGHTS)
+    parser.add_argument("--epochs", type=int, default=40)
+    parser.add_argument("--patience", type=int, default=15)
+    parser.add_argument("--imgsz", type=int, default=1280)
+    parser.add_argument("--batch", type=int, default=3)
+    parser.add_argument("--lr0", type=float, default=0.001, help="Low LR -- fine-tuning from a trained checkpoint on very few images")
+    parser.add_argument("--mosaic", type=float, default=0.0, help="0.0 = off (default: too few train images for mosaic to help, not hurt -- per this script's docstring)")
+    parser.add_argument("--shear", type=float, default=1.0,
+                         help="Matches cell_detect/configs/cells.yaml's full-scale Job A value (was silently 0.0 -- ultralytics' own default -- before)")
+    parser.add_argument("--perspective", type=float, default=0.0005,
+                         help="Matches cell_detect/configs/cells.yaml's full-scale Job A value; real photos have real perspective distortion (see braille_cnn/PIPELINE.md's ~13-point measured drop)")
+    parser.add_argument("--scale", type=float, default=0.20,
+                         help="Failure analysis in reports/eval/gold_cell_detector_finetune.md found missed cells run ~6-7%% smaller than detected ones (perspective foreshortening near a book's spine) -- worth trying higher than the current default to see if it closes more of that gap")
+    parser.add_argument("--no-low-quality", action="store_true",
+                         help="Don't add low-quality-lighting variants of any split's pages as extra images, even if labelled")
+    parser.add_argument("--low-quality-pages", type=int, nargs="+", default=None,
+                         help="Which low-quality pages to use, overriding auto-detection of every labelled one. "
+                              "Reports/eval/gold_cell_detector_finetune.md's 'Settled' section: going from 12 to 16 "
+                              "training images (all 8 low-quality train pages instead of just 1-4) regressed "
+                              "training three separate times, for reasons unrelated to data quality (checked) or "
+                              "which 4 pages (checked) -- just the image count. Default reproduces that finding: "
+                              "only pages 1-4 (the proven set) get added to train; val/test still get every "
+                              "low-quality page available, since that side was never implicated.")
+    parser.add_argument("--degrade-pages", type=int, nargs="+", default=[],
+                         help="Add a synthetically camera-degraded copy of these pages (any split) as extra "
+                              "training/eval images -- simulates the AiSee glasses camera's real image quality, "
+                              "calibrated (not guessed) against an actual AiSee photo: downscale to "
+                              f"{DEGRADE_DOWNSCALE} then back up, see DEGRADE_DOWNSCALE's comment for the "
+                              "measurement. Off by default (empty list) -- opt in per page, e.g. "
+                              "--degrade-pages 1 2 3 4 5 6 7 8 9 10 11 12 for every page in the current split.")
+    parser.add_argument("--device", type=str, default="cpu")
+    parser.add_argument("--amp", action=argparse.BooleanOptionalAction, default=False,
+                         help="Automatic mixed precision -- off by default, it's a CUDA feature and unreliable on CPU")
+    parser.add_argument("--skip-baseline", action="store_true", help="Skip the before-fine-tune eval on --test-page")
+    args = parser.parse_args()
+
+    if not args.base_weights.exists():
+        raise SystemExit(f"Base weights not found: {args.base_weights}")
+
+    low_quality_pages = []
+    if not args.no_low_quality:
+        available = sorted(
+            int(p.stem.split("-")[1]) for p in LOW_GOLD_DIR.glob("pg-*.json")
+        ) if LOW_GOLD_DIR.is_dir() else []
+        if args.low_quality_pages is not None:
+            low_quality_pages = args.low_quality_pages
+        else:
+            # Safe default (see --low-quality-pages's help): every available
+            # low-quality page for val/test, but only the proven pages 1-4
+            # for train, even if more are labelled and --train-pages covers
+            # them -- adding low-quality 5-8 to train regressed three
+            # separate times.
+            SAFE_TRAIN_LOW_PAGES = {1, 2, 3, 4}
+            val_test_pages = set(args.val_page) | set(args.test_page)
+            low_quality_pages = sorted(
+                n for n in available if n in val_test_pages or n in SAFE_TRAIN_LOW_PAGES
+            )
+
+    yaml_path, low_used, degraded_used = build_dataset(
+        args.train_pages, args.val_page, args.test_page, DATASET_ROOT,
+        low_quality_pages, args.degrade_pages,
+    )
+
+    from ultralytics import YOLO
+
+    baseline = None
+    if not args.skip_baseline:
+        print("\n=== Baseline: braille_cell_best.pt on held-out test page (before fine-tune) ===")
+        base_model = YOLO(str(args.base_weights))
+        baseline = base_model.val(data=str(yaml_path), split="test", imgsz=args.imgsz, device=args.device, plots=False)
+
+    print(f"\n=== Fine-tuning {args.base_weights.name} on pg-{args.train_pages} ===")
+    model = YOLO(str(args.base_weights))
+    model.train(
+        data=str(yaml_path),
+        epochs=args.epochs,
+        imgsz=args.imgsz,
+        batch=args.batch,
+        device=args.device,
+        patience=args.patience,
+        lr0=args.lr0,
+        amp=args.amp,
+        fliplr=0.0,  # tried 0.5 (safe in principle: nc=1, no dot patterns here)
+        flipud=0.0,  # but on 12 train images it hurt badly (val mAP50 0.81->0.32,
+                     # see reports/eval/gold_cell_detector_finetune.md) -- too much
+                     # augmentation variance for this little real data to absorb
+        mosaic=args.mosaic,
+        degrees=3.0,
+        translate=0.10,
+        scale=args.scale,
+        shear=args.shear,
+        perspective=args.perspective,
+        project=str(ROOT / "cell_detect" / "runs"),
+        name="gold_finetune_2",
+        exist_ok=True,
+    )
+
+    best = ROOT / "cell_detect" / "runs" / "gold_finetune_2" / "weights" / "best.pt"
+    if not best.exists():
+        raise SystemExit(f"Training finished but {best} is missing")
+    args.out_weights.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(best, args.out_weights)
+    print(f"\nSaved fine-tuned weights: {args.out_weights}")
+
+    print(f"\n=== After fine-tune: {args.out_weights.name} on held-out test page ===")
+    tuned_model = YOLO(str(args.out_weights))
+    after = tuned_model.val(data=str(yaml_path), split="test", imgsz=args.imgsz, device=args.device, plots=False)
+
+    def _row(label, m):
+        if m is None:
+            return f"| {label} | n/a | n/a | n/a |"
+        return f"| {label} | {m.box.map50:.4f} | {m.box.mp:.4f} | {m.box.mr:.4f} |"
+
+    print("\n| model | mAP50 | precision | recall |")
+    print("|---|---|---|---|")
+    print(_row(f"baseline ({args.base_weights.name})", baseline))
+    print(_row(f"gold fine-tuned ({args.out_weights.name})", after))
+
+    from braille_cnn.eval_report import write_eval_report
+
+    def _pages_desc(pages, low, degraded):
+        desc = f"pg-{pages}"
+        if low:
+            desc += f" + low-quality-lighting pg-{low}"
+        if degraded:
+            desc += f" + camera-degraded pg-{degraded}"
+        return desc
+
+    lines = [
+        f"Train pages: {_pages_desc(args.train_pages, low_used['train'], degraded_used['train'])} | "
+        f"val (checkpoint selection only): {_pages_desc(args.val_page, low_used['val'], degraded_used['val'])} | "
+        f"**test (held out, never trained/monitored on): "
+        f"{_pages_desc(args.test_page, low_used['test'], degraded_used['test'])}**",
+        "",
+        "| model | mAP50 | precision | recall |",
+        "|---|---|---|---|",
+        _row(f"baseline (`{args.base_weights.name}`)", baseline),
+        _row(f"gold fine-tuned (`{args.out_weights.name}`)", after),
+    ]
+    write_eval_report(
+        Path("reports/eval") / "gold_cell_detector_finetune.md",
+        "Gold cell-detector fine-tune: before vs after (held-out test page)",
+        lines,
+    )
+
+
+if __name__ == "__main__":
+    main()
