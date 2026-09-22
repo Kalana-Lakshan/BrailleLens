@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:image/image.dart' as img;
 
@@ -22,4 +24,31 @@ img.Image? decodeUpright(Uint8List bytes) {
   final decoded = img.decodeImage(bytes);
   if (decoded == null) return null;
   return img.bakeOrientation(decoded);
+}
+
+/// Same upright guarantee as [decodeUpright], as a `dart:ui` image for
+/// painting.
+///
+/// `ui.instantiateImageCodec` does **not** apply the EXIF orientation tag, so
+/// a widget that decodes with it paints the raw sensor raster while every
+/// model coordinate in this app is in `decodeUpright` space. On a phone photo
+/// tagged "rotate 90°" that swaps the axes, and overlays (cell boxes, the
+/// fingertip marker) and taps land nowhere near the pixels they name. Baking
+/// the orientation here keeps painting and geometry in one space.
+Future<ui.Image> decodeUprightUi(Uint8List bytes) async {
+  final baked = decodeUpright(bytes);
+  if (baked == null) {
+    final codec = await ui.instantiateImageCodec(bytes);
+    return (await codec.getNextFrame()).image;
+  }
+  final rgba = baked.getBytes(order: img.ChannelOrder.rgba);
+  final completer = Completer<ui.Image>();
+  ui.decodeImageFromPixels(
+    rgba,
+    baked.width,
+    baked.height,
+    ui.PixelFormat.rgba8888,
+    completer.complete,
+  );
+  return completer.future;
 }

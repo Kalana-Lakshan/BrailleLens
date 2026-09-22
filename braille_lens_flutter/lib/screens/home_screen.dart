@@ -4,6 +4,7 @@ import 'package:permission_handler/permission_handler.dart';
 import '../services/audio_routing_service.dart';
 import '../services/audio_service.dart';
 import '../services/bluetooth_service.dart';
+import '../widgets/glass_device_picker.dart';
 import '../theme/app_theme.dart';
 import '../utils/answer_match.dart';
 import 'learning_screen.dart';
@@ -111,6 +112,49 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       "You can also say 'Learning' or 'Testing'.",
     );
 
+    _startVoiceCommandLoop();
+  }
+
+  /// Manual glasses selection: list paired devices, connect to the chosen
+  /// one, then move the microphone and prompt playback onto it so Learning
+  /// and Testing both capture and speak through the glasses.
+  Future<void> _pickGlasses() async {
+    // The voice loop holds the mic; connecting while it listens leaves the
+    // SCO switch fighting the recogniser.
+    _audioService.stopListening();
+    await _audioService.stopSpeech();
+    if (!mounted) return;
+
+    setState(() => _isCheckingBluetooth = true);
+    final picked = await showGlassDevicePicker(context);
+    if (!mounted) return;
+
+    final connected = picked != null;
+    final route = await AudioRoutingService.instance
+        .syncToGlasses(glassesConnected: connected);
+    if (!mounted) return;
+
+    setState(() {
+      _isCheckingBluetooth = false;
+      _btState = _btService.state;
+    });
+
+    if (connected) {
+      await _audioService.hapticDouble();
+      final battery = _btService.batteryLevel;
+      final level = battery >= 0 ? ' Battery $battery percent.' : '';
+      final audio = route == AudioRoute.glasses
+          ? ' Camera and microphone are on your glasses.'
+          : ' Audio stays on the phone.';
+      await _audioService.speak('Connected to ${picked.name}.$level$audio');
+    } else {
+      await _audioService.hapticLight();
+      await _audioService.speak(
+        'No glasses connected. The phone camera and microphone will be used.',
+      );
+    }
+
+    if (!mounted || _navigating) return;
     _startVoiceCommandLoop();
   }
 
@@ -273,6 +317,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               isChecking: _isCheckingBluetooth,
               btState: _btState,
               btDevice: _btService.connectedDevice,
+              onPickGlasses: _pickGlasses,
             ),
           ),
 
@@ -425,9 +470,14 @@ class _StatusBar extends StatelessWidget {
   final BluetoothConnectionState btState;
   final BrailleDevice? btDevice;
 
+  /// Opens the paired-device picker. The indicator itself is the control, so
+  /// the target is large and does not need a separate button to hunt for.
+  final VoidCallback onPickGlasses;
+
   const _StatusBar({
     required this.isChecking,
     required this.btState,
+    required this.onPickGlasses,
     this.btDevice,
   });
 
@@ -463,7 +513,23 @@ class _StatusBar extends StatelessWidget {
                 ),
               ),
             ),
-            _buildBtIndicator(),
+            Semantics(
+              label: 'Glasses. Tap to choose which paired device to connect.',
+              button: true,
+              child: TextButton.icon(
+                onPressed: onPickGlasses,
+                icon: const Icon(Icons.visibility, size: 16),
+                label: const Text(
+                  'GLASSES',
+                  style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1.0),
+                ),
+                style: TextButton.styleFrom(
+                  foregroundColor: AppTheme.primaryYellow,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                ),
+              ),
+            ),
+            GestureDetector(onTap: onPickGlasses, child: _buildBtIndicator()),
           ],
         ),
       ),

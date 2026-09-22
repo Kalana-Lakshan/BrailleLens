@@ -5,6 +5,12 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
 
+    <!-- Captures are published to Pictures/BrailleLens so the dataset can be
+         pulled off the phone. API 29+ reaches MediaStore through scoped
+         storage and needs no permission for its own entries; API 24..28 writes
+         the file into the public Pictures directory by hand and does. -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
+
     <!-- AI Glass: Bluetooth Classic (Realtek Audio Connect vendor channel).
          API 31+ split the old BLUETOOTH/BLUETOOTH_ADMIN pair into runtime
          permissions; both sets are declared so one APK covers API 24..34+. -->
@@ -12,23 +18,33 @@
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-    <!-- Discovery on API 30 and below still resolves through location. -->
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />
+    <!-- Location only where the glasses path truly needs it. The bridge lists
+         bonded devices rather than scanning, so Bluetooth never needs it.
+         RtkWifiAdapter's pre-Android-10 Wi-Fi join confirms the connection by
+         reading the SSID, which Android 8.1-9 gates behind location; from 10
+         on it uses an app-scoped WifiNetworkSpecifier that needs none. The
+         Station-mode hotspot would also need it on 10-12L, so the bridge
+         refuses Station mode there instead of asking for location. -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" android:maxSdkVersion="28" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="28" />
 
     <!-- AI Glass audio routing: forcing capture/playback onto the headset
          SCO link requires MODIFY_AUDIO_SETTINGS. -->
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 
-    <!-- AI Glass live feed: the phone joins the glasses SoftAP, then pulls RTSP. -->
+    <!-- AI Glass live feed: the phone joins the glasses SoftAP (AP mode) or
+         hosts its own hotspot (Station mode), then pulls RTSP.
+         NEARBY_WIFI_DEVICES gates the local-only hotspot on API 33+. -->
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
-
+    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" android:usesPermissionFlags="neverForLocation" />
+    
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
     <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
-
+    
     <application
         android:label="BrailleLens"
         android:name="${applicationName}"

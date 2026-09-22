@@ -15,9 +15,9 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_17.toString()
-    }
+    // kotlinOptions {
+    //     jvmTarget = JavaVersion.VERSION_17.toString()
+    // }
 
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
@@ -55,6 +55,12 @@ android {
     }
 }
 
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+    }
+}
+
 dependencies {
     // Realtek Audio Connect SDK — the AI Glass vendor channel, live streaming
     // and DFU. Copied from the AIGlass reference app (v0.5.55) into app/libs.
@@ -65,6 +71,12 @@ dependencies {
     implementation(files("libs/rtk-core-ktx-1.7.83.jar"))
     implementation(files("libs/rtk-dfu-3.14.36.jar"))
     implementation(files("libs/rtk-support-1.7.94.aar"))
+    // Local AAR libraries from android/app/libs/
+    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar", "*.aar"))))
+
+    // SmartWear guide §1 step 2: third-party libraries the SDK needs.
+    implementation("com.squareup.okhttp3:okhttp:4.9.3")
+    implementation("com.google.code.gson:gson:2.10.1")
 
     // Transitive requirements of the SDK AARs (they are plain file deps, so
     // nothing is resolved for them automatically).
@@ -75,8 +87,6 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
     implementation("com.google.android.material:material:1.11.0")
     implementation("com.google.guava:guava:31.1-android")
-    implementation("com.google.code.gson:gson:2.10.1")
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }
 
 flutter {

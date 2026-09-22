@@ -12,6 +12,7 @@ import '../services/fingertip_onnx_service.dart';
 import '../services/prescan_bridge.dart';
 import '../theme/app_theme.dart';
 import '../utils/image_decode.dart';
+import '../utils/sinhala_phonetics.dart';
 import '../widgets/frozen_image_view.dart';
 import '../widgets/tap_fingertip_dialog.dart';
 
@@ -166,8 +167,9 @@ class _LearningScreenState extends State<LearningScreen> {
         _statusLine =
             '${fixed.cells.length} cells found · place a finger, then tap capture';
       });
-      await widget.audioService.speak(
-        '${fixed.cells.length} cells found. Place your finger on a character and tap capture.',
+      // "Page scan complete. Now place your finger on a letter."
+      await widget.audioService.speakSinhala(
+        'පිටුව ස්කෑන් කර අවසන්. දැන් ඔබේ ඇඟිල්ල අකුරක් මත තබන්න.',
       );
     } on PrescanUnavailableException catch (e) {
       setState(() {
@@ -240,6 +242,8 @@ class _LearningScreenState extends State<LearningScreen> {
           : result.subtitle;
     });
 
+    // Stage stays at fingerResult, so the next button press reads another
+    // cell straight away rather than rescanning the page.
     if (result.hasHit) {
       final ch = result.headline;
       if (ch == '—') {
@@ -247,7 +251,12 @@ class _LearningScreenState extends State<LearningScreen> {
           'The detected cell is an indicator, not a standalone character.',
         );
       } else {
-        await widget.audioService.speakSinhalaCharacter(ch);
+        // "The letter <name>" — a reader names the letter (ක → කයන්න)
+        // rather than sounding it out.
+        final name = sinhalaLetterName(ch);
+        await widget.audioService.speakSinhala(
+          name.isEmpty ? ch : 'අක්ෂරය $name',
+        );
       }
     } else {
       await widget.audioService.speak('No character found under your finger.');
