@@ -61,6 +61,7 @@ py -3.11 -m braille_cnn.infer_page --auto --image test-img.jpeg --lang si --dot-
 | DBSI dataset | Clone into `data DBSI/` (see [Dataset setup](#dataset-setup)) |
 | Trained checkpoint | `braille_cnn/checkpoints/braille_cnn_dbsi_finetuned.pt` (gitignored — train locally) |
 | IP Webcam app | For phone-as-camera testing (or use `--source 0` for built-in webcam) |
+| AI Glass reference app | Only for glasses work — gitignored, copy in locally (see [AI Glass reference SDK](#ai-glass-reference-sdk-local-only)) |
 
 ### Dataset setup
 
@@ -71,6 +72,49 @@ copy "data DBSI\test.txt"  "data DBSI\data\test.txt"
 ```
 
 Training reads from `--dbsi-root "data DBSI/data"` because page images live under `data/` while split files sit at the clone root.
+
+### AI Glass reference SDK (local only)
+
+Realtek's reference app is our documentation for the vendor protocol — the SDK
+integration guides, the Kotlin that shows how each callback is meant to be used,
+and the AARs themselves. It is **not in the repo**: it is ~50 MB of vendor
+binaries we did not write, and `.gitignore` excludes it.
+
+**You only need this if you are working on the glasses integration.** Nothing
+else in the project — the Python pipelines, training, the Flutter app's Braille
+logic — depends on it, and the app builds without it.
+
+Get `Android_AIGlass_APP_Sourcecode_v0.5.55.zip` from the team drive and unzip it at the repo root, so the layout is:
+
+```
+BrailleLens/
+├── Android_AIGlass_APP_Sourcecode_v0.5.55/
+│   ├── AIGlass_V0.5.55.689_realtek.apk      # vendor app, for comparison on the phone
+│   ├── docs/                                 # SDK integration guides (SmartWear + WiFi)
+│   ├── lib/                                  # the Realtek AARs, upstream copies
+│   └── src/AIGlass/                          # reference app source
+├── braille_lens_flutter/
+└── ...
+```
+
+Any `Android_AIGlass_APP_Sourcecode_v*/` folder at the root is gitignored, so
+the version number does not matter and git will never offer to commit it.
+
+**You do not need to copy the AARs anywhere.** The ones we build against are
+already committed at `braille_lens_flutter/android/app/libs/`, so
+`flutter build apk` works on a fresh clone. The reference folder is for reading.
+
+Useful starting points once it is in place:
+
+| Question | File |
+|----------|------|
+| How is the vendor channel set up? | `src/AIGlass/.../SmartWearViewModel.kt` |
+| How is the frame button handled? | `src/AIGlass/.../photo/PhotoActivity.kt` |
+| How does voice input start? | `src/AIGlass/.../ui/ChatActivity.kt` |
+| Wi-Fi / RTSP credentials | `src/AIGlass/.../gallery/WifiViewModel.kt` |
+
+Our own side of the integration is documented in
+[GLASSES_INTEGRATION_PLAN.md](GLASSES_INTEGRATION_PLAN.md).
 
 ---
 

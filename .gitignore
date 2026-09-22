@@ -69,3 +69,8 @@ finger_cell_track/**/*.zip
 # Gradle build output (Flutter only ignores braille_lens_flutter/build)
 braille_lens_flutter/android/build/
 braille_lens_flutter/android/*/build/
+
+# Realtek AI Glass reference app (vendor SDK, AARs, sample APK) — read-only
+# reference, not our source. The AARs we actually build against are vendored
+# into braille_lens_flutter/android/app/libs/.
+Android_AIGlass_APP_Sourcecode_v*/
