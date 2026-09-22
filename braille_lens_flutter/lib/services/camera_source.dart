@@ -1,14 +1,62 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../theme/app_theme.dart';
 import 'camera_service.dart';
 import 'glass_device_service.dart';
+
+/// Where a still from the glasses comes from.
+///
+/// The two are not interchangeable, and the choice decides what the Braille
+/// pipeline gets to work with:
+///
+/// * [vendorChannel] asks the device for a full-resolution original and waits
+///   for it to transfer over Bluetooth SPP. Seconds, not milliseconds — but it
+///   is the sensor image, which is what dot detection needs. This is why the
+///   integration was built this way and it stays the default.
+/// * [videoSnapshot] grabs the frame libmpv is already showing. It returns
+///   almost instantly and needs no transfer, but the RTSP feed is downscaled,
+///   so fine dot structure may not survive. Good for framing checks, rapid
+///   dataset collection and anything where latency beats resolution.
+enum GlassCaptureMode { vendorChannel, videoSnapshot }
+
+/// Builds the libmpv player for the glasses RTSP preview, with audio off.
+///
+/// The glasses stream carries an audio track. If libmpv plays it, it opens an
+/// OpenSL ES output track, and with the glasses as the phone's Bluetooth
+/// headset that can pull the SCO/HFP call path up and down — the "call ended"
+/// tone on the glasses, and the drops in the preview. The preview only needs
+/// pictures.
+///
+/// media_kit 1.2.6's [PlayerConfiguration] has no audio switch (`muted` only
+/// zeroes the volume; the output still opens), and it forces `ao=opensles` on
+/// physical devices during init. So this sets the libmpv properties directly:
+/// `aid=no` means no audio track is ever selected, so no decoder and no audio
+/// output is created; `ao=null` is the backstop if a track gets selected
+/// anyway. `setProperty` waits for player init, so these land after media_kit's
+/// own defaults and before the caller's `open()`.
+Future<Player> createGlassPreviewPlayer() async {
+  final player = Player(
+    configuration: const PlayerConfiguration(
+      // Small buffer: this is a viewfinder, so latency matters far more than
+      // smoothing over a dropped frame.
+      bufferSize: 2 * 1024 * 1024,
+    ),
+  );
+  final platform = player.platform;
+  if (platform is NativePlayer) {
+    await platform.setProperty('aid', 'no');
+    await platform.setProperty('ao', 'null');
+  }
+  return player;
+}
 
 /// Where frames come from, so Learning and Testing do not care whether the
 /// wearer is using the glasses or the phone.
@@ -111,6 +159,10 @@ class GlassCameraSource implements CameraSource {
 
   StreamSubscription<GlassLiveStream>? _streamSub;
   Player? _player;
+  Future<Player>? _playerFuture;
+
+  /// Set while the phone still has to join the glasses Wi-Fi by hand.
+  String? _joinHint;
   VideoController? _videoController;
 
   /// Rebuilds the preview when the player is created or the URL changes.
@@ -149,31 +201,38 @@ class GlassCameraSource implements CameraSource {
 
   void _onLiveStream(GlassLiveStream e) {
     if (e.rtspUrl.isEmpty) {
-      // Happens in AP mode when the device reports no routable address; the
-      // feed is up but nothing outside the SDK player can reach it.
+      // Station mode only: the glasses joined our hotspot but reported no IP.
       _lastError = 'Live feed has no reachable address';
       _playerTick.value++;
       return;
     }
-    if (e.rtspUrl == _rtspUrl && _player != null) return;
+    // AP mode with a failed automatic join: still open the player — if the
+    // wearer joins the glasses Wi-Fi by hand, libmpv's retry picks it up —
+    // but keep the hint visible until then.
+    _joinHint = e.wifiConnected
+        ? null
+        : 'Join the glasses Wi-Fi "${e.ssid ?? ''}" to see the feed';
+    _lastError = _joinHint;
+    if (e.rtspUrl == _rtspUrl && _player != null) {
+      _playerTick.value++;
+      return;
+    }
     _rtspUrl = e.rtspUrl;
     unawaited(_openPlayer(e.rtspUrl));
   }
 
   Future<void> _openPlayer(String url) async {
     try {
-      // Small buffer: this is a viewfinder, so latency matters far more than
-      // smoothing over a dropped frame.
-      final player = _player ??
-          Player(
-            configuration: const PlayerConfiguration(
-              bufferSize: 2 * 1024 * 1024,
-            ),
-          );
+      // Audio off: see [createGlassPreviewPlayer]. The future is shared so two
+      // quick LIVE_STREAM events cannot build two players.
+      final player =
+          _player ?? await (_playerFuture ??= createGlassPreviewPlayer());
       _player = player;
       _videoController ??= VideoController(player);
       await player.open(Media(url), play: true);
-      _lastError = null;
+      // open() returning only means libmpv accepted the URL; a pending
+      // Wi-Fi join is still the thing to tell the wearer about.
+      _lastError = _joinHint;
     } catch (e) {
       _lastError = 'Could not play the glasses feed: $e';
       debugPrint('[GlassCameraSource] $_lastError');
@@ -181,10 +240,79 @@ class GlassCameraSource implements CameraSource {
     _playerTick.value++;
   }
 
+  /// Which path [captureJpeg] takes. See [GlassCaptureMode] — the default is
+  /// the full-resolution original, because that is what dot detection needs.
+  GlassCaptureMode captureMode = GlassCaptureMode.vendorChannel;
+
+  /// Guards against overlapping screenshots. mpv takes its own lock for the
+  /// grab, so a burst of frame-button presses queued against it is the one way
+  /// this stalls playback; the second press is dropped instead.
+  bool _snapshotInFlight = false;
+
+  /// Grabs the frame libmpv is currently showing, straight from the video
+  /// pipeline — no round trip to the glasses and no file transfer.
+  ///
+  /// Returns null when the live feed is not up: this reads the decoder's
+  /// current frame, so without a playing stream there is nothing to read.
+  Future<Uint8List?> captureSnapshotJpeg() async {
+    final player = _player;
+    if (player == null || !_streaming) {
+      _lastError = 'Live feed is not running — no frame to grab';
+      return null;
+    }
+    if (_snapshotInFlight) {
+      _lastError = 'A snapshot is already being taken';
+      return null;
+    }
+    _snapshotInFlight = true;
+    try {
+      final bytes = await player.screenshot(format: 'image/jpeg');
+      if (bytes == null || bytes.isEmpty) {
+        // Most often the stream is connected but has not decoded a frame yet.
+        _lastError = 'The video feed returned no frame';
+        return null;
+      }
+      _lastError = _joinHint;
+      return bytes;
+    } catch (e) {
+      _lastError = 'Snapshot from the video feed failed: $e';
+      debugPrint('[GlassCameraSource] $_lastError');
+      return null;
+    } finally {
+      _snapshotInFlight = false;
+    }
+  }
+
+  /// [captureSnapshotJpeg] written to a file in the app cache, returning its
+  /// path. For callers that want a file rather than bytes — dataset collection,
+  /// or handing the image to something that reads from disk.
+  ///
+  /// Cache, not the gallery: this directory is app-private and the OS may clear
+  /// it. Use [GlassDeviceService.saveImageToGallery] to publish a snapshot for
+  /// keeps.
+  Future<String?> captureSnapshotToFile() async {
+    final bytes = await captureSnapshotJpeg();
+    if (bytes == null) return null;
+    try {
+      final dir = await getTemporaryDirectory();
+      final path =
+          '${dir.path}/glass_snap_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      await File(path).writeAsBytes(bytes, flush: true);
+      return path;
+    } catch (e) {
+      _lastError = 'Could not write the snapshot to the cache: $e';
+      debugPrint('[GlassCameraSource] $_lastError');
+      return null;
+    }
+  }
+
   @override
   Future<Uint8List?> captureJpeg({
     Duration timeout = const Duration(seconds: 12),
   }) async {
+    if (captureMode == GlassCaptureMode.videoSnapshot) {
+      return captureSnapshotJpeg();
+    }
     if (!_glass.isConnected) {
       _lastError = 'Glasses not connected';
       return null;
@@ -302,8 +430,10 @@ class GlassCameraSource implements CameraSource {
     // left reading from a socket that is about to close.
     await _player?.dispose();
     _player = null;
+    _playerFuture = null;
     _videoController = null;
     _rtspUrl = null;
+    _joinHint = null;
     if (_streaming) {
       await _glass.stopLiveStream();
       _streaming = false;
@@ -357,6 +487,11 @@ class CameraSourceController extends ChangeNotifier {
       final previous = _source;
       CameraSource next =
           wantGlasses ? GlassCameraSource(_glass) : PhoneCameraSource();
+      // A mode chosen earlier survives a reconnect; a fresh source would
+      // otherwise silently revert to the vendor channel mid-session.
+      if (next is GlassCameraSource && _glassCaptureMode != null) {
+        next.captureMode = _glassCaptureMode!;
+      }
 
       var ok = await next.initialize();
       if (!ok && wantGlasses) {
@@ -382,6 +517,33 @@ class CameraSourceController extends ChangeNotifier {
   Future<void> refresh() => _selectBest();
 
   Future<Uint8List?> captureJpeg() async => _source?.captureJpeg();
+
+  /// Which path the glasses take for a still. Setting it while the phone
+  /// camera is active is remembered and applied when the glasses come back.
+  GlassCaptureMode get glassCaptureMode =>
+      _glassCaptureMode ?? GlassCaptureMode.vendorChannel;
+
+  set glassCaptureMode(GlassCaptureMode mode) {
+    _glassCaptureMode = mode;
+    final source = _source;
+    if (source is GlassCameraSource) source.captureMode = mode;
+    notifyListeners();
+  }
+
+  GlassCaptureMode? _glassCaptureMode;
+
+  /// Grabs a frame from the live feed, bypassing whatever [captureJpeg] would
+  /// do. Null on the phone camera, which has no video pipeline to read.
+  Future<Uint8List?> captureSnapshotJpeg() async {
+    final source = _source;
+    return source is GlassCameraSource ? source.captureSnapshotJpeg() : null;
+  }
+
+  /// [captureSnapshotJpeg] written to the cache; returns the file path.
+  Future<String?> captureSnapshotToFile() async {
+    final source = _source;
+    return source is GlassCameraSource ? source.captureSnapshotToFile() : null;
+  }
 
   Widget buildPreview() =>
       _source?.buildPreview() ??

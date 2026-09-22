@@ -23,11 +23,24 @@ class GlassDevice {
   final String address;
   final String name;
 
-  const GlassDevice({required this.address, required this.name});
+  /// The paired device's name matches a known glasses naming pattern.
+  final bool likelyGlasses;
+
+  /// Currently connected to the phone as a Bluetooth headset (A2DP/HFP).
+  final bool audioConnected;
+
+  const GlassDevice({
+    required this.address,
+    required this.name,
+    this.likelyGlasses = false,
+    this.audioConnected = false,
+  });
 
   factory GlassDevice.fromMap(Map<dynamic, dynamic> m) => GlassDevice(
         address: (m['address'] ?? '') as String,
         name: (m['name'] ?? 'AI Glass') as String,
+        likelyGlasses: m['likelyGlasses'] as bool? ?? false,
+        audioConnected: m['audioConnected'] as bool? ?? false,
       );
 
   @override
@@ -40,14 +53,30 @@ class GlassDevice {
 
 /// How the camera feed is reaching us once a live stream is up.
 abstract final class GlassLiveChannel {
-  /// Phone joins the SoftAP hosted by the glasses, then pulls RTSP.
+  /// Glasses host a SoftAP; the bridge joins the phone to it and the feed is
+  /// at the fixed `rtsp://192.168.43.1:554` (SmartWear guide §5.1).
   static const int wifiAp = 1;
 
-  /// Glasses join a shared LAN or the phone hotspot, then we pull RTSP.
+  /// The phone hosts a hotspot and the glasses join it; the feed is at the IP
+  /// the glasses report (§5.2). Refused on Android 10–12L, where the hotspot
+  /// would need location access the app does not request.
   static const int wifiStation = 2;
 
-  /// H.264 chunks over the Bluetooth vendor channel.
+  /// H.264 over the Bluetooth vendor channel. The bridge rejects it: the data
+  /// needs the SDK's own player, which nothing on the Dart side drives.
   static const int bluetooth = 3;
+}
+
+/// What `takePhoto` asks the glasses for (§4.3 `TakePhotoType`).
+enum GlassPhotoType {
+  /// Full-resolution original — what the Braille pipeline needs.
+  origin,
+
+  /// Original plus a thumbnail; the bridge still returns the original.
+  originAndThumbnail,
+
+  /// Small preview only; too small for dot detection.
+  thumbnail,
 }
 
 /// `WifiApInfo.MODE_*` as verified in the Realtek SmartWear AAR.
@@ -86,10 +115,18 @@ sealed class GlassEvent {
       case 'BATTERY':
         return GlassBattery(
           level: map['level'] as int? ?? -1,
-          charging: map['charging'] as bool? ?? false,
+          secondaryLevel: map['secondaryLevel'] as int? ?? -1,
         );
       case 'PHOTO_CAPTURED':
-        return GlassPhotoCaptured(map['data'] as Uint8List? ?? Uint8List(0));
+        final galleryUri = map['galleryUri'] as String?;
+        return GlassPhotoCaptured(
+          map['data'] as Uint8List? ?? Uint8List(0),
+          path: map['path'] as String?,
+          // The bridge sends '' when the gallery write failed and omits the key
+          // entirely on an older build; neither is a usable URI.
+          galleryUri:
+              (galleryUri == null || galleryUri.isEmpty) ? null : galleryUri,
+        );
       case 'PHOTO_FAILED':
         return GlassPhotoFailed(map['reason'] as String? ?? 'unknown');
       case 'LIVE_STREAM':
@@ -97,8 +134,25 @@ sealed class GlassEvent {
           channel: map['channel'] as int? ?? GlassLiveChannel.wifiAp,
           ssid: map['ssid'] as String?,
           password: map['password'] as String?,
+          ipAddress: map['ipAddress'] as String?,
           rtspUrl: map['rtspUrl'] as String? ?? '',
+          wifiConnected: map['wifiConnected'] as bool? ?? false,
         );
+      case 'WIFI_CONNECTION':
+        return GlassWifiConnection(map['connected'] as bool? ?? false);
+      case 'WIFI_STA_STATE':
+        return GlassWifiStaState(
+          active: map['active'] as bool? ?? false,
+          ipAddress: map['ipAddress'] as String?,
+        );
+      case 'SOFT_AP_STATE':
+        return GlassSoftApState(
+          started: map['started'] as bool? ?? false,
+          ssid: map['ssid'] as String?,
+          password: map['password'] as String?,
+        );
+      case 'DEVICE_ACTION':
+        return GlassDeviceAction(map['action'] as int? ?? -1);
       case 'VIDEO_FRAME':
         return GlassVideoFrame(map['data'] as Uint8List? ?? Uint8List(0));
       case 'WIFI_AP_STATE':
@@ -160,16 +214,37 @@ class GlassMicState extends GlassEvent {
   const GlassMicState(this.streaming);
 }
 
+/// §4.18 battery report. The SDK reports levels only, no charging state; for
+/// a single device like the glasses only [level] is meaningful.
 class GlassBattery extends GlassEvent {
   final int level;
-  final bool charging;
-  const GlassBattery({required this.level, required this.charging});
+  final int secondaryLevel;
+  const GlassBattery({required this.level, this.secondaryLevel = -1});
+}
+
+/// A key-press action other than the photo button (§4.13).
+class GlassDeviceAction extends GlassEvent {
+  final int action;
+  const GlassDeviceAction(this.action);
 }
 
 /// A full-resolution JPEG pulled off the glasses after a capture.
 class GlassPhotoCaptured extends GlassEvent {
   final Uint8List jpeg;
-  const GlassPhotoCaptured(this.jpeg);
+
+  /// Where the SDK wrote the original on the phone, if the bridge reported it.
+  /// App-private storage — no gallery app can see this one.
+  final String? path;
+
+  /// MediaStore URI of the public copy in `Pictures/BrailleLens`, or null if
+  /// the gallery write failed. Null is not a capture failure: [jpeg] is still
+  /// good and the pipeline runs on it either way.
+  final String? galleryUri;
+
+  const GlassPhotoCaptured(this.jpeg, {this.path, this.galleryUri});
+
+  /// True once the image is visible to Gallery and Google Photos.
+  bool get savedToGallery => galleryUri != null;
 }
 
 class GlassPhotoFailed extends GlassEvent {
@@ -181,13 +256,44 @@ class GlassLiveStream extends GlassEvent {
   final int channel;
   final String? ssid;
   final String? password;
+
+  /// Only reported in Station mode (§5.2.3).
+  final String? ipAddress;
   final String rtspUrl;
+
+  /// Whether the phone is on the network the feed is served on. In AP mode
+  /// false means the automatic join failed and the wearer's phone must join
+  /// [ssid] by hand before [rtspUrl] is reachable.
+  final bool wifiConnected;
   const GlassLiveStream({
     required this.channel,
     this.ssid,
     this.password,
+    this.ipAddress,
     required this.rtspUrl,
+    this.wifiConnected = false,
   });
+}
+
+/// Phone Wi-Fi link to the glasses AP came up or dropped (WiFi Part).
+class GlassWifiConnection extends GlassEvent {
+  final bool connected;
+  const GlassWifiConnection(this.connected);
+}
+
+/// Glasses joined (or left) the phone hotspot in Station mode.
+class GlassWifiStaState extends GlassEvent {
+  final bool active;
+  final String? ipAddress;
+  const GlassWifiStaState({required this.active, this.ipAddress});
+}
+
+/// The phone hotspot used for Station mode started or stopped.
+class GlassSoftApState extends GlassEvent {
+  final bool started;
+  final String? ssid;
+  final String? password;
+  const GlassSoftApState({required this.started, this.ssid, this.password});
 }
 
 /// One decoded preview frame (JPEG) from the live feed.
@@ -251,8 +357,8 @@ class GlassDeviceService extends ChangeNotifier {
   GlassConnectionState _state = GlassConnectionState.idle;
   GlassDevice? _device;
   int _batteryLevel = -1;
-  bool _charging = false;
   bool _micStreaming = false;
+  bool _phoneOnGlassesWifi = false;
   bool _bridgeChecked = false;
   String? _lastError;
   String? _lastErrorCode;
@@ -268,8 +374,10 @@ class GlassDeviceService extends ChangeNotifier {
   bool get isConnected => _state == GlassConnectionState.connected;
   bool get isAvailable => _state != GlassConnectionState.unavailable;
   int get batteryLevel => _batteryLevel;
-  bool get isCharging => _charging;
   bool get isMicStreaming => _micStreaming;
+
+  /// True while the phone is joined to the glasses AP for the live feed.
+  bool get isPhoneOnGlassesWifi => _phoneOnGlassesWifi;
   String? get lastError => _lastError;
   String? get lastErrorCode => _lastErrorCode;
 
@@ -287,8 +395,8 @@ class GlassDeviceService extends ChangeNotifier {
   Stream<GlassButtonClicked> get buttonClicks => _only<GlassButtonClicked>();
   Stream<GlassMicData> get micData => _only<GlassMicData>();
 
-  /// Emitted once the device reports a live session is up, carrying the
-  /// `rtsp://<ip>:554` URL the preview player opens.
+  /// Emitted once a live session is up and the phone-side network step is
+  /// done, carrying the `rtsp://…:554` URL the preview player opens.
   Stream<GlassLiveStream> get liveStreams => _only<GlassLiveStream>();
   Stream<GlassVideoFrame> get videoFrames => _only<GlassVideoFrame>();
   Stream<GlassPhotoCaptured> get photos => _only<GlassPhotoCaptured>();
@@ -330,12 +438,18 @@ class GlassDeviceService extends ChangeNotifier {
           _reconnectTimer = null;
         } else if (state == GlassConnectionState.disconnected) {
           _micStreaming = false;
+          _phoneOnGlassesWifi = false;
           _scheduleReconnect();
         }
         _setState(state);
-      case GlassBattery(:final level, :final charging):
+      case GlassBattery(:final level):
         _batteryLevel = level;
-        _charging = charging;
+        notifyListeners();
+      case GlassWifiConnection(:final connected):
+        _phoneOnGlassesWifi = connected;
+        notifyListeners();
+      case GlassLiveStream(:final wifiConnected):
+        _phoneOnGlassesWifi = wifiConnected;
         notifyListeners();
       case GlassMicState(:final streaming):
         _micStreaming = streaming;
@@ -421,7 +535,14 @@ class GlassDeviceService extends ChangeNotifier {
     try {
       final queued =
           await _invoke<bool>('connect', {'address': address}) ?? false;
-      if (!queued) return false;
+      if (!queued) {
+        // Refused before anything was sent (e.g. no device picked); do not
+        // leave the UI sitting on "connecting".
+        if (_state == GlassConnectionState.connecting) {
+          _setState(GlassConnectionState.disconnected);
+        }
+        return false;
+      }
       final ready = await completer.future;
       if (ready) {
         _setState(GlassConnectionState.connected);
@@ -463,25 +584,95 @@ class GlassDeviceService extends ChangeNotifier {
     });
   }
 
-  /// Asks the glasses to take a full-resolution photo. The JPEG arrives on
-  /// [photos] once transferred over the vendor channel.
-  Future<bool> takePhoto() async => await _invoke<bool>('takePhoto') ?? false;
+  /// Asks the glasses to take a photo (§4.3). The JPEG and its on-phone path
+  /// arrive on [photos] once transferred over the vendor channel.
+  ///
+  /// [width], [height] and [quality] (0–9) are only sent when given, so the
+  /// device otherwise keeps its own defaults.
+  Future<bool> takePhoto({
+    GlassPhotoType type = GlassPhotoType.origin,
+    int? width,
+    int? height,
+    int? quality,
+    bool playSound = true,
+  }) async =>
+      await _invoke<bool>('takePhoto', {
+        'type': type.name,
+        'width': width,
+        'height': height,
+        'quality': quality,
+        'playSound': playSound,
+      }) ??
+      false;
 
-  /// Starts the glasses microphone PCM stream ([micData]).
-  Future<bool> startMicrophone() async =>
-      await _invoke<bool>('startMic') ?? false;
+  /// Whether a frame-button press starts a full-resolution capture in native
+  /// code. Turn it off when Dart answers the press another way — a snapshot
+  /// from the live video feed — so one press yields one image.
+  ///
+  /// [buttonClicks] fires either way.
+  Future<bool> setHardwareShutter(bool enabled) async =>
+      await _invoke<bool>('setHardwareShutter', {'enabled': enabled}) ?? enabled;
+
+  /// Publishes [jpeg] to the phone's gallery at `Pictures/BrailleLens` and
+  /// returns its MediaStore URI, or null if the write failed.
+  ///
+  /// Vendor-channel photos are published by the bridge as they arrive. This is
+  /// for images that only exist in Dart — a frame grabbed from the live feed —
+  /// so both capture paths land in one album.
+  Future<String?> saveImageToGallery(Uint8List jpeg) async {
+    if (jpeg.isEmpty) return null;
+    return _invoke<String>('saveToGallery', {'data': jpeg});
+  }
+
+  /// Starts the glasses microphone PCM stream ([micData]); 16 kHz mono once
+  /// the device is ready. [meeting] selects the long-form voice mode (§4.9).
+  Future<bool> startMicrophone({bool meeting = false}) async =>
+      await _invoke<bool>('startMic', {'mode': meeting ? 'meeting' : 'default'}) ??
+      false;
 
   Future<bool> stopMicrophone() async =>
       await _invoke<bool>('stopMic') ?? false;
 
-  /// Brings up the RTSP live feed. Details arrive as [GlassLiveStream].
-  Future<bool> startLiveStream({int channel = GlassLiveChannel.wifiAp}) async =>
-      await _invoke<bool>('startLiveStream', {'channel': channel}) ?? false;
+  /// Brings up the RTSP live feed (§5). Details arrive as [GlassLiveStream]
+  /// once the phone is on the right network. Omitted video parameters keep
+  /// the device defaults (1280×720, 30 fps, 1 Mbps).
+  Future<bool> startLiveStream({
+    int channel = GlassLiveChannel.wifiAp,
+    int? width,
+    int? height,
+    int? fps,
+    int? bps,
+  }) async =>
+      await _invoke<bool>('startLiveStream', {
+        'channel': channel,
+        'width': width,
+        'height': height,
+        'fps': fps,
+        'bps': bps,
+      }) ??
+      false;
 
   Future<bool> stopLiveStream() async =>
       await _invoke<bool>('stopLiveStream') ?? false;
 
   Future<void> refreshBattery() => _invoke<void>('getBattery');
+
+  /// Opens Android's Bluetooth settings so new glasses can be paired. The app
+  /// can only connect to devices that are already bonded, and pairing is the
+  /// system's job.
+  Future<void> openBluetoothSettings() =>
+      _invoke<void>('openBluetoothSettings');
+
+  /// Removes the wide-angle lens distortion from a glasses photo (§6).
+  ///
+  /// Both image dimensions must be even or the SDK rejects it. Writes next to
+  /// the input when [outputPath] is null. Returns the corrected file's path,
+  /// or null on failure.
+  Future<String?> correctImage(String inputPath, {String? outputPath}) =>
+      _invoke<String>('correctImage', {
+        'inputPath': inputPath,
+        'outputPath': outputPath,
+      });
 
   Future<T?> _invoke<T>(String method, [Map<String, dynamic>? args]) async {
     try {

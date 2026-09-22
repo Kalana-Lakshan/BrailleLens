@@ -1,4 +1,4 @@
-name: braille_lens_flutter
+﻿name: braille_lens_flutter
 description: "BrailleLens 100% Offline Interactive Mobile App for Braille Character Classification"
 publish_to: 'none'
 version: 1.0.0+1
@@ -17,6 +17,9 @@ dependencies:
   image: ^4.5.0
   image_picker: ^1.1.2
   permission_handler: ^11.3.1
+  # Cache directory for video-feed snapshots. Already present transitively via
+  # camera/media_kit; named here because this app now imports it directly.
+  path_provider: ^2.1.4
   google_fonts: ^6.2.1
   camera: ^0.11.0
   audioplayers: ^6.1.0
@@ -28,6 +31,11 @@ dependencies:
   media_kit_video: ^1.2.4
   media_kit_libs_android_video: ^1.3.6
 
+  # Raw 16 kHz mono PCM from the phone mic, for the Testing-mode answer when
+  # the glasses are not connected. speech_to_text cannot hand back samples,
+  # and the CTC model needs the waveform itself.
+  record: ^6.1.1
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -38,12 +46,12 @@ flutter:
 
   assets:
     - assets/audio/
-    - assets/models/braille_cnn.onnx
-    - assets/models/braille_labels.json
-    - assets/models/fingertip_braille_yolo26n.onnx
-    - assets/models/fingertip_braille_yolo26n_mobile.onnx
-    - assets/models/fingertip_braille_yolo26n_meta.json
-    - assets/models/braille_cell_yolo26n.onnx
-    - assets/models/braille_cell_yolo26n_mobile.onnx
-    - assets/models/braille_cell_yolo26n_meta.json
+    # Whole directory rather than one line per file: the speech model
+    # (sinhala_mms_ctc.onnx + vocab.json) is not in the repo yet, and naming a
+    # missing file here fails the build. Everything present is bundled:
+    #   braille_cell_yolo26n[_mobile].onnx - page cell detector
+    #   braille_cnn.onnx + braille_labels.json - cell classifier + Sinhala map
+    #   fingertip_braille_yolo26n[_mobile].onnx - fingertip detector
+    #   sinhala_mms_ctc.onnx + vocab.json - speech recognition (to be added)
+    - assets/models/
     - assets/samples/

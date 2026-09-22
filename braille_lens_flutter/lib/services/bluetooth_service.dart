@@ -75,16 +75,23 @@ class BluetoothService {
       return false;
     }
 
+    // The scan lists every paired device (glasses-like names first, then the
+    // active Bluetooth headset), so only auto-connect to one of those — never
+    // to arbitrary paired earbuds or a car kit.
     final found = await _glass.scanForGlasses(timeout: scanDuration);
-    if (found.isEmpty) {
+    final GlassDevice? pick = found
+            .where((d) => d.likelyGlasses)
+            .firstOrNull ??
+        found.where((d) => d.audioConnected).firstOrNull;
+    if (pick == null) {
       debugPrint('[BluetoothService] no glasses found');
       stateListenable.value = state;
       return false;
     }
 
-    final ok = await _glass.connect(address: found.first.address);
+    final ok = await _glass.connect(address: pick.address);
     debugPrint(
-      '[BluetoothService] connect to ${found.first.name}: '
+      '[BluetoothService] connect to ${pick.name}: '
       '${ok ? 'connected' : 'failed'}',
     );
     stateListenable.value = state;
