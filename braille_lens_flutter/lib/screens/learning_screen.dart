@@ -6,11 +6,15 @@ import 'package:flutter/material.dart';
 import '../models/braille_cell.dart';
 import '../services/audio_service.dart';
 import '../services/camera_source.dart';
-import '../services/glass_device_service.dart';
+import '../services/cell_hit_test.dart';
+import '../services/coordinate_mapper.dart';
 import '../services/covered_cell_service.dart';
 import '../services/fingertip_onnx_service.dart';
+import '../services/glass_device_service.dart';
+import '../services/hands_free_learning_session.dart';
 import '../services/prescan_bridge.dart';
 import '../theme/app_theme.dart';
+import '../utils/homography.dart';
 import '../utils/image_decode.dart';
 import '../utils/sinhala_phonetics.dart';
 import '../widgets/frozen_image_view.dart';
@@ -18,14 +22,11 @@ import '../widgets/tap_fingertip_dialog.dart';
 
 enum _LearningStage { prescan, fingerResult }
 
-/// Two-stage Learning Mode:
-/// 1. Capture hand-free page → prescan builds CellMap (yellow boxes).
-/// 2. Capture finger on page → fingertip hit-test → show Sinhala letter from map.
+/// Two-stage Learning Mode with SRS hands-free dwell (FR5/FR6/FR8).
 ///
-/// Covered-character identification uses **geometry only**: the finger frame
-/// is aligned onto the prescan and the label is read off the prescan map. The
-/// CNN never sees the finger frame, where the hand hides the very dots that
-/// would have to be classified.
+/// Auto page baseline when no tip is present, ~3 s cell dwell with lock
+/// earcons, then geometry lookup via [CoveredCellService.resolveAligned].
+/// Yellow button / glasses frame button remain manual overrides.
 class LearningScreen extends StatefulWidget {
   final AudioService audioService;
 
@@ -36,16 +37,20 @@ class LearningScreen extends StatefulWidget {
 }
 
 class _LearningScreenState extends State<LearningScreen> {
-  /// Glasses when connected, phone camera otherwise — swaps itself if the
-  /// glasses drop mid-session.
   final CameraSourceController _camera = CameraSourceController();
   final PrescanBridge _prescanBridge = PrescanBridge();
   final FingertipOnnxService _fingertipOnnx = FingertipOnnxService();
   final CoveredCellService _coveredCell = CoveredCellService();
+  final HandsFreeLearningSession _session = HandsFreeLearningSession();
 
-  /// Frame-button presses, routed to [_onCapturePressed] so the hardware
-  /// button and the on-screen control run one path.
   StreamSubscription<GlassButtonClicked>? _glassButtonSub;
+  Timer? _sampleTimer;
+  bool _sampleInFlight = false;
+  bool _countdownAborted = false;
+  bool _handsFreeEnabled = true;
+
+  /// Last successful live→prescan transform for cheap dwell cell ids.
+  Homography? _lastAlignH;
 
   _LearningStage _stage = _LearningStage.prescan;
   bool _cameraReady = false;
@@ -69,8 +74,6 @@ class _LearningScreenState extends State<LearningScreen> {
     await _camera.initialize();
     await _camera.configureCapturePolicy();
 
-    // Frame button → same stage path as the yellow button (JPEG → pipeline).
-    // With glasses, captureJpeg uses an RTSP snapshot (native shutter off).
     _glassButtonSub = GlassDeviceService.instance.buttonClicks.listen((_) {
       if (!_camera.usingGlasses) return;
       widget.audioService.hapticLight();
@@ -89,21 +92,26 @@ class _LearningScreenState extends State<LearningScreen> {
         tipReady
             ? 'YOLO: ${_fingertipOnnx.loadedAsset?.split('/').last}'
             : 'YOLO failed — tap fingertip',
-        if (_camera.usingGlasses) 'Capture: glasses button',
+        'Hands-free: on',
       ].join(' · ');
     });
 
-    final trigger = _camera.usingGlasses
-        ? 'press the button on your glasses'
-        : 'tap capture';
     await widget.audioService.speak(
-      'Learning Mode. Stage 1: hold the Braille page still with no finger, '
-      'then $trigger. Stage 2: place your finger on a cell and $trigger again.',
+      'Learning Mode. Clear the page for an automatic scan. '
+      'Then place your finger on a letter and hold still. '
+      'You can also capture manually.',
     );
+
+    if (!mounted || !_cameraReady) return;
+    _session.start();
+    _dispatch(_session.onSample(
+      now: DateTime.now(),
+      tipPresent: false,
+      cellId: null,
+    ));
+    _startSampleLoop();
   }
 
-  /// The camera source swapped underneath us (glasses connected or dropped).
-  /// Prescan state is deliberately kept — only the viewfinder changes.
   void _onCameraSourceChanged() {
     if (!mounted) return;
     unawaited(_camera.configureCapturePolicy());
@@ -114,33 +122,254 @@ class _LearningScreenState extends State<LearningScreen> {
       ? 'press the button on your glasses'
       : 'tap capture';
 
-  /// Single capture entry point shared by the on-screen button and the
-  /// glasses frame button.
-  Future<void> _onCapturePressed() async {
-    if (_busy || _isExiting) return;
-    if (_stage == _LearningStage.prescan) {
-      await _capturePrescan();
-    } else {
-      await _captureFinger();
+  // ── Hands-free sampling ────────────────────────────────────────────────────
+
+  void _startSampleLoop() {
+    _sampleTimer?.cancel();
+    // ~2.5 Hz — tip YOLO + optional cheap cell map; full resolve only on fire.
+    _sampleTimer = Timer.periodic(const Duration(milliseconds: 400), (_) {
+      unawaited(_onSampleTick());
+    });
+  }
+
+  void _stopSampleLoop() {
+    _sampleTimer?.cancel();
+    _sampleTimer = null;
+  }
+
+  Future<void> _onSampleTick() async {
+    if (!_handsFreeEnabled ||
+        _isExiting ||
+        !_cameraReady ||
+        _sampleInFlight ||
+        _session.paused) {
+      return;
+    }
+    // Do not steal frames while a capture pipeline is running.
+    if (_busy) return;
+    final phase = _session.phase;
+    if (phase == HandsFreePhase.buildingMap ||
+        phase == HandsFreePhase.announce) {
+      return;
+    }
+
+    _sampleInFlight = true;
+    try {
+      final jpeg = await _camera.captureSampleJpeg();
+      if (jpeg == null || !mounted) return;
+
+      final tip = await _fingertipOnnx.detect(jpeg);
+      int? cellId;
+      final map = _cellMap;
+      if (tip != null &&
+          map != null &&
+          (phase == HandsFreePhase.reading ||
+              phase == HandsFreePhase.dwelling ||
+              phase == HandsFreePhase.lockBeeps ||
+              phase == HandsFreePhase.cooldown ||
+              phase == HandsFreePhase.pageCountdown)) {
+        cellId = await _cheapCellId(jpeg, tip);
+      }
+
+      if (!mounted) return;
+      await _dispatch(_session.onSample(
+        now: DateTime.now(),
+        tipPresent: tip != null,
+        cellId: cellId,
+      ));
+    } finally {
+      _sampleInFlight = false;
     }
   }
 
-  Future<void> _exit() async {
-    if (_isExiting) return;
-    setState(() => _isExiting = true);
-    await widget.audioService.stopSpeech();
-    await widget.audioService.hapticLight();
-    await widget.audioService.speak('Returning to main menu.');
-    if (mounted) Navigator.pop(context);
+  /// Cheap cell identity for dwell (not the announce path).
+  Future<int?> _cheapCellId(Uint8List jpeg, FingertipDetection tip) async {
+    final map = _cellMap;
+    if (map == null) return null;
+
+    final liveBoxes = await _prescanBridge.detectCellBoxes(jpeg);
+    Offset probe = tip.contactPoint;
+    for (final b in liveBoxes) {
+      if (b.contains(tip.contactPoint)) {
+        probe = b.center;
+        break;
+      }
+    }
+
+    final mapped = _lastAlignH != null
+        ? _lastAlignH!.transform(probe)
+        : CoordinateMapper.mapFingerTipToPrescan(
+            tipInFingerImage: probe,
+            prescanWidth: map.imageWidth,
+            prescanHeight: map.imageHeight,
+            fingerImageWidth: tip.imageWidth,
+            fingerImageHeight: tip.imageHeight,
+          );
+
+    return CellHitTest.hitTest(mapped, map, skipEmpty: true)?.id;
   }
 
-  Future<void> _capturePrescan() async {
+  Future<void> _dispatch(List<HandsFreeAction> actions) async {
+    for (final a in actions) {
+      if (!mounted || _isExiting) return;
+      switch (a) {
+        case HandsFreeStatus(:final message):
+          setState(() => _statusLine = message);
+        case HandsFreeSpeak(:final text, :final sinhala):
+          if (sinhala) {
+            await widget.audioService.speakSinhala(text);
+          } else {
+            await widget.audioService.speak(text);
+          }
+        case HandsFreePlayCountdown(
+            :final count,
+            :final intervalMs,
+            :final kind
+          ):
+          await _runCountdown(count, intervalMs, kind);
+        case HandsFreeAbortCountdown():
+          _countdownAborted = true;
+        case HandsFreeRequestPrescan():
+          await _autoPrescan();
+        case HandsFreeRequestFingerCapture():
+          await _autoFinger();
+        case HandsFreeRequestSoftRescan():
+          await _autoSoftRescan();
+      }
+    }
+  }
+
+  Future<void> _runCountdown(
+    int count,
+    int intervalMs,
+    HandsFreeCountdownKind kind,
+  ) async {
+    _countdownAborted = false;
+    // Keep sampling so a returning fingertip can abort page/lock/soft beeps.
+    final ok = await widget.audioService.playCountdownBeeps(
+      count,
+      gap: Duration(milliseconds: intervalMs),
+      shouldAbort: () => _countdownAborted || _isExiting,
+    );
+    if (!mounted || _isExiting) return;
+    if (!ok || _countdownAborted) return;
+    await _dispatch(_session.onCountdownFinished(kind));
+  }
+
+  Future<void> _autoPrescan() async {
+    _session.pause();
+    setState(() {
+      _busy = true;
+      _statusLine = 'Scanning the page for Braille cells…';
+    });
+    final jpeg = await _camera.captureJpeg();
+    if (jpeg == null) {
+      setState(() {
+        _busy = false;
+        _statusLine = _camera.source?.lastError ?? 'Camera capture failed';
+      });
+      await _dispatch(_session.onPrescanFinished(success: false));
+      _session.resume();
+      return;
+    }
+    final ok = await _runPrescanFromJpeg(jpeg, speakOnSuccess: false);
+    await _dispatch(_session.onPrescanFinished(success: ok));
+    _session.resume();
+  }
+
+  Future<void> _autoFinger() async {
+    _session.pause();
+    setState(() {
+      _busy = true;
+      _statusLine = 'Detecting fingertip…';
+    });
+    final jpeg = await _camera.captureJpeg();
+    if (jpeg == null) {
+      setState(() {
+        _busy = false;
+        _statusLine = _camera.source?.lastError ?? 'Camera capture failed';
+      });
+      await _dispatch(_session.onAnnounceFinished(announcedCellId: null));
+      _session.resume();
+      return;
+    }
+    final cellId = await _runFingerLookupFromJpeg(
+      jpeg,
+      allowTapFallback: false,
+      playSuccessEarcon: true,
+    );
+    await _dispatch(_session.onAnnounceFinished(announcedCellId: cellId));
+    _session.resume();
+  }
+
+  Future<void> _autoSoftRescan() async {
+    _session.pause();
+    setState(() {
+      _busy = true;
+      _statusLine = 'Refreshing page map…';
+      _fingerJpeg = null;
+      _covered = null;
+      _fingertip = null;
+    });
+    final jpeg = await _camera.captureJpeg();
+    if (jpeg == null) {
+      setState(() => _busy = false);
+      await _dispatch(_session.onSoftRescanFinished(success: false));
+      _session.resume();
+      return;
+    }
+    // Soft rescan must be hand-free; if a tip is visible, skip.
+    final tip = await _fingertipOnnx.detect(jpeg);
+    if (tip != null) {
+      setState(() {
+        _busy = false;
+        _statusLine = 'Finger still visible — refresh skipped';
+      });
+      await _dispatch(_session.onSoftRescanFinished(success: false));
+      _session.resume();
+      return;
+    }
+    final ok = await _runPrescanFromJpeg(jpeg, speakOnSuccess: false);
+    if (ok) _lastAlignH = null;
+    await _dispatch(_session.onSoftRescanFinished(success: ok));
+    _session.resume();
+  }
+
+  // ── Shared pipeline (manual + auto) ────────────────────────────────────────
+
+  Future<void> _onCapturePressed() async {
+    if (_busy || _isExiting) return;
+    _countdownAborted = true;
+    _session.pause();
+    try {
+      if (_stage == _LearningStage.prescan) {
+        await _capturePrescanManual();
+      } else {
+        await _captureFingerManual();
+      }
+    } finally {
+      if (_handsFreeEnabled && mounted && !_isExiting) {
+        if (_cellMap != null) {
+          // After manual map build, sit in reading; after finger, cooldown-like.
+          if (_session.phase == HandsFreePhase.pageHunt ||
+              _session.phase == HandsFreePhase.pageCountdown ||
+              _session.phase == HandsFreePhase.buildingMap) {
+            if (_cellMap != null) {
+              _session.onPrescanFinished(success: true);
+            }
+          }
+        }
+        _session.resume();
+      }
+    }
+  }
+
+  Future<void> _capturePrescanManual() async {
     if (_busy) return;
     setState(() {
       _busy = true;
       _statusLine = 'Scanning the page for Braille cells…';
     });
-
     final jpeg = await _camera.captureJpeg();
     if (jpeg == null) {
       setState(() {
@@ -150,7 +379,36 @@ class _LearningScreenState extends State<LearningScreen> {
       await widget.audioService.speak('Capture failed. Try again.');
       return;
     }
+    await _runPrescanFromJpeg(jpeg, speakOnSuccess: true);
+  }
 
+  Future<void> _captureFingerManual() async {
+    if (_busy || _cellMap == null) return;
+    setState(() {
+      _busy = true;
+      _statusLine = 'Detecting fingertip…';
+    });
+    final jpeg = await _camera.captureJpeg();
+    if (jpeg == null) {
+      setState(() {
+        _busy = false;
+        _statusLine = _camera.source?.lastError ?? 'Camera capture failed';
+      });
+      await widget.audioService.speak('Capture failed. Try again.');
+      return;
+    }
+    await _runFingerLookupFromJpeg(
+      jpeg,
+      allowTapFallback: true,
+      playSuccessEarcon: false,
+    );
+  }
+
+  /// Returns true when a non-empty CellMap was stored.
+  Future<bool> _runPrescanFromJpeg(
+    Uint8List jpeg, {
+    required bool speakOnSuccess,
+  }) async {
     try {
       final map = await _prescanBridge.prescanPage(
         jpeg,
@@ -167,60 +425,67 @@ class _LearningScreenState extends State<LearningScreen> {
       final h = decoded?.height ?? map.imageHeight;
       final fixed = CellMap(cells: map.cells, imageWidth: w, imageHeight: h);
 
+      if (!mounted) return false;
       setState(() {
         _prescanJpeg = jpeg;
         _cellMap = fixed;
         _stage = _LearningStage.fingerResult;
+        _fingerJpeg = null;
+        _covered = null;
+        _fingertip = null;
         _busy = false;
         _statusLine =
             '${fixed.cells.length} cells found · place a finger, then $_captureHint';
       });
-      // "Page scan complete. Now place your finger on a letter."
-      await widget.audioService.speakSinhala(
-        'පිටුව ස්කෑන් කර අවසන්. දැන් ඔබේ ඇඟිල්ල අකුරක් මත තබන්න.',
-      );
+      if (speakOnSuccess) {
+        await widget.audioService.speakSinhala(
+          'පිටුව ස්කෑන් කර අවසන්. දැන් ඔබේ ඇඟිල්ල අකුරක් මත තබන්න.',
+        );
+      }
+      return true;
     } on PrescanUnavailableException catch (e) {
+      if (!mounted) return false;
       setState(() {
         _busy = false;
         _statusLine = e.message;
       });
-      await widget.audioService.speak(
-        'Page scan failed. Hold the page steady with good lighting and try again.',
-      );
+      if (speakOnSuccess) {
+        await widget.audioService.speak(
+          'Page scan failed. Hold the page steady with good lighting and try again.',
+        );
+      }
+      return false;
     } catch (e) {
+      if (!mounted) return false;
       setState(() {
         _busy = false;
         _statusLine = 'Prescan error: $e';
       });
+      return false;
     }
   }
 
-  Future<void> _captureFinger() async {
-    if (_busy || _cellMap == null) return;
-    setState(() {
-      _busy = true;
-      _statusLine = 'Detecting fingertip…';
-    });
-
-    final jpeg = await _camera.captureJpeg();
-    if (jpeg == null) {
-      setState(() {
-        _busy = false;
-        _statusLine = _camera.source?.lastError ?? 'Camera capture failed';
-      });
-      await widget.audioService.speak('Capture failed. Try again.');
-      return;
+  /// Returns the announced CellMap id, or null on miss.
+  Future<int?> _runFingerLookupFromJpeg(
+    Uint8List jpeg, {
+    required bool allowTapFallback,
+    required bool playSuccessEarcon,
+  }) async {
+    FingertipDetection? tip = await _fingertipOnnx.detect(jpeg);
+    if (tip == null && allowTapFallback) {
+      tip = await _promptTapFingertip(jpeg);
     }
 
-    FingertipDetection? tip = await _fingertipOnnx.detect(jpeg);
-    tip ??= await _promptTapFingertip(jpeg);
-
     if (tip == null) {
+      if (!mounted) return null;
       setState(() {
         _busy = false;
         _statusLine = 'No fingertip — tap on your finger tip on screen';
       });
-      return;
+      if (!allowTapFallback) {
+        await widget.audioService.speak('No fingertip detected. Try again.');
+      }
+      return null;
     }
 
     if (mounted) {
@@ -239,7 +504,14 @@ class _LearningScreenState extends State<LearningScreen> {
       prescanJpeg: _prescanJpeg,
     );
 
-    if (!mounted) return;
+    // Cache a cheap similarity from tip→prescan for the next dwell samples.
+    if (result.hasHit) {
+      final dx = result.tipInPrescan.dx - tip.contactPoint.dx;
+      final dy = result.tipInPrescan.dy - tip.contactPoint.dy;
+      _lastAlignH = Homography([1, 0, dx, 0, 1, dy, 0, 0, 1]);
+    }
+
+    if (!mounted) return null;
     setState(() {
       _fingerJpeg = jpeg;
       _fingertip = tip;
@@ -250,28 +522,29 @@ class _LearningScreenState extends State<LearningScreen> {
           : result.subtitle;
     });
 
-    // Stage stays at fingerResult, so the next button press reads another
-    // cell straight away rather than rescanning the page.
     if (result.hasHit) {
+      if (playSuccessEarcon) {
+        await widget.audioService.playSuccessTone();
+        await widget.audioService.hapticLight();
+      }
       final ch = result.headline;
       if (ch == '—') {
         await widget.audioService.speak(
           'The detected cell is an indicator, not a standalone character.',
         );
       } else {
-        // "The letter <name>" — a reader names the letter (ක → කයන්න)
-        // rather than sounding it out.
         final name = sinhalaLetterName(ch);
         await widget.audioService.speakSinhala(
           name.isEmpty ? ch : 'අක්ෂරය $name',
         );
       }
-    } else {
-      await widget.audioService.speak('No character found under your finger.');
+      return result.cell?.id;
     }
+
+    await widget.audioService.speak('No character found under your finger.');
+    return null;
   }
 
-  /// Fallback when ONNX fingertip model is missing: user taps contact point.
   Future<FingertipDetection?> _promptTapFingertip(Uint8List jpeg) async {
     final decoded = decodeUpright(jpeg);
     if (decoded == null) return null;
@@ -285,11 +558,7 @@ class _LearningScreenState extends State<LearningScreen> {
 
     return FingertipDetection(
       contactPoint: tap,
-      box: Rect.fromCenter(
-        center: tap,
-        width: 48,
-        height: 48,
-      ),
+      box: Rect.fromCenter(center: tap, width: 48, height: 48),
       confidence: 1.0,
       imageWidth: decoded.width,
       imageHeight: decoded.height,
@@ -297,6 +566,8 @@ class _LearningScreenState extends State<LearningScreen> {
   }
 
   void _rescan() {
+    _countdownAborted = true;
+    _lastAlignH = null;
     setState(() {
       _stage = _LearningStage.prescan;
       _prescanJpeg = null;
@@ -306,13 +577,30 @@ class _LearningScreenState extends State<LearningScreen> {
       _fingertip = null;
       _statusLine = null;
     });
+    _session.resetToPageHunt();
     widget.audioService.speak(
-      'Rescanning page. ${_camera.usingGlasses ? 'Press the glasses button' : 'Capture'} when ready.',
+      'Rescanning page. Clear the page for automatic scan, or capture manually.',
     );
+  }
+
+  Future<void> _exit() async {
+    if (_isExiting) return;
+    setState(() => _isExiting = true);
+    _countdownAborted = true;
+    _handsFreeEnabled = false;
+    _stopSampleLoop();
+    _session.pause();
+    await widget.audioService.stopSpeech();
+    await widget.audioService.hapticLight();
+    await widget.audioService.speak('Returning to main menu.');
+    if (mounted) Navigator.pop(context);
   }
 
   @override
   void dispose() {
+    _countdownAborted = true;
+    _handsFreeEnabled = false;
+    _stopSampleLoop();
     _glassButtonSub?.cancel();
     _camera.removeListener(_onCameraSourceChanged);
     unawaited(_camera.restoreHardwareShutter());
@@ -341,11 +629,6 @@ class _LearningScreenState extends State<LearningScreen> {
     );
   }
 
-  /// Small, non-obscuring "working" badge — deliberately does *not* dim the
-  /// rest of the screen (a full-screen translucent veil made the camera
-  /// preview, status text, and buttons hard to read while scanning).
-  /// [_statusLine] already carries the actual progress text; this is just a
-  /// small spinner so it's clear something is happening.
   Widget _buildBusyIndicator() {
     return IgnorePointer(
       child: Center(
@@ -368,11 +651,6 @@ class _LearningScreenState extends State<LearningScreen> {
     );
   }
 
-  /// The cell boxes belong to the page they were found on, so they are drawn
-  /// over the prescan and nowhere else. Drawing them over the finger frame
-  /// would put them where the *scan* saw cells rather than where the cells
-  /// are in the picture being shown, which reads as a broken detector even
-  /// when the lookup underneath is right.
   Widget _buildImageArea() {
     if (_fingerJpeg != null) {
       return FrozenImageView(
@@ -389,9 +667,6 @@ class _LearningScreenState extends State<LearningScreen> {
     return _camera.buildPreview();
   }
 
-  /// Small rounded badge with just enough backing to stay legible over a
-  /// bright camera feed (e.g. white paper) -- deliberately not a full-width
-  /// bar, so the camera preview around it stays at full brightness.
   Widget _pill({required Widget child, VoidCallback? onTap}) {
     final content = Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
@@ -426,7 +701,9 @@ class _LearningScreenState extends State<LearningScreen> {
             _pill(
               onTap: _exit,
               child: const Text('Exit',
-                  style: TextStyle(color: AppTheme.primaryYellow, fontWeight: FontWeight.bold)),
+                  style: TextStyle(
+                      color: AppTheme.primaryYellow,
+                      fontWeight: FontWeight.bold)),
             ),
             const SizedBox(width: 8),
             Expanded(
@@ -449,7 +726,8 @@ class _LearningScreenState extends State<LearningScreen> {
             if (_cellMap != null)
               _pill(
                 onTap: _busy ? null : _rescan,
-                child: const Text('Rescan', style: TextStyle(color: Colors.white)),
+                child: const Text('Rescan',
+                    style: TextStyle(color: Colors.white)),
               )
             else
               const SizedBox(width: 8),
@@ -459,9 +737,6 @@ class _LearningScreenState extends State<LearningScreen> {
     );
   }
 
-  /// Framing guidance as a small floating pill instead of a permanent block
-  /// baked into the bottom sheet -- keeps it visible without eating into
-  /// the camera viewport's height.
   Widget _buildFramingHint() {
     if (!(_stage == _LearningStage.prescan && _cellMap == null)) {
       return const SizedBox.shrink();
@@ -487,7 +762,7 @@ class _LearningScreenState extends State<LearningScreen> {
                   ),
                   SizedBox(height: 2),
                   Text(
-                    'Use bright, even light',
+                    'Auto-scan after hold · or capture manually',
                     style: TextStyle(color: Colors.white70, fontSize: 11),
                   ),
                 ],
@@ -507,16 +782,11 @@ class _LearningScreenState extends State<LearningScreen> {
       right: 0,
       bottom: 0,
       child: Container(
-        // Trimmed from the original fromLTRB(20,16,20,32) + a large
-        // icon+instruction block baked in above the button -- that block
-        // (now a small floating pill over the viewport instead, see
-        // _buildFramingHint) plus this padding used to eat a third or more
-        // of the screen's height, squeezing the camera preview into a thin
-        // strip and reading as if the whole feed were covered by a scrim.
         padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
         decoration: BoxDecoration(
           color: Colors.black.withValues(alpha: 0.75),
-          border: const Border(top: BorderSide(color: AppTheme.primaryYellow, width: 2)),
+          border: const Border(
+              top: BorderSide(color: AppTheme.primaryYellow, width: 2)),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -526,7 +796,8 @@ class _LearningScreenState extends State<LearningScreen> {
                 padding: EdgeInsets.only(bottom: 8),
                 child: Text(
                   'FINGER TRACKED',
-                  style: TextStyle(color: Color(0xFF00E5FF), fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                      color: Color(0xFF00E5FF), fontWeight: FontWeight.bold),
                 ),
               ),
             Text(
@@ -543,10 +814,8 @@ class _LearningScreenState extends State<LearningScreen> {
                   ? covered!.subtitle
                   : (covered?.subtitle ??
                       (_cellMap != null
-                          ? 'Place a finger, then $_captureHint'
-                          : (_camera.usingGlasses
-                              ? 'Hold the page still, then press the glasses button'
-                              : 'Capture a hand-free page photo'))),
+                          ? 'Hold finger on a cell (~3 s) or $_captureHint'
+                          : 'Clear the page for auto-scan, or capture')),
               textAlign: TextAlign.center,
               style: const TextStyle(color: Colors.white70, fontSize: 15),
             ),
@@ -555,16 +824,17 @@ class _LearningScreenState extends State<LearningScreen> {
               Text(
                 _statusLine!,
                 textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.white.withValues(alpha: 0.45), fontSize: 12),
+                style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.45), fontSize: 12),
               ),
             ],
             const SizedBox(height: 16),
-            // Phone: yellow button. Glasses: frame button only (same pipeline).
             if (!_camera.usingGlasses)
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
-                  onPressed: (_busy || !_cameraReady) ? null : _onCapturePressed,
+                  onPressed:
+                      (_busy || !_cameraReady) ? null : _onCapturePressed,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppTheme.primaryYellow,
                     foregroundColor: Colors.black,
@@ -574,15 +844,16 @@ class _LearningScreenState extends State<LearningScreen> {
                     _stage == _LearningStage.prescan
                         ? 'SCAN BRAILLE PAGE'
                         : 'DETECT CHARACTER UNDER FINGER',
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                    style: const TextStyle(
+                        fontWeight: FontWeight.bold, fontSize: 16),
                   ),
                 ),
               )
             else
               Text(
                 _stage == _LearningStage.prescan
-                    ? 'Press the glasses button to scan the page'
-                    : 'Press the glasses button to detect the character',
+                    ? 'Auto-scan when clear · or press glasses button'
+                    : 'Hold finger ~3 s · or press glasses button',
                 textAlign: TextAlign.center,
                 style: const TextStyle(
                   color: AppTheme.primaryYellow,
@@ -596,4 +867,3 @@ class _LearningScreenState extends State<LearningScreen> {
     );
   }
 }
-

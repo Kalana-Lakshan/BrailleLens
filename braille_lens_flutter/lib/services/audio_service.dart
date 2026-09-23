@@ -133,6 +133,30 @@ class AudioService {
     }
   }
 
+  /// Plays [count] start earcons with [gap] between them (page / dwell lock).
+  ///
+  /// Returns `false` if [shouldAbort] became true mid-sequence so the host
+  /// can cancel the pending capture.
+  Future<bool> playCountdownBeeps(
+    int count, {
+    Duration gap = const Duration(milliseconds: 500),
+    bool Function()? shouldAbort,
+  }) async {
+    for (var i = 0; i < count; i++) {
+      if (shouldAbort?.call() == true) return false;
+      try {
+        await _player.stop();
+        await _player.play(AssetSource('audio/earcon_start.wav'));
+      } catch (e) {
+        debugPrint('[AudioService] Countdown beep error: $e');
+      }
+      if (i < count - 1) {
+        await Future<void>.delayed(gap);
+      }
+    }
+    return shouldAbort?.call() != true;
+  }
+
   // ── Haptic Feedback ───────────────────────────────────────────────────────────
 
   /// Single light tap — e.g. camera frame locked.
