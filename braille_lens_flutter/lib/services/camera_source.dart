@@ -532,6 +532,26 @@ class CameraSourceController extends ChangeNotifier {
 
   GlassCaptureMode? _glassCaptureMode;
 
+  /// Capture policy for Learning/Testing.
+  ///
+  /// Glasses + live RTSP: vendor-channel stills fail (SDK code 4), so grab
+  /// frames from the feed and turn off the native frame-button shutter so
+  /// one press is one Dart-handled [captureJpeg]. Phone: yellow button +
+  /// phone camera as usual; restore the hardware shutter for other screens.
+  Future<void> configureCapturePolicy() async {
+    if (usingGlasses) {
+      glassCaptureMode = GlassCaptureMode.videoSnapshot;
+      await _glass.setHardwareShutter(false);
+    } else {
+      await _glass.setHardwareShutter(true);
+    }
+  }
+
+  /// Call when leaving Learning/Testing so other screens keep default shutter.
+  Future<void> restoreHardwareShutter() async {
+    await _glass.setHardwareShutter(true);
+  }
+
   /// Grabs a frame from the live feed, bypassing whatever [captureJpeg] would
   /// do. Null on the phone camera, which has no video pipeline to read.
   Future<Uint8List?> captureSnapshotJpeg() async {
