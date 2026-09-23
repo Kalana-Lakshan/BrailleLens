@@ -559,6 +559,19 @@ class CameraSourceController extends ChangeNotifier {
     return source is GlassCameraSource ? source.captureSnapshotJpeg() : null;
   }
 
+  /// Lightweight still for hands-free tip sampling (throttled by the caller).
+  ///
+  /// Glasses: RTSP video snapshot. Phone: [captureJpeg] / takePicture.
+  Future<Uint8List?> captureSampleJpeg() async {
+    final source = _source;
+    if (source is GlassCameraSource) {
+      final snap = await source.captureSnapshotJpeg();
+      if (snap != null) return snap;
+      return source.captureJpeg();
+    }
+    return source?.captureJpeg();
+  }
+
   /// [captureSnapshotJpeg] written to the cache; returns the file path.
   Future<String?> captureSnapshotToFile() async {
     final source = _source;
