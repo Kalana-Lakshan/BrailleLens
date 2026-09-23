@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:typed_data';
 import 'dart:ui' show Offset, Rect;
 
 import 'package:flutter_test/flutter_test.dart';
@@ -9,6 +10,61 @@ import 'package:braille_lens_flutter/services/coordinate_mapper.dart';
 import 'package:braille_lens_flutter/services/covered_cell_service.dart';
 import 'package:braille_lens_flutter/theme/app_theme.dart';
 import 'package:braille_lens_flutter/utils/homography.dart';
+
+const _sinhala = ['ක', 'ත', 'න', 'ම', 'ප', 'ස', 'ය', 'ර', 'ල', 'ව'];
+
+/// Irregular word layout (avoids pure-period ambiguity) with labelled cells.
+({CellMap map, List<Offset> centres, double spacing}) _wordGrid() {
+  const spacing = 40.0;
+  const half = 16.0;
+  const wordsPerLine = [
+    [3, 5, 2],
+    [4, 2, 6],
+    [2, 7],
+    [5, 3, 3],
+    [6, 4],
+    [3, 2, 5],
+    [7, 2],
+    [4, 5, 2],
+  ];
+  final centres = <Offset>[];
+  final cells = <BrailleCell>[];
+  var id = 0;
+  for (var row = 0; row < wordsPerLine.length; row++) {
+    var col = 0;
+    for (final word in wordsPerLine[row]) {
+      for (var i = 0; i < word; i++) {
+        final c = Offset(60 + col * spacing, 80 + row * spacing * 1.6);
+        centres.add(c);
+        cells.add(BrailleCell(
+          id: id,
+          x0: c.dx - half,
+          y0: c.dy - half,
+          x1: c.dx + half,
+          y1: c.dy + half,
+          char: _sinhala[id % _sinhala.length],
+          code: id + 1,
+          pattern: '${(id % 6) + 1}',
+        ));
+        id++;
+        col++;
+      }
+      col++;
+    }
+  }
+  return (
+    map: CellMap(cells: cells, imageWidth: 720, imageHeight: 1280),
+    centres: centres,
+    spacing: spacing,
+  );
+}
+
+List<Rect> _boxesFromCentres(List<Offset> centres, {double half = 16}) {
+  return [
+    for (final c in centres)
+      Rect.fromLTRB(c.dx - half, c.dy - half, c.dx + half, c.dy + half),
+  ];
+}
 
 /// One space cell and one ක cell on a 720x1280 prescan frame.
 CellMap _sampleMap() {
@@ -350,5 +406,182 @@ void main() {
     final darker = math.min(l1, l2);
     final contrast = (lighter + 0.05) / (darker + 0.05);
     expect(contrast, greaterThanOrEqualTo(7.0));
+  });
+
+  test('expanded fingertip exclude drops centres under the hand', () {
+    final box = const Rect.fromLTRB(100, 100, 140, 140);
+    final expanded = CellConstellationAligner.expandedExclude(box)!;
+    expect(expanded.width, closeTo(box.width * 1.5, 0.01));
+    expect(expanded.contains(const Offset(120, 120)), isTrue);
+    expect(expanded.contains(const Offset(200, 200)), isFalse);
+  });
+
+  test('finger mask: centres inside exclude rect do not break alignment', () {
+    final grid = _wordGrid();
+    const tx = 18.0;
+    const ty = -12.0;
+    final live = [for (final c in grid.centres) Offset(c.dx - tx, c.dy - ty)];
+    // Cover ~first 15 live centres with an expanded fingertip pad.
+    final exclude = Rect.fromCenter(
+      center: live[8],
+      width: grid.spacing * 4,
+      height: grid.spacing * 3,
+    );
+    final aligned = CellConstellationAligner.alignSync(
+      liveCenters: live,
+      referenceCenters: grid.centres,
+      cellWidth: grid.spacing,
+      excludeLive: exclude,
+    );
+    expect(aligned, isNotNull);
+    expect(aligned!.inliers, greaterThanOrEqualTo(CellConstellationAligner.minInliers));
+    final probe = live[40];
+    final mapped = aligned.homography.transform(probe);
+    expect((mapped - Offset(probe.dx + tx, probe.dy + ty)).distance, lessThan(3.0));
+  });
+
+  test('affine LS recovers mild non-uniform scale', () {
+    final src = [
+      const Offset(0, 0),
+      const Offset(100, 0),
+      const Offset(0, 100),
+      const Offset(100, 100),
+      const Offset(50, 50),
+    ];
+    // sx=1.12, sy=0.88, plus translation.
+    final dst = [
+      for (final p in src) Offset(1.12 * p.dx + 10, 0.88 * p.dy - 5),
+    ];
+    final h = fitAffineLeastSquares(src, dst);
+    expect(h, isNotNull);
+    final mapped = Homography(h!).transform(const Offset(40, 60));
+    expect(mapped.dx, closeTo(1.12 * 40 + 10, 1e-6));
+    expect(mapped.dy, closeTo(0.88 * 60 - 5, 1e-6));
+  });
+
+  test('constellation affine refine matches non-uniform scale grid', () {
+    final grid = _wordGrid();
+    // Mild anisotropic scale — enough to beat similarity residual threshold
+    // (0.25×cell) without defeating the discrete vote scales.
+    const sx = 1.06;
+    const sy = 0.94;
+    const tx = 20.0;
+    const ty = -10.0;
+    Offset warp(Offset p) => Offset(sx * p.dx + tx, sy * p.dy + ty);
+    final live = grid.centres;
+    final reference = live.map(warp).toList();
+
+    final aligned = CellConstellationAligner.alignSync(
+      liveCenters: live,
+      referenceCenters: reference,
+      cellWidth: grid.spacing,
+    );
+    expect(aligned, isNotNull);
+    for (final p in [live[25], live[50], live[70]]) {
+      final mapped = aligned!.homography.transform(p);
+      expect((mapped - warp(p)).distance, lessThan(5.0));
+    }
+  });
+
+  test('cells+id: tip-in-box returns Sinhala label despite tip noise', () async {
+    final grid = _wordGrid();
+    const tx = 22.0;
+    const ty = -14.0;
+    final liveCentres = [
+      for (final c in grid.centres) Offset(c.dx - tx, c.dy - ty),
+    ];
+    final liveBoxes = _boxesFromCentres(liveCentres);
+    // Target cell 42 — tip offset ~0.35 cell from centre, still inside box.
+    const target = 42;
+    final tipNoise = Offset(grid.spacing * 0.35, -grid.spacing * 0.15);
+    final tip = liveCentres[target] + tipNoise;
+    expect(liveBoxes[target].contains(tip), isTrue);
+
+    final fingertipBox = Rect.fromCenter(
+      center: tip,
+      width: grid.spacing * 2.2,
+      height: grid.spacing * 2.2,
+    );
+
+    final result = await CoveredCellService().resolveAligned(
+      fingerJpeg: Uint8List(0),
+      tipInFingerImage: tip,
+      cellMap: grid.map,
+      fingerImageWidth: 720,
+      fingerImageHeight: 1280,
+      fingerFrameCells: liveBoxes,
+      fingertipBox: fingertipBox,
+    );
+
+    expect(result.alignMode, 'cells+id');
+    expect(result.cell?.id, target);
+    expect(result.headline, grid.map.cells[target].char);
+  });
+
+  test('resolveAligned recovers label under tip after rotate/scale/translate',
+      () async {
+    final grid = _wordGrid();
+    const scale = 1.05;
+    const rotation = 3 * math.pi / 180.0;
+    const tx = 25.0;
+    const ty = -15.0;
+    Offset move(Offset p) => Offset(
+          scale * math.cos(rotation) * p.dx -
+              scale * math.sin(rotation) * p.dy +
+              tx,
+          scale * math.sin(rotation) * p.dx +
+              scale * math.cos(rotation) * p.dy +
+              ty,
+        );
+    // Live = inverse of move applied to reference (prescan centres).
+    Offset unmove(Offset q) {
+      final cosA = math.cos(-rotation);
+      final sinA = math.sin(-rotation);
+      final x = (q.dx - tx) / scale;
+      final y = (q.dy - ty) / scale;
+      return Offset(cosA * x - sinA * y, sinA * x + cosA * y);
+    }
+
+    final liveCentres = grid.centres.map(unmove).toList();
+    final liveBoxes = _boxesFromCentres(liveCentres);
+    const target = 55;
+    final tip = liveCentres[target];
+
+    final result = await CoveredCellService().resolveAligned(
+      fingerJpeg: Uint8List(0),
+      tipInFingerImage: tip,
+      cellMap: grid.map,
+      fingerImageWidth: 720,
+      fingerImageHeight: 1280,
+      fingerFrameCells: liveBoxes,
+    );
+
+    expect(result.hasHit, isTrue);
+    expect(result.alignMode, anyOf('cells+id', 'cells+box', 'cells'));
+    expect(result.cell?.id, target);
+    expect(result.headline, grid.map.cells[target].char);
+    // Sanity: move(live) ≈ reference.
+    expect((move(liveCentres[target]) - grid.centres[target]).distance,
+        lessThan(1e-6));
+  });
+
+  test('CellIdentityMatch greedily pairs live boxes to unique cells', () {
+    final grid = _wordGrid();
+    const h = Homography([1, 0, 20, 0, 1, -10, 0, 0, 1]);
+    final live = _boxesFromCentres([
+      for (final c in grid.centres.take(20)) Offset(c.dx - 20, c.dy + 10),
+    ]);
+    final ids = CellIdentityMatch.match(
+      h: h,
+      liveBoxes: live,
+      cellMap: CellMap(
+        cells: grid.map.cells.take(20).toList(),
+        imageWidth: 720,
+        imageHeight: 1280,
+      ),
+    );
+    expect(ids.byLiveIndex.length, greaterThanOrEqualTo(15));
+    expect(ids.forLiveIndex(0)?.id, 0);
+    expect(ids.forLiveIndex(5)?.id, 5);
   });
 }

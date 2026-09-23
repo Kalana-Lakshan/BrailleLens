@@ -52,26 +52,80 @@ class CoveredCellResult {
   }
 }
 
+/// Greedy live-centre → prescan-cell matches after a constellation transform.
+///
+/// Each unmasked live box centre is mapped into the prescan; the nearest
+/// unused reference centre within [maxDistCells] cell widths claims it.
+class CellIdentityMatch {
+  /// live box index → matched [BrailleCell] from the prescan map.
+  final Map<int, BrailleCell> byLiveIndex;
+
+  const CellIdentityMatch(this.byLiveIndex);
+
+  BrailleCell? forLiveIndex(int i) => byLiveIndex[i];
+
+  /// Build matches. Live centres under [excludeLive] (expanded fingertip) are
+  /// skipped so the hand does not steal a neighbour's identity, except indices
+  /// listed in [forceLiveIndices] (the tip's own box).
+  static CellIdentityMatch match({
+    required Homography h,
+    required List<Rect> liveBoxes,
+    required CellMap cellMap,
+    Rect? excludeLive,
+    Set<int> forceLiveIndices = const {},
+    double maxDistCells = 0.6,
+  }) {
+    final cellW = CellHitTest.medianCellWidth(cellMap);
+    if (cellW <= 0 || cellMap.cells.isEmpty) {
+      return const CellIdentityMatch({});
+    }
+    final maxDist = cellW * maxDistCells;
+    final exclude = CellConstellationAligner.expandedExclude(excludeLive);
+    final usedRef = <int>{};
+    final out = <int, BrailleCell>{};
+
+    // Sort by how close the mapped centre is to some ref centre so confident
+    // pairs claim first.
+    final candidates = <({int live, int ref, double d})>[];
+    for (var i = 0; i < liveBoxes.length; i++) {
+      final c = liveBoxes[i].center;
+      if (exclude != null &&
+          exclude.contains(c) &&
+          !forceLiveIndices.contains(i)) {
+        continue;
+      }
+      final mapped = h.transform(c);
+      for (var j = 0; j < cellMap.cells.length; j++) {
+        final d = (mapped - cellMap.cells[j].center).distance;
+        if (d <= maxDist) {
+          candidates.add((live: i, ref: j, d: d));
+        }
+      }
+    }
+    candidates.sort((a, b) => a.d.compareTo(b.d));
+    final usedLive = <int>{};
+    for (final c in candidates) {
+      if (usedLive.contains(c.live) || usedRef.contains(c.ref)) continue;
+      usedLive.add(c.live);
+      usedRef.add(c.ref);
+      out[c.live] = cellMap.cells[c.ref];
+    }
+    return CellIdentityMatch(out);
+  }
+}
+
 /// Identifies which prescan cell is covered by the fingertip.
 class CoveredCellService {
   /// Full stage-2 lookup: work out how the finger frame sits on the prescan,
   /// then read the label off the prescan map.
   ///
-  /// Alignment is attempted in order of how well it survives a Braille page:
-  /// 1. `cells` — the detected cell constellation in both frames. Best, since
-  ///    the cells are exactly the landmarks the hit-test cares about.
-  /// 2. `homography` — pixel feature registration, for when the finger frame
-  ///    detector came up short.
-  /// 3. `scale` — plain width/height ratios, correct only if the phone barely
-  ///    moved between the two shots.
-  ///
-  /// The finger frame's own cell boxes then do most of the work. Asking which
-  /// of *those* boxes the tip sits in is exact — tip and boxes were measured
-  /// in the same picture — so the transform is only ever asked to say which
-  /// prescan cell a whole box corresponds to. That question tolerates far
-  /// more error than mapping a bare point: the boxes are a cell apart, so the
-  /// answer stays right until the mapping drifts by half a cell, whereas a
-  /// mapped point lands wrong as soon as it leaves its box.
+  /// Alignment order (structure first):
+  /// 1. `cells` / `cells+id` / `cells+box` — constellation on cell centres,
+  ///    with fingertip centres masked and optional affine refine. Tip-in-box
+  ///    then prefers identity match over warping the tip alone.
+  /// 2. `homography` — pixel feature registration only when constellation
+  ///    cannot run (too few live cells or align failed).
+  /// 3. `scale` — plain width/height ratios.
   Future<CoveredCellResult> resolveAligned({
     required Uint8List fingerJpeg,
     required Offset tipInFingerImage,
@@ -90,6 +144,7 @@ class CoveredCellService {
         liveCenters: fingerFrameCells.map((b) => b.center).toList(),
         referenceCenters: cellMap.cells.map((c) => c.center).toList(),
         cellWidth: CellHitTest.medianCellWidth(cellMap),
+        excludeLive: fingertipBox,
       );
       if (aligned != null) {
         h = aligned.homography;
@@ -98,6 +153,7 @@ class CoveredCellService {
       }
     }
 
+    // Texture ORB only when constellation is unavailable or failed.
     if (h == null && prescanJpeg != null) {
       final reg = await FrameRegistration.estimate(
         referenceJpeg: prescanJpeg,
@@ -114,6 +170,34 @@ class CoveredCellService {
       fingerImageWidth: fingerImageWidth,
       fingerImageHeight: fingerImageHeight,
     );
+
+    // Structure identity: tip is in live box i → use matched prescan cell.
+    if (h != null && mode == 'cells' && touched != null) {
+      final liveIndex = _liveBoxIndex(touched.center, fingerFrameCells);
+      if (liveIndex != null) {
+        final ids = CellIdentityMatch.match(
+          h: h,
+          liveBoxes: fingerFrameCells,
+          cellMap: cellMap,
+          excludeLive: fingertipBox,
+          // Always match the tip's box even if its centre sits under the hand.
+          forceLiveIndices: {liveIndex},
+        );
+        final matched = ids.forLiveIndex(liveIndex);
+        if (matched != null) {
+          debugPrint('[CoveredCell] cells+id live=$liveIndex → '
+              'prescan id=${matched.id} ${matched.char}');
+          return CoveredCellResult(
+            cell: matched,
+            tipInPrescan: h.transform(tipInFingerImage),
+            tipInFingerImage: tipInFingerImage,
+            fingertipBox: fingertipBox,
+            alignMode: 'cells+id',
+          );
+        }
+      }
+    }
+
     if (touched != null) {
       mode = '$mode+box';
       debugPrint('[CoveredCell] tip is in finger-frame box '
@@ -134,6 +218,23 @@ class CoveredCellService {
       probeInFingerImage: touched?.center,
       matchNearestCentre: touched != null,
     );
+  }
+
+  int? _liveBoxIndex(Offset center, List<Rect> boxes) {
+    for (var i = 0; i < boxes.length; i++) {
+      if ((boxes[i].center - center).distanceSquared < 1.0) return i;
+    }
+    // Fallback: nearest box centre.
+    var bestI = -1;
+    var bestD = double.infinity;
+    for (var i = 0; i < boxes.length; i++) {
+      final d = (boxes[i].center - center).distanceSquared;
+      if (d < bestD) {
+        bestD = d;
+        bestI = i;
+      }
+    }
+    return bestI >= 0 ? bestI : null;
   }
 
   /// Which of the finger frame's own detected boxes the tip is touching.
