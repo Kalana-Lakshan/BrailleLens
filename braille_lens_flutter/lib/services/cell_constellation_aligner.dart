@@ -22,18 +22,25 @@ class CellAlignment {
 /// No correspondences are known up front, so instead of matching points this
 /// votes: for each candidate scale/rotation, every (live, reference) pair
 /// casts a vote for the translation that would align it, and the winning
-/// bin is the transform that the largest number of cells agree on. Cells the
-/// hand covers simply do not vote.
+/// bin is the transform that the largest number of cells agree on.
+///
+/// Centres under the fingertip ([excludeLive]) are dropped so the hand does
+/// not cast votes. After similarity ICP, an optional affine refine absorbs
+/// mild non-uniform scale without falling back to a full projective model.
 class CellConstellationAligner {
   /// Minimum cells that must agree before the transform is trusted.
   static const int minInliers = 10;
+
+  /// How far outside [excludeLive] to also drop centres (hand pad > tip box).
+  static const double excludeExpand = 1.5;
 
   static Future<CellAlignment?> align({
     required List<Offset> liveCenters,
     required List<Offset> referenceCenters,
     required double cellWidth,
+    Rect? excludeLive,
   }) async {
-    final args = _args(liveCenters, referenceCenters, cellWidth);
+    final args = _args(liveCenters, referenceCenters, cellWidth, excludeLive);
     if (args == null) return null;
     return _wrap(await compute(_alignIsolate, args));
   }
@@ -44,23 +51,41 @@ class CellConstellationAligner {
     required List<Offset> liveCenters,
     required List<Offset> referenceCenters,
     required double cellWidth,
+    Rect? excludeLive,
   }) {
-    final args = _args(liveCenters, referenceCenters, cellWidth);
+    final args = _args(liveCenters, referenceCenters, cellWidth, excludeLive);
     if (args == null) return null;
     return _wrap(_alignIsolate(args));
+  }
+
+  /// Expanded fingertip rect used to mask live centres under the hand.
+  static Rect? expandedExclude(Rect? box, {double expand = excludeExpand}) {
+    if (box == null || box.isEmpty) return null;
+    final cx = box.center.dx;
+    final cy = box.center.dy;
+    final hw = box.width * expand / 2;
+    final hh = box.height * expand / 2;
+    return Rect.fromCenter(center: Offset(cx, cy), width: hw * 2, height: hh * 2);
   }
 
   static Map<String, dynamic>? _args(
     List<Offset> live,
     List<Offset> ref,
     double cellWidth,
+    Rect? excludeLive,
   ) {
-    if (live.length < minInliers || ref.length < minInliers) return null;
+    final masked = _maskLive(live, expandedExclude(excludeLive));
+    if (masked.length < minInliers || ref.length < minInliers) return null;
     return <String, dynamic>{
-      'live': _flatten(live),
+      'live': _flatten(masked),
       'ref': _flatten(ref),
       'cell': cellWidth,
     };
+  }
+
+  static List<Offset> _maskLive(List<Offset> live, Rect? exclude) {
+    if (exclude == null) return live;
+    return live.where((p) => !exclude.contains(p)).toList();
   }
 
   static CellAlignment? _wrap(Map<String, dynamic>? raw) {
@@ -144,7 +169,7 @@ Map<String, dynamic>? _alignIsolate(Map<String, dynamic> args) {
   var bestInliers = 0;
   var bestResidual = double.infinity;
   for (final candidate in candidates.take(6)) {
-    final fit = _refine(candidate.h, live, grid, tol);
+    final fit = _refine(candidate.h, live, grid, tol, cellWidth);
     if (fit == null) continue;
     if (fit.inliers > bestInliers ||
         (fit.inliers == bestInliers && fit.residual < bestResidual)) {
@@ -154,7 +179,9 @@ Map<String, dynamic>? _alignIsolate(Map<String, dynamic> args) {
     }
   }
 
-  if (best == null || bestInliers < CellConstellationAligner.minInliers) return null;
+  if (best == null || bestInliers < CellConstellationAligner.minInliers) {
+    return null;
+  }
 
   // A fit that zooms or flips the page is a wrong answer dressed up as a
   // confident one; let the caller fall back instead.
@@ -181,10 +208,19 @@ class _Fit {
 
 /// The winning bin is only accurate to half a cell. Re-derive the transform
 /// from every cell it brings into agreement, so the mapping is set by the
-/// whole page rather than by the coarse vote grid.
-_Fit? _refine(List<double> seed, List<Offset> live, _PointGrid grid, double tol) {
+/// whole page rather than by the coarse vote grid. If similarity residual
+/// stays high, try an affine refine on the same inliers.
+_Fit? _refine(
+  List<double> seed,
+  List<Offset> live,
+  _PointGrid grid,
+  double tol,
+  double cellWidth,
+) {
   var h = seed;
   _Fit? fit;
+  List<Offset>? lastSrc;
+  List<Offset>? lastDst;
   for (var pass = 0; pass < 3; pass++) {
     final srcIn = <Offset>[];
     final dstIn = <Offset>[];
@@ -204,11 +240,74 @@ _Fit? _refine(List<double> seed, List<Offset> live, _PointGrid grid, double tol)
       inliers: srcIn.length,
       residual: residual / srcIn.length,
     );
+    lastSrc = srcIn;
+    lastDst = dstIn;
     final next = _fitSimilarity(srcIn, dstIn);
     if (next == null) break;
     h = next;
   }
+  if (fit == null || lastSrc == null || lastDst == null) return fit;
+
+  // Mild perspective / non-uniform scale: affine on the same inliers when
+  // similarity residual is still a noticeable fraction of a cell.
+  if (fit.residual > cellWidth * 0.25 &&
+      lastSrc.length >= CellConstellationAligner.minInliers) {
+    var affine = fitAffineLeastSquares(lastSrc, lastDst);
+    if (affine != null && _affineSane(affine)) {
+      // Re-associate with the affine seed so stretched axes can reclaim
+      // points that similarity left just outside the tolerance.
+      final srcIn = <Offset>[];
+      final dstIn = <Offset>[];
+      var residual = 0.0;
+      for (final p in live) {
+        final mapped = Homography.transformPoint(affine, p);
+        final nearest = grid.nearest(mapped, tol);
+        if (nearest != null) {
+          srcIn.add(p);
+          dstIn.add(nearest);
+          residual += (nearest - mapped).distance;
+        }
+      }
+      if (srcIn.length >= CellConstellationAligner.minInliers) {
+        final refined = fitAffineLeastSquares(srcIn, dstIn);
+        if (refined != null && _affineSane(refined)) {
+          affine = refined;
+          residual = 0.0;
+          var inliers = 0;
+          for (var i = 0; i < srcIn.length; i++) {
+            final mapped = Homography.transformPoint(affine, srcIn[i]);
+            final d = (mapped - dstIn[i]).distance;
+            if (d <= tol) {
+              inliers++;
+              residual += d;
+            }
+          }
+          if (inliers >= CellConstellationAligner.minInliers) {
+            final mean = residual / inliers;
+            if (mean < fit.residual) {
+              return _Fit(h: affine, inliers: inliers, residual: mean);
+            }
+          }
+        } else {
+          final mean = residual / srcIn.length;
+          if (mean < fit.residual) {
+            return _Fit(h: affine, inliers: srcIn.length, residual: mean);
+          }
+        }
+      }
+    }
+  }
   return fit;
+}
+
+bool _affineSane(List<double> h) {
+  // 2x2 linear part determinant must stay positive and away from zero.
+  final det = h[0] * h[4] - h[1] * h[3];
+  if (det < 0.25 || det > 4.0) return false;
+  final sx = sqrt(h[0] * h[0] + h[3] * h[3]);
+  final sy = sqrt(h[1] * h[1] + h[4] * h[4]);
+  if (sx < 0.6 || sx > 1.7 || sy < 0.6 || sy > 1.7) return false;
+  return true;
 }
 
 List<Offset> _unflatten(List<double> flat) {

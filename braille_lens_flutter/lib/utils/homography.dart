@@ -94,6 +94,72 @@ Homography? ransacHomography(
   return Homography(bestH);
 }
 
+/// Least-squares affine map (6 DOF) from paired [src]→[dst] points.
+///
+/// Returns a 3×3 matrix with bottom row `[0,0,1]`:
+/// `x' = a*x + b*y + tx`, `y' = c*x + d*y + ty`.
+List<double>? fitAffineLeastSquares(List<Offset> src, List<Offset> dst) {
+  final n = src.length;
+  if (n != dst.length || n < 3) return null;
+
+  // Two independent 3-parameter systems: [x y 1] * [a,b,tx]^T = x'
+  // and [x y 1] * [c,d,ty]^T = y'. Accumulate normal equations.
+  final ata = List.generate(3, (_) => List<double>.filled(3, 0));
+  final atbx = List<double>.filled(3, 0);
+  final atby = List<double>.filled(3, 0);
+  for (var i = 0; i < n; i++) {
+    final x = src[i].dx;
+    final y = src[i].dy;
+    final row = [x, y, 1.0];
+    for (var r = 0; r < 3; r++) {
+      atbx[r] += row[r] * dst[i].dx;
+      atby[r] += row[r] * dst[i].dy;
+      for (var c = 0; c < 3; c++) {
+        ata[r][c] += row[r] * row[c];
+      }
+    }
+  }
+  final px = _solve3(ata, atbx);
+  final py = _solve3(ata, atby);
+  if (px == null || py == null) return null;
+  return [px[0], px[1], px[2], py[0], py[1], py[2], 0, 0, 1];
+}
+
+List<double>? _solve3(List<List<double>> aIn, List<double> bIn) {
+  const n = 3;
+  final m = List.generate(n, (i) => [...aIn[i], bIn[i]]);
+  for (var col = 0; col < n; col++) {
+    var pivot = col;
+    var best = m[col][col].abs();
+    for (var r = col + 1; r < n; r++) {
+      final v = m[r][col].abs();
+      if (v > best) {
+        best = v;
+        pivot = r;
+      }
+    }
+    if (best < 1e-12) return null;
+    if (pivot != col) {
+      final tmp = m[col];
+      m[col] = m[pivot];
+      m[pivot] = tmp;
+    }
+    final div = m[col][col];
+    for (var c = col; c <= n; c++) {
+      m[col][c] /= div;
+    }
+    for (var r = 0; r < n; r++) {
+      if (r == col) continue;
+      final f = m[r][col];
+      if (f == 0) continue;
+      for (var c = col; c <= n; c++) {
+        m[r][c] -= f * m[col][c];
+      }
+    }
+  }
+  return List<double>.generate(n, (i) => m[i][n]);
+}
+
 List<double>? _solve8(List<List<double>> a, List<double> b) {
   const n = 8;
   final m = List.generate(n, (i) => [...a[i], b[i]]);
