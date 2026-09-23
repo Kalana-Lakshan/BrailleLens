@@ -85,8 +85,12 @@ class _TestingScreenState extends State<TestingScreen> {
 
   Future<void> _boot() async {
     await _camera.initialize();
+    await _camera.configureCapturePolicy();
 
+    // With glasses: frame button only (native shutter off → RTSP snapshot).
+    // Phone: yellow button; ignore frame-button events if any.
     _glassButtonSub = GlassDeviceService.instance.buttonClicks.listen((_) {
+      if (!_camera.usingGlasses) return;
       widget.audioService.hapticLight();
       _onCapturePressed();
     });
@@ -111,6 +115,7 @@ class _TestingScreenState extends State<TestingScreen> {
             ? 'YOLO: ${_fingertipOnnx.loadedAsset?.split('/').last}'
             : 'YOLO failed — tap fingertip',
         sttReady ? 'STT: ${_stt.loadedAsset?.split('/').last}' : 'STT unavailable',
+        if (_camera.usingGlasses) 'Capture: glasses button',
       ].join(' · ');
     });
 
@@ -126,9 +131,13 @@ class _TestingScreenState extends State<TestingScreen> {
       debugPrint('[Testing] STT unavailable: ${_stt.lastError}');
     }
 
+    final trigger = _camera.usingGlasses
+        ? 'press the button on your glasses'
+        : 'tap capture';
     await widget.audioService.speak(
       'Testing Mode. Stage 1: hold the Braille page still with no finger, '
-      'then tap capture. Then put a finger on a letter and I will ask you to name it.',
+      'then $trigger. Then put a finger on a letter and $trigger again '
+      'and I will ask you to name it.',
     );
   }
 
@@ -144,6 +153,7 @@ class _TestingScreenState extends State<TestingScreen> {
   /// The camera source swapped underneath us (glasses connected or dropped).
   void _onCameraSourceChanged() {
     if (!mounted) return;
+    unawaited(_camera.configureCapturePolicy());
     setState(() => _cameraReady = _camera.isReady);
   }
 
@@ -233,7 +243,9 @@ class _TestingScreenState extends State<TestingScreen> {
       _lastCorrect = null;
       _statusLine = null;
     });
-    widget.audioService.speak('Rescanning page. Capture when ready.');
+    widget.audioService.speak(
+      'Rescanning page. ${_camera.usingGlasses ? 'Press the glasses button' : 'Capture'} when ready.',
+    );
   }
 
   // ── Stage 2: prompt + check ─────────────────────────────────────────────────
@@ -410,6 +422,7 @@ class _TestingScreenState extends State<TestingScreen> {
   void dispose() {
     _glassButtonSub?.cancel();
     _camera.removeListener(_onCameraSourceChanged);
+    unawaited(_camera.restoreHardwareShutter());
     _fingertipOnnx.dispose();
     _voice.dispose();
     _camera.dispose();
@@ -606,23 +619,36 @@ class _TestingScreenState extends State<TestingScreen> {
               ),
             ],
             const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: (_busy || !_cameraReady) ? null : _onCapturePressed,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.primaryYellow,
-                  foregroundColor: Colors.black,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
+            if (!_camera.usingGlasses)
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: (_busy || !_cameraReady) ? null : _onCapturePressed,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primaryYellow,
+                    foregroundColor: Colors.black,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                  child: Text(
+                    _stage == _TestStage.prescan
+                        ? 'SCAN BRAILLE PAGE'
+                        : 'READ MY FINGER & ASK ME',
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  ),
                 ),
-                child: Text(
-                  _stage == _TestStage.prescan
-                      ? 'SCAN BRAILLE PAGE'
-                      : 'READ MY FINGER & ASK ME',
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+              )
+            else
+              Text(
+                _stage == _TestStage.prescan
+                    ? 'Press the glasses button to scan the page'
+                    : 'Press the glasses button to read your finger',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: AppTheme.primaryYellow,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 15,
                 ),
               ),
-            ),
           ],
         ),
       ),

@@ -67,10 +67,12 @@ class _LearningScreenState extends State<LearningScreen> {
 
   Future<void> _boot() async {
     await _camera.initialize();
+    await _camera.configureCapturePolicy();
 
-    // The frame button and the on-screen button both land on
-    // _onCapturePressed, so the two controls can never diverge.
+    // Frame button → same stage path as the yellow button (JPEG → pipeline).
+    // With glasses, captureJpeg uses an RTSP snapshot (native shutter off).
     _glassButtonSub = GlassDeviceService.instance.buttonClicks.listen((_) {
+      if (!_camera.usingGlasses) return;
       widget.audioService.hapticLight();
       _onCapturePressed();
     });
@@ -87,6 +89,7 @@ class _LearningScreenState extends State<LearningScreen> {
         tipReady
             ? 'YOLO: ${_fingertipOnnx.loadedAsset?.split('/').last}'
             : 'YOLO failed — tap fingertip',
+        if (_camera.usingGlasses) 'Capture: glasses button',
       ].join(' · ');
     });
 
@@ -103,8 +106,13 @@ class _LearningScreenState extends State<LearningScreen> {
   /// Prescan state is deliberately kept — only the viewfinder changes.
   void _onCameraSourceChanged() {
     if (!mounted) return;
+    unawaited(_camera.configureCapturePolicy());
     setState(() => _cameraReady = _camera.isReady);
   }
+
+  String get _captureHint => _camera.usingGlasses
+      ? 'press the button on your glasses'
+      : 'tap capture';
 
   /// Single capture entry point shared by the on-screen button and the
   /// glasses frame button.
@@ -165,7 +173,7 @@ class _LearningScreenState extends State<LearningScreen> {
         _stage = _LearningStage.fingerResult;
         _busy = false;
         _statusLine =
-            '${fixed.cells.length} cells found · place a finger, then tap capture';
+            '${fixed.cells.length} cells found · place a finger, then $_captureHint';
       });
       // "Page scan complete. Now place your finger on a letter."
       await widget.audioService.speakSinhala(
@@ -298,13 +306,16 @@ class _LearningScreenState extends State<LearningScreen> {
       _fingertip = null;
       _statusLine = null;
     });
-    widget.audioService.speak('Rescanning page. Capture when ready.');
+    widget.audioService.speak(
+      'Rescanning page. ${_camera.usingGlasses ? 'Press the glasses button' : 'Capture'} when ready.',
+    );
   }
 
   @override
   void dispose() {
     _glassButtonSub?.cancel();
     _camera.removeListener(_onCameraSourceChanged);
+    unawaited(_camera.restoreHardwareShutter());
     _fingertipOnnx.dispose();
     _camera.dispose();
     super.dispose();
@@ -532,8 +543,10 @@ class _LearningScreenState extends State<LearningScreen> {
                   ? covered!.subtitle
                   : (covered?.subtitle ??
                       (_cellMap != null
-                          ? 'Place a finger, then tap capture'
-                          : 'Capture a hand-free page photo')),
+                          ? 'Place a finger, then $_captureHint'
+                          : (_camera.usingGlasses
+                              ? 'Hold the page still, then press the glasses button'
+                              : 'Capture a hand-free page photo'))),
               textAlign: TextAlign.center,
               style: const TextStyle(color: Colors.white70, fontSize: 15),
             ),
@@ -546,23 +559,37 @@ class _LearningScreenState extends State<LearningScreen> {
               ),
             ],
             const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: (_busy || !_cameraReady) ? null : _onCapturePressed,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.primaryYellow,
-                  foregroundColor: Colors.black,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
+            // Phone: yellow button. Glasses: frame button only (same pipeline).
+            if (!_camera.usingGlasses)
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: (_busy || !_cameraReady) ? null : _onCapturePressed,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primaryYellow,
+                    foregroundColor: Colors.black,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                  child: Text(
+                    _stage == _LearningStage.prescan
+                        ? 'SCAN BRAILLE PAGE'
+                        : 'DETECT CHARACTER UNDER FINGER',
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  ),
                 ),
-                child: Text(
-                  _stage == _LearningStage.prescan
-                      ? 'SCAN BRAILLE PAGE'
-                      : 'DETECT CHARACTER UNDER FINGER',
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+              )
+            else
+              Text(
+                _stage == _LearningStage.prescan
+                    ? 'Press the glasses button to scan the page'
+                    : 'Press the glasses button to detect the character',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: AppTheme.primaryYellow,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 15,
                 ),
               ),
-            ),
           ],
         ),
       ),
