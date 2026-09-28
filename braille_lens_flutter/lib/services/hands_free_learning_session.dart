@@ -21,8 +21,10 @@ class HandsFreeConfig {
   /// Tip must stay on the same cell this long before announce (SRS ~2–3 s).
   final int dwellMs;
 
-  /// Beeps played at the end of dwell / for page baseline.
+  /// Beeps played at the end of dwell, just before the finger still.
   final int lockBeepCount;
+
+  /// Gap between beeps in every countdown.
   final int lockBeepIntervalMs;
 
   /// Tip absent this long while reading → soft CellMap refresh.
@@ -31,7 +33,10 @@ class HandsFreeConfig {
   /// Tip absent this long in page hunt before page countdown.
   final int pageStableMs;
 
-  /// Soft-rescan uses a shorter beep train.
+  /// Beeps before the first hand-free page capture — time to lift the hand.
+  final int pageBeepCount;
+
+  /// Beeps before a soft CellMap refresh.
   final int softRescanBeepCount;
 
   const HandsFreeConfig({
@@ -40,7 +45,8 @@ class HandsFreeConfig {
     this.lockBeepIntervalMs = 500,
     this.moveAbsentMs = 1500,
     this.pageStableMs = 800,
-    this.softRescanBeepCount = 3,
+    this.pageBeepCount = 8,
+    this.softRescanBeepCount = 8,
   });
 
   /// Dwell elapsed when lock beeps should start.
@@ -57,7 +63,11 @@ sealed class HandsFreeAction {
 
 class HandsFreeStatus extends HandsFreeAction {
   final String message;
-  const HandsFreeStatus(this.message);
+
+  /// Spoken form of [message] for a blind learner; null keeps it on-screen only
+  /// (per-tick lines such as dwell timers would otherwise flood the TTS).
+  final String? speech;
+  const HandsFreeStatus(this.message, {this.speech});
 }
 
 class HandsFreePlayCountdown extends HandsFreeAction {
@@ -195,7 +205,10 @@ class HandsFreeLearningSession {
       _absentMs = 0;
       return [
         const HandsFreeAbortCountdown(),
-        const HandsFreeStatus('Finger returned — page refresh cancelled'),
+        const HandsFreeStatus(
+          'Finger returned — page refresh cancelled',
+          speech: 'Refresh cancelled. Keep reading.',
+        ),
       ];
     }
     if (phase == HandsFreePhase.lockBeeps) {
@@ -211,7 +224,10 @@ class HandsFreeLearningSession {
         _absentMs = tipPresent ? 0 : 0;
         return [
           const HandsFreeAbortCountdown(),
-          const HandsFreeStatus('Finger moved — dwell reset'),
+          const HandsFreeStatus(
+            'Finger moved — dwell reset',
+            speech: 'Finger moved. Hold still on one letter.',
+          ),
         ];
       }
     }
@@ -224,16 +240,25 @@ class HandsFreeLearningSession {
   }) {
     if (tipPresent) {
       _stableNoTipMs = 0;
-      return const [HandsFreeStatus('Clear the page for auto scan')];
+      return const [
+        HandsFreeStatus(
+          'Clear the page for auto scan',
+          speech: 'Please take your hand off the page for the automatic scan.',
+        ),
+      ];
     }
     _stableNoTipMs += dt;
     if (_stableNoTipMs >= config.pageStableMs) {
       phase = HandsFreePhase.pageCountdown;
       _stableNoTipMs = 0;
       return [
-        const HandsFreeStatus('Page countdown…'),
+        HandsFreeStatus(
+          'Scanning after ${config.pageBeepCount} beeps — keep hands off',
+          speech: 'Keep your hands off the page. '
+              'Scanning after ${config.pageBeepCount} beeps.',
+        ),
         HandsFreePlayCountdown(
-          count: config.lockBeepCount,
+          count: config.pageBeepCount,
           intervalMs: config.lockBeepIntervalMs,
           kind: HandsFreeCountdownKind.page,
         ),
@@ -260,7 +285,12 @@ class HandsFreeLearningSession {
         _absentMs = 0;
         phase = HandsFreePhase.softRescan;
         return [
-          const HandsFreeStatus('Refreshing page map…'),
+          HandsFreeStatus(
+            'Refreshing page map after ${config.softRescanBeepCount} beeps…',
+            speech: 'Finger lifted. Refreshing the page map after '
+                '${config.softRescanBeepCount} beeps. '
+                'Touch a letter to cancel.',
+          ),
           HandsFreePlayCountdown(
             count: config.softRescanBeepCount,
             intervalMs: config.lockBeepIntervalMs,
@@ -280,7 +310,12 @@ class HandsFreeLearningSession {
       _dwellMs = 0;
       _dwellCellId = null;
       phase = HandsFreePhase.reading;
-      return const [HandsFreeStatus('Finger seen — align over a cell')];
+      return const [
+        HandsFreeStatus(
+          'Finger seen — align over a cell',
+          speech: 'Move your finger onto a letter.',
+        ),
+      ];
     }
 
     // Suppress re-announce of the cell we just spoke until tip leaves
@@ -288,7 +323,7 @@ class HandsFreeLearningSession {
     if (_announcedCellId != null && cellId == _announcedCellId) {
       phase = HandsFreePhase.cooldown;
       _cooldownCellId = cellId;
-      return const [HandsFreeStatus('Move to another cell')];
+      return const [_moveToNext];
     }
 
     if (_dwellCellId != cellId) {
@@ -304,7 +339,7 @@ class HandsFreeLearningSession {
     if (_dwellMs >= config.lockStartMs) {
       phase = HandsFreePhase.lockBeeps;
       return [
-        HandsFreeStatus('Hold still — capturing…'),
+        const HandsFreeStatus('Hold still — capturing…', speech: 'Hold still.'),
         HandsFreePlayCountdown(
           count: config.lockBeepCount,
           intervalMs: config.lockBeepIntervalMs,
@@ -330,10 +365,20 @@ class HandsFreeLearningSession {
       _dwellCellId = null;
       _absentMs = 0;
       phase = HandsFreePhase.reading;
-      return const [HandsFreeStatus('Ready — place finger on a cell')];
+      return const [
+        HandsFreeStatus(
+          'Ready — place finger on a cell',
+          speech: 'Ready for the next letter.',
+        ),
+      ];
     }
-    return const [HandsFreeStatus('Move to another cell')];
+    return const [_moveToNext];
   }
+
+  static const _moveToNext = HandsFreeStatus(
+    'Move to another cell',
+    speech: 'Move to the next letter.',
+  );
 
   /// Host finished playing a countdown (page / lock / soft rescan).
   List<HandsFreeAction> onCountdownFinished(HandsFreeCountdownKind kind) {
@@ -343,7 +388,10 @@ class HandsFreeLearningSession {
         if (phase != HandsFreePhase.pageCountdown) return const [];
         phase = HandsFreePhase.buildingMap;
         return [
-          const HandsFreeStatus('Scanning page…'),
+          const HandsFreeStatus(
+            'Scanning page…',
+            speech: 'Scanning the page. Please wait.',
+          ),
           const HandsFreeRequestPrescan(),
         ];
       case HandsFreeCountdownKind.lock:
@@ -393,7 +441,7 @@ class HandsFreeLearningSession {
     _dwellCellId = null;
     if (announcedCellId != null) {
       phase = HandsFreePhase.cooldown;
-      return const [HandsFreeStatus('Move to another cell')];
+      return const [_moveToNext];
     }
     phase = HandsFreePhase.reading;
     return const [HandsFreeStatus('No character — try again')];

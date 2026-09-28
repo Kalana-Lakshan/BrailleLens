@@ -46,8 +46,17 @@ class _LearningScreenState extends State<LearningScreen> {
   StreamSubscription<GlassButtonClicked>? _glassButtonSub;
   Timer? _sampleTimer;
   bool _sampleInFlight = false;
-  bool _countdownAborted = false;
+  /// Bumped to cancel the running countdown; each countdown owns one value.
+  int _countdownGen = 0;
   bool _handsFreeEnabled = true;
+
+  static const _repeatVoiceAfter = Duration(seconds: 12);
+
+  /// How long a finger result stays up before the CellMap view returns.
+  static const _resultHold = Duration(seconds: 4);
+  Timer? _resultClearTimer;
+  String? _lastVoiced;
+  DateTime _lastVoicedAt = DateTime.fromMillisecondsSinceEpoch(0);
 
   /// Last successful live→prescan transform for cheap dwell cell ids.
   Homography? _lastAlignH;
@@ -96,11 +105,23 @@ class _LearningScreenState extends State<LearningScreen> {
       ].join(' · ');
     });
 
-    await widget.audioService.speak(
-      'Learning Mode. Clear the page for an automatic scan. '
-      'Then place your finger on a letter and hold still. '
-      'You can also capture manually.',
-    );
+    final beeps = _session.config.pageBeepCount;
+    final intro = StringBuffer('Learning Mode. ');
+    intro.write(_cameraReady
+        ? 'Using the ${_camera.usingGlasses ? 'glasses' : 'phone'} camera. '
+        : 'No camera is available. ');
+    if (!cnnReady) {
+      intro.write('Warning: the Braille reader failed to load. ');
+    }
+    if (!tipReady) {
+      intro.write('The finger detector failed to load, so you will need to '
+          'tap your fingertip on the screen. ');
+    }
+    intro.write('Take your hand off the page. After $beeps beeps the page is '
+        'scanned automatically. Then place your finger on a letter and hold '
+        'still until the beeps finish. You can also $_captureHint to capture '
+        'manually.');
+    await widget.audioService.speak(intro.toString());
 
     if (!mounted || !_cameraReady) return;
     _session.start();
@@ -213,8 +234,9 @@ class _LearningScreenState extends State<LearningScreen> {
     for (final a in actions) {
       if (!mounted || _isExiting) return;
       switch (a) {
-        case HandsFreeStatus(:final message):
+        case HandsFreeStatus(:final message, :final speech):
           setState(() => _statusLine = message);
+          if (speech != null) await _voiceStatus(speech);
         case HandsFreeSpeak(:final text, :final sinhala):
           if (sinhala) {
             await widget.audioService.speakSinhala(text);
@@ -226,9 +248,10 @@ class _LearningScreenState extends State<LearningScreen> {
             :final intervalMs,
             :final kind
           ):
-          await _runCountdown(count, intervalMs, kind);
+          // Not awaited: sampling must continue so a returning tip can abort.
+          unawaited(_runCountdown(count, intervalMs, kind));
         case HandsFreeAbortCountdown():
-          _countdownAborted = true;
+          _countdownGen++;
         case HandsFreeRequestPrescan():
           await _autoPrescan();
         case HandsFreeRequestFingerCapture():
@@ -239,20 +262,35 @@ class _LearningScreenState extends State<LearningScreen> {
     }
   }
 
+  /// Speaks a status line, skipping a back-to-back repeat of the same phrase
+  /// within [_repeatVoiceAfter] (the sampler re-emits statuses every tick).
+  Future<void> _voiceStatus(String text) async {
+    final now = DateTime.now();
+    if (text == _lastVoiced &&
+        now.difference(_lastVoicedAt) < _repeatVoiceAfter) {
+      return;
+    }
+    _lastVoiced = text;
+    _lastVoicedAt = now;
+    await widget.audioService.speak(text);
+  }
+
+  Future<void> _voiceCaptureFailed() =>
+      _voiceStatus('Camera capture failed. Check the camera and try again.');
+
   Future<void> _runCountdown(
     int count,
     int intervalMs,
     HandsFreeCountdownKind kind,
   ) async {
-    _countdownAborted = false;
-    // Keep sampling so a returning fingertip can abort page/lock/soft beeps.
+    final gen = ++_countdownGen;
     final ok = await widget.audioService.playCountdownBeeps(
       count,
       gap: Duration(milliseconds: intervalMs),
-      shouldAbort: () => _countdownAborted || _isExiting,
+      shouldAbort: () => gen != _countdownGen || _isExiting,
     );
     if (!mounted || _isExiting) return;
-    if (!ok || _countdownAborted) return;
+    if (!ok || gen != _countdownGen) return;
     await _dispatch(_session.onCountdownFinished(kind));
   }
 
@@ -268,6 +306,7 @@ class _LearningScreenState extends State<LearningScreen> {
         _busy = false;
         _statusLine = _camera.source?.lastError ?? 'Camera capture failed';
       });
+      await _voiceCaptureFailed();
       await _dispatch(_session.onPrescanFinished(success: false));
       _session.resume();
       return;
@@ -289,6 +328,7 @@ class _LearningScreenState extends State<LearningScreen> {
         _busy = false;
         _statusLine = _camera.source?.lastError ?? 'Camera capture failed';
       });
+      await _voiceCaptureFailed();
       await _dispatch(_session.onAnnounceFinished(announcedCellId: null));
       _session.resume();
       return;
@@ -304,6 +344,7 @@ class _LearningScreenState extends State<LearningScreen> {
 
   Future<void> _autoSoftRescan() async {
     _session.pause();
+    _resultClearTimer?.cancel();
     setState(() {
       _busy = true;
       _statusLine = 'Refreshing page map…';
@@ -313,7 +354,11 @@ class _LearningScreenState extends State<LearningScreen> {
     });
     final jpeg = await _camera.captureJpeg();
     if (jpeg == null) {
-      setState(() => _busy = false);
+      setState(() {
+        _busy = false;
+        _statusLine = _camera.source?.lastError ?? 'Camera capture failed';
+      });
+      await _voiceCaptureFailed();
       await _dispatch(_session.onSoftRescanFinished(success: false));
       _session.resume();
       return;
@@ -325,6 +370,9 @@ class _LearningScreenState extends State<LearningScreen> {
         _busy = false;
         _statusLine = 'Finger still visible — refresh skipped';
       });
+      await _voiceStatus(
+        'Your finger is still on the page, so the old page map is kept.',
+      );
       await _dispatch(_session.onSoftRescanFinished(success: false));
       _session.resume();
       return;
@@ -339,7 +387,7 @@ class _LearningScreenState extends State<LearningScreen> {
 
   Future<void> _onCapturePressed() async {
     if (_busy || _isExiting) return;
-    _countdownAborted = true;
+    _countdownGen++;
     _session.pause();
     try {
       if (_stage == _LearningStage.prescan) {
@@ -426,6 +474,7 @@ class _LearningScreenState extends State<LearningScreen> {
       final fixed = CellMap(cells: map.cells, imageWidth: w, imageHeight: h);
 
       if (!mounted) return false;
+      _resultClearTimer?.cancel();
       setState(() {
         _prescanJpeg = jpeg;
         _cellMap = fixed;
@@ -437,6 +486,7 @@ class _LearningScreenState extends State<LearningScreen> {
         _statusLine =
             '${fixed.cells.length} cells found · place a finger, then $_captureHint';
       });
+      await _voiceStatus('Found ${fixed.cells.length} Braille cells.');
       if (speakOnSuccess) {
         await widget.audioService.speakSinhala(
           'පිටුව ස්කෑන් කර අවසන්. දැන් ඔබේ ඇඟිල්ල අකුරක් මත තබන්න.',
@@ -521,6 +571,7 @@ class _LearningScreenState extends State<LearningScreen> {
           ? '${result.compactDots} · ${result.headline}'
           : result.subtitle;
     });
+    _scheduleResultClear();
 
     if (result.hasHit) {
       if (playSuccessEarcon) {
@@ -538,11 +589,35 @@ class _LearningScreenState extends State<LearningScreen> {
           name.isEmpty ? ch : 'අක්ෂරය $name',
         );
       }
+      final dots = RegExp(r'[1-6]')
+          .allMatches(result.compactDots)
+          .map((m) => m.group(0))
+          .join(' ');
+      if (dots.isNotEmpty) {
+        await widget.audioService.speak('Dots $dots.');
+      }
       return result.cell?.id;
     }
 
-    await widget.audioService.speak('No character found under your finger.');
+    await widget.audioService.speak(
+      result.alignMode.startsWith('scale')
+          ? 'No character found. The page is not aligned; hold the camera '
+              'the way you did for the page scan.'
+          : 'No character found under your finger.',
+    );
     return null;
+  }
+
+  void _scheduleResultClear() {
+    _resultClearTimer?.cancel();
+    _resultClearTimer = Timer(_resultHold, () {
+      if (!mounted || _isExiting) return;
+      setState(() {
+        _fingerJpeg = null;
+        _fingertip = null;
+        _covered = null;
+      });
+    });
   }
 
   Future<FingertipDetection?> _promptTapFingertip(Uint8List jpeg) async {
@@ -566,7 +641,8 @@ class _LearningScreenState extends State<LearningScreen> {
   }
 
   void _rescan() {
-    _countdownAborted = true;
+    _countdownGen++;
+    _resultClearTimer?.cancel();
     _lastAlignH = null;
     setState(() {
       _stage = _LearningStage.prescan;
@@ -586,7 +662,7 @@ class _LearningScreenState extends State<LearningScreen> {
   Future<void> _exit() async {
     if (_isExiting) return;
     setState(() => _isExiting = true);
-    _countdownAborted = true;
+    _countdownGen++;
     _handsFreeEnabled = false;
     _stopSampleLoop();
     _session.pause();
@@ -598,7 +674,8 @@ class _LearningScreenState extends State<LearningScreen> {
 
   @override
   void dispose() {
-    _countdownAborted = true;
+    _countdownGen++;
+    _resultClearTimer?.cancel();
     _handsFreeEnabled = false;
     _stopSampleLoop();
     _glassButtonSub?.cancel();
