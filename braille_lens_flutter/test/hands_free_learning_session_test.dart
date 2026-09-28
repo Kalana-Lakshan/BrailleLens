@@ -158,6 +158,7 @@ void main() {
     final page =
         defaults.onSample(now: at(900), tipPresent: false, cellId: null);
     expect(page.whereType<HandsFreePlayCountdown>().single.count, 8);
+    expect(page.whereType<HandsFreeStatus>().single.speech, contains('8 beeps'));
 
     defaults.phase = HandsFreePhase.reading;
     defaults.onSample(now: at(1000), tipPresent: false, cellId: null);
@@ -167,6 +168,7 @@ void main() {
     final countdown = soft.whereType<HandsFreePlayCountdown>().single;
     expect(countdown.kind, HandsFreeCountdownKind.softRescan);
     expect(countdown.count, 8);
+    expect(soft.whereType<HandsFreeStatus>().single.speech, contains('8 beeps'));
   });
 
   test('prescan failure returns to page hunt', () {
