@@ -46,7 +46,8 @@ class _LearningScreenState extends State<LearningScreen> {
   StreamSubscription<GlassButtonClicked>? _glassButtonSub;
   Timer? _sampleTimer;
   bool _sampleInFlight = false;
-  bool _countdownAborted = false;
+  /// Bumped to cancel the running countdown; each countdown owns one value.
+  int _countdownGen = 0;
   bool _handsFreeEnabled = true;
 
   /// Last successful live→prescan transform for cheap dwell cell ids.
@@ -226,9 +227,10 @@ class _LearningScreenState extends State<LearningScreen> {
             :final intervalMs,
             :final kind
           ):
-          await _runCountdown(count, intervalMs, kind);
+          // Not awaited: sampling must continue so a returning tip can abort.
+          unawaited(_runCountdown(count, intervalMs, kind));
         case HandsFreeAbortCountdown():
-          _countdownAborted = true;
+          _countdownGen++;
         case HandsFreeRequestPrescan():
           await _autoPrescan();
         case HandsFreeRequestFingerCapture():
@@ -244,15 +246,14 @@ class _LearningScreenState extends State<LearningScreen> {
     int intervalMs,
     HandsFreeCountdownKind kind,
   ) async {
-    _countdownAborted = false;
-    // Keep sampling so a returning fingertip can abort page/lock/soft beeps.
+    final gen = ++_countdownGen;
     final ok = await widget.audioService.playCountdownBeeps(
       count,
       gap: Duration(milliseconds: intervalMs),
-      shouldAbort: () => _countdownAborted || _isExiting,
+      shouldAbort: () => gen != _countdownGen || _isExiting,
     );
     if (!mounted || _isExiting) return;
-    if (!ok || _countdownAborted) return;
+    if (!ok || gen != _countdownGen) return;
     await _dispatch(_session.onCountdownFinished(kind));
   }
 
@@ -339,7 +340,7 @@ class _LearningScreenState extends State<LearningScreen> {
 
   Future<void> _onCapturePressed() async {
     if (_busy || _isExiting) return;
-    _countdownAborted = true;
+    _countdownGen++;
     _session.pause();
     try {
       if (_stage == _LearningStage.prescan) {
@@ -566,7 +567,7 @@ class _LearningScreenState extends State<LearningScreen> {
   }
 
   void _rescan() {
-    _countdownAborted = true;
+    _countdownGen++;
     _lastAlignH = null;
     setState(() {
       _stage = _LearningStage.prescan;
@@ -586,7 +587,7 @@ class _LearningScreenState extends State<LearningScreen> {
   Future<void> _exit() async {
     if (_isExiting) return;
     setState(() => _isExiting = true);
-    _countdownAborted = true;
+    _countdownGen++;
     _handsFreeEnabled = false;
     _stopSampleLoop();
     _session.pause();
@@ -598,7 +599,7 @@ class _LearningScreenState extends State<LearningScreen> {
 
   @override
   void dispose() {
-    _countdownAborted = true;
+    _countdownGen++;
     _handsFreeEnabled = false;
     _stopSampleLoop();
     _glassButtonSub?.cancel();
