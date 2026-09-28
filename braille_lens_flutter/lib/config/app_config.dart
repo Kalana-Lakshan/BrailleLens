@@ -32,11 +32,19 @@ class AppConfig {
   /// Multi-cell page detector — single-class YOLO26n (`braille_cell`),
   /// 1280×1280 input, up to 800 boxes per page. Exported by
   /// `cell_detect/export_to_onnx.py` from `cell_detect/weights/
-  /// braille_cell_best.pt`. UINT8 quantized first (phone CPU), FP32 fallback
-  /// — same dual-asset pattern as [fingertipOnnxAsset].
+  /// braille_cell_gold_degraded.pt` — fine-tuned with an added synthetic
+  /// camera-degradation augmentation to close the domain gap with the AiSee
+  /// glasses camera (see `cell_detect/CAMERA_DEGRADATION.md`). Consistent
+  /// mAP50 gains on held-out Gold pages across high/low/degraded quality
+  /// variants; mixed on 2 real unseen AiSee photos (fewer merged boxes on
+  /// one, lower recall on faint dots on the other) -- see
+  /// `braille_cell_yolo26n_degraded_meta.json`'s provenance_notes. UINT8
+  /// quantized first (phone CPU), FP32 fallback — same dual-asset pattern as
+  /// [fingertipOnnxAsset]. Previous default: `braille_cell_yolo26n[_mobile].onnx`
+  /// (from `braille_cell_best.pt`), still bundled as an asset if reverting.
   static const String cellDetectorOnnxAsset =
-      'assets/models/braille_cell_yolo26n_mobile.onnx';
+      'assets/models/braille_cell_yolo26n_degraded_mobile.onnx';
 
   static const String cellDetectorOnnxFallbackAsset =
-      'assets/models/braille_cell_yolo26n.onnx';
+      'assets/models/braille_cell_yolo26n_degraded.onnx';
 }
