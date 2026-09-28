@@ -102,23 +102,23 @@ class CellDetectorService {
       o?.release();
     }
 
-    // output0: [1, N, 6], rows = [x1, y1, x2, y2, conf, cls] in 1280x1280
-    // letterbox space -- already de-duplicated by YOLO26's end-to-end head
-    // (verified empirically: no overlapping duplicate boxes in practice),
-    // but NMS below is kept as a safety net rather than assumed.
-    final rows = _parseOutputRows(outValue);
+    // output0 is either an end-to-end head's [1, N, 6] per-detection rows
+    // ([x1, y1, x2, y2, conf, cls], already de-duplicated) or a raw head's
+    // [1, 4+numClasses, numAnchors] channel-major grid (box in (cx, cy, w,
+    // h), one score channel per class) -- see _parseDetections.
+    final rows = _parseDetections(outValue);
 
     final candidates = <CellDetection>[];
     for (final row in rows) {
       if (row.length < 6) continue;
-      final conf = (row[4] as num).toDouble();
-      final cls = (row[5] as num).toInt();
+      final conf = row[4];
+      final cls = row[5].round();
       if (conf < _confThreshold || cls != 0) continue;
 
-      final x1 = _unmap((row[0] as num).toDouble(), letterbox);
-      final y1 = _unmapY((row[1] as num).toDouble(), letterbox);
-      final x2 = _unmap((row[2] as num).toDouble(), letterbox);
-      final y2 = _unmapY((row[3] as num).toDouble(), letterbox);
+      final x1 = _unmap(row[0], letterbox);
+      final y1 = _unmapY(row[1], letterbox);
+      final x2 = _unmap(row[2], letterbox);
+      final y2 = _unmapY(row[3], letterbox);
 
       final box = Rect.fromLTRB(
         x1.clamp(0, origW.toDouble()),
@@ -171,11 +171,56 @@ class CellDetectorService {
     _ready = false;
   }
 
-  List<List<dynamic>> _parseOutputRows(dynamic value) {
+  /// Normalizes either YOLO26 export layout to per-box rows
+  /// `[x1, y1, x2, y2, conf, cls]` in letterbox pixel space:
+  /// - End-to-end head: `[1, N, 6]` -- N short rows, already per-detection.
+  /// - Raw (non end-to-end) head: `[1, 4+numClasses, numAnchors]` --
+  ///   channel-major (few long channels: cx, cy, w, h, one score per
+  ///   class), needs transposing and its centre-form boxes converting to
+  ///   corner-form.
+  List<List<double>> _parseDetections(dynamic value) {
     if (value is! List || value.isEmpty) return [];
     final outer = value[0];
-    if (outer is! List) return [];
-    return outer.map((r) => r is List ? r : <dynamic>[]).toList();
+    if (outer is! List || outer.isEmpty) return [];
+    final first = outer[0];
+    if (first is! List) return [];
+
+    final outerLen = outer.length;
+    final innerLen = first.length;
+    final channels = outer
+        .map((r) => (r as List).map((v) => (v as num).toDouble()).toList())
+        .toList();
+
+    // Whichever dimension is smaller holds the per-box attributes; the
+    // larger one is the count of boxes (end-to-end) or anchors (raw).
+    if (innerLen <= outerLen) {
+      // Row-major: each outer entry is already one short detection row.
+      return channels;
+    }
+
+    // Channel-major raw grid: transpose to per-anchor rows and pick the
+    // best-scoring class (braille_cell models have exactly one class, so
+    // this reduces to "the only channel").
+    final numAnchors = innerLen;
+    final numClasses = outerLen - 4;
+    final rows = <List<double>>[];
+    for (var a = 0; a < numAnchors; a++) {
+      final cx = channels[0][a];
+      final cy = channels[1][a];
+      final w = channels[2][a];
+      final h = channels[3][a];
+      var bestCls = 0;
+      var bestScore = numClasses > 0 ? channels[4][a] : 0.0;
+      for (var c = 1; c < numClasses; c++) {
+        final s = channels[4 + c][a];
+        if (s > bestScore) {
+          bestScore = s;
+          bestCls = c;
+        }
+      }
+      rows.add([cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2, bestScore, bestCls.toDouble()]);
+    }
+    return rows;
   }
 
   Float32List _toTensor(img.Image rgb, int size) {
