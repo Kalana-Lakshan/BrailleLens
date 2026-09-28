@@ -21,8 +21,10 @@ class HandsFreeConfig {
   /// Tip must stay on the same cell this long before announce (SRS ~2–3 s).
   final int dwellMs;
 
-  /// Beeps played at the end of dwell / for page baseline.
+  /// Beeps played at the end of dwell, just before the finger still.
   final int lockBeepCount;
+
+  /// Gap between beeps in every countdown.
   final int lockBeepIntervalMs;
 
   /// Tip absent this long while reading → soft CellMap refresh.
@@ -31,7 +33,10 @@ class HandsFreeConfig {
   /// Tip absent this long in page hunt before page countdown.
   final int pageStableMs;
 
-  /// Soft-rescan uses a shorter beep train.
+  /// Beeps before the first hand-free page capture — time to lift the hand.
+  final int pageBeepCount;
+
+  /// Beeps before a soft CellMap refresh.
   final int softRescanBeepCount;
 
   const HandsFreeConfig({
@@ -40,7 +45,8 @@ class HandsFreeConfig {
     this.lockBeepIntervalMs = 500,
     this.moveAbsentMs = 1500,
     this.pageStableMs = 800,
-    this.softRescanBeepCount = 3,
+    this.pageBeepCount = 8,
+    this.softRescanBeepCount = 8,
   });
 
   /// Dwell elapsed when lock beeps should start.
@@ -233,7 +239,7 @@ class HandsFreeLearningSession {
       return [
         const HandsFreeStatus('Page countdown…'),
         HandsFreePlayCountdown(
-          count: config.lockBeepCount,
+          count: config.pageBeepCount,
           intervalMs: config.lockBeepIntervalMs,
           kind: HandsFreeCountdownKind.page,
         ),

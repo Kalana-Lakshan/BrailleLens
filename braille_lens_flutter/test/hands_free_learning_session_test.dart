@@ -152,6 +152,23 @@ void main() {
     expect(abort.whereType<HandsFreeAbortCountdown>(), hasLength(1));
   });
 
+  test('first page capture and soft rescan both wait eight beeps', () {
+    final defaults = HandsFreeLearningSession()..start();
+    defaults.onSample(now: at(0), tipPresent: false, cellId: null);
+    final page =
+        defaults.onSample(now: at(900), tipPresent: false, cellId: null);
+    expect(page.whereType<HandsFreePlayCountdown>().single.count, 8);
+
+    defaults.phase = HandsFreePhase.reading;
+    defaults.onSample(now: at(1000), tipPresent: false, cellId: null);
+    defaults.onSample(now: at(1800), tipPresent: false, cellId: null);
+    final soft =
+        defaults.onSample(now: at(2600), tipPresent: false, cellId: null);
+    final countdown = soft.whereType<HandsFreePlayCountdown>().single;
+    expect(countdown.kind, HandsFreeCountdownKind.softRescan);
+    expect(countdown.count, 8);
+  });
+
   test('prescan failure returns to page hunt', () {
     session.phase = HandsFreePhase.buildingMap;
     final fail = session.onPrescanFinished(success: false);
