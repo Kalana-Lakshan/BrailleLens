@@ -1,0 +1,55 @@
+{
+  "model": "braille_cell_yolo26n_degraded.onnx",
+  "task": "detect",
+  "class_names": [
+    "braille_cell"
+  ],
+  "num_classes": 1,
+  "imgsz": 1280,
+  "input_layout": "NCHW",
+  "color_format": "RGB",
+  "normalize": {
+    "scale": 0.00392156862745098,
+    "mean": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "std": [
+      1.0,
+      1.0,
+      1.0
+    ]
+  },
+  "conf_threshold": 0.25,
+  "iou_threshold": 0.45,
+  "max_det": 800,
+  "nms_in_app": true,
+  "ir_version": 7,
+  "source_weights": "braille_cell_gold_degraded.pt",
+  "source_weights_sha256_16": "3782294f64036e8b",
+  "inputs": [
+    {
+      "name": "images",
+      "shape": [
+        1,
+        3,
+        1280,
+        1280
+      ],
+      "dtype": "float32"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "output0",
+      "shape": [
+        1,
+        5,
+        33600
+      ]
+    }
+  ],
+  "provenance_notes": "Experimental variant of braille_cell_yolo26n.onnx, fine-tuned with an added synthetic camera-degradation augmentation (see cell_detect/CAMERA_DEGRADATION.md) to close the domain gap with the AiSee glasses camera. NOT the active default -- app_config.dart still points at braille_cell_yolo26n.onnx. Validated on held-out Gold pages (consistent mAP50 gains across high/low/degraded variants) but mixed results on 2 real unseen AiSee photos (fewer merged boxes, but lower recall on faint dots on one of them) -- see gold_finetune_2 experiment log for details.",
+  "flutter_notes": "Preprocess: resize letterbox to 1280x1280, RGB, divide by 255. Postprocess: YOLO26 detection head, output already de-duplicated (end-to-end head) -- keep every row above conf_threshold (a page has many cells, unlike the fingertip model which only keeps the single best row). Box centers are the cell centroids."
+}
