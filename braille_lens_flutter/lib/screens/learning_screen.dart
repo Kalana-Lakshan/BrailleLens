@@ -51,6 +51,10 @@ class _LearningScreenState extends State<LearningScreen> {
   bool _handsFreeEnabled = true;
 
   static const _repeatVoiceAfter = Duration(seconds: 12);
+
+  /// How long a finger result stays up before the CellMap view returns.
+  static const _resultHold = Duration(seconds: 4);
+  Timer? _resultClearTimer;
   String? _lastVoiced;
   DateTime _lastVoicedAt = DateTime.fromMillisecondsSinceEpoch(0);
 
@@ -340,6 +344,7 @@ class _LearningScreenState extends State<LearningScreen> {
 
   Future<void> _autoSoftRescan() async {
     _session.pause();
+    _resultClearTimer?.cancel();
     setState(() {
       _busy = true;
       _statusLine = 'Refreshing page map…';
@@ -469,6 +474,7 @@ class _LearningScreenState extends State<LearningScreen> {
       final fixed = CellMap(cells: map.cells, imageWidth: w, imageHeight: h);
 
       if (!mounted) return false;
+      _resultClearTimer?.cancel();
       setState(() {
         _prescanJpeg = jpeg;
         _cellMap = fixed;
@@ -565,6 +571,7 @@ class _LearningScreenState extends State<LearningScreen> {
           ? '${result.compactDots} · ${result.headline}'
           : result.subtitle;
     });
+    _scheduleResultClear();
 
     if (result.hasHit) {
       if (playSuccessEarcon) {
@@ -601,6 +608,18 @@ class _LearningScreenState extends State<LearningScreen> {
     return null;
   }
 
+  void _scheduleResultClear() {
+    _resultClearTimer?.cancel();
+    _resultClearTimer = Timer(_resultHold, () {
+      if (!mounted || _isExiting) return;
+      setState(() {
+        _fingerJpeg = null;
+        _fingertip = null;
+        _covered = null;
+      });
+    });
+  }
+
   Future<FingertipDetection?> _promptTapFingertip(Uint8List jpeg) async {
     final decoded = decodeUpright(jpeg);
     if (decoded == null) return null;
@@ -623,6 +642,7 @@ class _LearningScreenState extends State<LearningScreen> {
 
   void _rescan() {
     _countdownGen++;
+    _resultClearTimer?.cancel();
     _lastAlignH = null;
     setState(() {
       _stage = _LearningStage.prescan;
@@ -655,6 +675,7 @@ class _LearningScreenState extends State<LearningScreen> {
   @override
   void dispose() {
     _countdownGen++;
+    _resultClearTimer?.cancel();
     _handsFreeEnabled = false;
     _stopSampleLoop();
     _glassButtonSub?.cancel();
