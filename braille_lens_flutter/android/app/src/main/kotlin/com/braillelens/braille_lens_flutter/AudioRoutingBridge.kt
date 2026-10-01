@@ -183,14 +183,19 @@ class AudioRoutingBridge(context: Context, messenger: BinaryMessenger) :
         }
     }
 
+    /// Undoes only what [startSco] changed. Re-setting the mode when it is
+    /// already normal still makes Samsung re-route audio, which aborts
+    /// whatever is playing: it killed the Sinhala welcome prompt ~1.5 s in
+    /// (Google TTS logged TextToSpeech.ERROR) every time the glasses scan
+    /// finished without finding glasses.
     private fun stopSco() {
-        runCatching {
-            @Suppress("DEPRECATION")
-            audio.stopBluetoothSco()
+        @Suppress("DEPRECATION")
+        if (audio.isBluetoothScoOn) {
+            runCatching { audio.stopBluetoothSco() }
+            runCatching { audio.isBluetoothScoOn = false }
         }
-        runCatching {
-            audio.isBluetoothScoOn = false
-            audio.mode = AudioManager.MODE_NORMAL
+        if (audio.mode != AudioManager.MODE_NORMAL) {
+            runCatching { audio.mode = AudioManager.MODE_NORMAL }
         }
     }
 
