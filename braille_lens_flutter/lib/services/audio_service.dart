@@ -16,12 +16,48 @@ class AudioService {
   bool _isSpeechInitialized = false;
 
   AudioService() {
-    _initTts();
+    _ttsReady = _initTts();
   }
 
   // ── TTS ──────────────────────────────────────────────────────────────────────
 
+  /// Google's engine ships a Sinhala (si-LK) voice. Samsung phones default
+  /// to Samsung TTS, which has none — every Sinhala prompt was silent on the
+  /// Galaxy M14 — so Google's is used whenever it is installed.
+  static const _googleTtsEngine = 'com.google.android.tts';
+
+  late final Future<void> _ttsReady;
+  bool _sinhalaVoice = false;
+
+  /// Whether the engine in use can speak si-LK. False means Sinhala prompts
+  /// will be silent or mangled until Sinhala voice data is installed.
+  bool get hasSinhalaVoice => _sinhalaVoice;
+
   Future<void> _initTts() async {
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      try {
+        final engines = ((await _tts.getEngines) as List?)
+                ?.map((e) => '$e')
+                .toList() ??
+            const <String>[];
+        // Completes once the new engine has finished initialising.
+        if (engines.contains(_googleTtsEngine)) {
+          await _tts.setEngine(_googleTtsEngine);
+        }
+        debugPrint('[AudioService] TTS engines $engines, using '
+            '${engines.contains(_googleTtsEngine) ? _googleTtsEngine : 'system default'}');
+      } catch (e) {
+        debugPrint('[AudioService] TTS engine selection failed: $e');
+      }
+    }
+    try {
+      _sinhalaVoice = await _tts.isLanguageAvailable('si-LK') == true;
+      final installed = await _tts.isLanguageInstalled('si-LK');
+      debugPrint('[AudioService] si-LK available=$_sinhalaVoice '
+          'installed=$installed');
+    } catch (e) {
+      debugPrint('[AudioService] si-LK check failed: $e');
+    }
     try {
       await _tts.setLanguage('en-US');
       await _tts.setSpeechRate(0.48);
@@ -33,16 +69,62 @@ class AudioService {
     }
   }
 
-  Future<void> speak(String text) async {
+  /// Set while an in-screen command listener runs: every prompt first takes
+  /// the microphone back from the recogniser, so the app neither transcribes
+  /// itself nor has its own voice ducked by the recogniser's audio focus.
+  bool yieldListeningToSpeech = false;
+
+  int _speaking = 0;
+
+  /// True while a prompt is playing or queued.
+  bool get isSpeaking => _speaking > 0;
+
+  /// Prompts play one after another. Each used to start with `stop()`, so a
+  /// second prompt cut off the one playing — on the phone log an English
+  /// status line replaced a Sinhala prompt 10 ms after it started, and Google
+  /// TTS reported the cut sentence as TextToSpeech.ERROR.
+  Future<void> _speechTail = Future<void>.value();
+
+  /// Bumped by [stopSpeech]: queued prompts from before it are dropped.
+  int _speechGen = 0;
+
+  Future<void> _enqueue(Future<void> Function() utter) {
+    final gen = _speechGen;
+    _speaking++;
+    final run = _speechTail.then((_) async {
+      try {
+        if (gen == _speechGen) await utter();
+      } finally {
+        _speaking--;
+      }
+    });
+    _speechTail = run.catchError((_) {});
+    return run;
+  }
+
+  /// Completes once every queued prompt has finished — the recogniser waits
+  /// on this, since starting it over a Bluetooth headset tears down the
+  /// audio link and kills the sentence playing on it.
+  Future<void> get speechIdle => _speechTail;
+
+  Future<void> speak(String text) {
+    if (yieldListeningToSpeech) stopListening();
+    return _enqueue(() => _speakNow(text));
+  }
+
+  Future<void> _speakNow(String text) async {
     try {
-      await _tts.stop();
+      await _ttsReady;
       await _tts.speak(text);
     } catch (e) {
       debugPrint('[AudioService] TTS speak error: $e');
     }
   }
 
+  /// Cuts off the prompt playing and drops the queued ones — for leaving a
+  /// screen or opening the mic, where stale speech must not carry on.
   Future<void> stopSpeech() async {
+    _speechGen++;
     try {
       await _tts.stop();
     } catch (e) {
@@ -60,15 +142,25 @@ class AudioService {
   /// Leaving the engine on `si-LK` (as this used to) means every later
   /// English prompt is read by the Sinhala voice, which mangles it or goes
   /// silent when only one of the two voices is installed.
-  Future<void> speakSinhala(String text) async {
-    if (text.trim().isEmpty) return;
+  Future<void> speakSinhala(String text) {
+    if (text.trim().isEmpty) return Future<void>.value();
+    if (yieldListeningToSpeech) stopListening();
+    return _enqueue(() => _speakSinhalaNow(text));
+  }
+
+  Future<void> _speakSinhalaNow(String text) async {
     try {
-      await _tts.stop();
-      await _tts.setLanguage('si-LK');
+      await _ttsReady;
+      // 0 means this engine has no Sinhala voice: say so in the log, since
+      // the prompt will come out silent or read letter by letter.
+      if (await _tts.setLanguage('si-LK') != 1) {
+        debugPrint('[AudioService] no si-LK voice for: $text');
+      }
       await _tts.speak(text);
     } catch (e) {
       debugPrint('[AudioService] Sinhala TTS error: $e');
-      await speak(text);
+      // Already inside the queue: speak directly, not via [speak].
+      await _speakNow(text);
     } finally {
       try {
         await _tts.setLanguage('en-US');
@@ -224,6 +316,8 @@ class AudioService {
   }) async {
     final available = await initStt();
     if (!available) return null;
+    // Never open the recogniser over a prompt (see [speechIdle]).
+    await speechIdle;
 
     final completer = Completer<String?>();
     Timer? timer;
@@ -293,6 +387,8 @@ class AudioService {
     if (!available) {
       return const ListenOutcome(words: null, stoppedByKeyword: false, timedOut: false, sttUnavailable: true);
     }
+    // Never open the recogniser over a prompt (see [speechIdle]).
+    await speechIdle;
 
     final completer = Completer<ListenOutcome>();
     Timer? timer;
