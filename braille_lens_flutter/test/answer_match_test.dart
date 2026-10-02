@@ -37,4 +37,26 @@ void main() {
     expect(spokenContainsStopKeyword('stopped'), isFalse);
     expect(spokenContainsStopKeyword('stopwatch'), isFalse);
   });
+
+  test('screen commands are whole English words', () {
+    expect(parseScreenCommand('back'), ScreenCommand.back);
+    expect(parseScreenCommand('go back please'), ScreenCommand.back);
+    expect(parseScreenCommand('Retry!'), ScreenCommand.retry);
+    expect(parseScreenCommand('re try'), ScreenCommand.retry);
+    expect(parseScreenCommand('help'), ScreenCommand.help);
+    expect(parseScreenCommand('background'), isNull);
+    expect(parseScreenCommand('helpful'), isNull);
+    expect(parseScreenCommand(null), isNull);
+  });
+
+  test('own Singlish prompts are not commands', () {
+    for (final prompt in [
+      'Weradiyi, me akura. Ayeth try karanna.',
+      'Refresh eka cancel kala. Digatama kiyawanna.',
+      'Hari! Oya kiwwe hari akura.',
+      'Finger eka tikak left ekata ganna.',
+    ]) {
+      expect(parseScreenCommand(prompt), isNull, reason: prompt);
+    }
+  });
 }

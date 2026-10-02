@@ -6,15 +6,16 @@ import 'package:flutter/material.dart';
 import '../models/braille_cell.dart';
 import '../services/audio_service.dart';
 import '../services/camera_source.dart';
-import '../services/cell_hit_test.dart';
-import '../services/coordinate_mapper.dart';
 import '../services/covered_cell_service.dart';
 import '../services/fingertip_onnx_service.dart';
 import '../services/glass_device_service.dart';
 import '../services/hands_free_learning_session.dart';
 import '../services/prescan_bridge.dart';
+import '../services/screen_command_listener.dart';
+import '../services/tip_dwell_tracker.dart';
+import '../utils/answer_match.dart';
+import '../utils/sinhala_prompts.dart';
 import '../theme/app_theme.dart';
-import '../utils/homography.dart';
 import '../utils/image_decode.dart';
 import '../utils/sinhala_phonetics.dart';
 import '../widgets/frozen_image_view.dart';
@@ -46,6 +47,9 @@ class _LearningScreenState extends State<LearningScreen> {
   StreamSubscription<GlassButtonClicked>? _glassButtonSub;
   Timer? _sampleTimer;
   bool _sampleInFlight = false;
+
+  /// Consecutive sample ticks that got no frame from the camera.
+  int _missedFrames = 0;
   /// Bumped to cancel the running countdown; each countdown owns one value.
   int _countdownGen = 0;
   bool _handsFreeEnabled = true;
@@ -58,8 +62,15 @@ class _LearningScreenState extends State<LearningScreen> {
   String? _lastVoiced;
   DateTime _lastVoicedAt = DateTime.fromMillisecondsSinceEpoch(0);
 
-  /// Last successful live→prescan transform for cheap dwell cell ids.
-  Homography? _lastAlignH;
+  /// Dwell identity from fingertip stillness (see [TipDwellTracker]).
+  final TipDwellTracker _tipDwell = TipDwellTracker();
+
+  /// English "back" / "retry" / "help" while the screen is idle.
+  late final ScreenCommandListener _commands = ScreenCommandListener(
+    audio: widget.audioService,
+    canListen: _commandsCanListen,
+    onCommand: _onCommand,
+  );
 
   _LearningStage _stage = _LearningStage.prescan;
   bool _cameraReady = false;
@@ -105,23 +116,18 @@ class _LearningScreenState extends State<LearningScreen> {
       ].join(' · ');
     });
 
-    final beeps = _session.config.pageBeepCount;
-    final intro = StringBuffer('Learning Mode. ');
-    intro.write(_cameraReady
-        ? 'Using the ${_camera.usingGlasses ? 'glasses' : 'phone'} camera. '
-        : 'No camera is available. ');
+    if (!_cameraReady) {
+      await widget.audioService.speakSinhala(SinhalaPrompts.noCamera);
+    }
     if (!cnnReady) {
-      intro.write('Warning: the Braille reader failed to load. ');
+      await widget.audioService.speakSinhala(SinhalaPrompts.readerFailed);
     }
     if (!tipReady) {
-      intro.write('The finger detector failed to load, so you will need to '
-          'tap your fingertip on the screen. ');
+      await widget.audioService
+          .speakSinhala(SinhalaPrompts.fingerDetectorFailed);
     }
-    intro.write('Take your hand off the page. After $beeps beeps the page is '
-        'scanned automatically. Then place your finger on a letter and hold '
-        'still until the beeps finish. You can also $_captureHint to capture '
-        'manually.');
-    await widget.audioService.speak(intro.toString());
+    await widget.audioService.speakSinhala(SinhalaPrompts.enterLearning);
+    await widget.audioService.speakSinhala(SinhalaPrompts.prescan);
 
     if (!mounted || !_cameraReady) return;
     _session.start();
@@ -131,6 +137,7 @@ class _LearningScreenState extends State<LearningScreen> {
       cellId: null,
     ));
     _startSampleLoop();
+    _commands.start();
   }
 
   void _onCameraSourceChanged() {
@@ -177,19 +184,39 @@ class _LearningScreenState extends State<LearningScreen> {
     _sampleInFlight = true;
     try {
       final jpeg = await _camera.captureSampleJpeg();
-      if (jpeg == null || !mounted) return;
+      if (!mounted) return;
+      if (jpeg == null) {
+        // The phone camera always returns a photo; the glasses' video feed
+        // can have no frame (stream down or mid-reconnect). Without a sample
+        // the session cannot advance, so make the stall visible instead of
+        // returning silently.
+        _missedFrames++;
+        if (_missedFrames == 5 || _missedFrames % 25 == 0) {
+          debugPrint('[Learning] no frame x$_missedFrames: '
+              '${_camera.source?.lastError}');
+          setState(() => _statusLine = _camera.usingGlasses
+              ? 'Waiting for the glasses video…'
+              : 'Waiting for the camera…');
+        }
+        return;
+      }
+      if (_missedFrames >= 5) {
+        debugPrint('[Learning] frames back after $_missedFrames misses');
+      }
+      _missedFrames = 0;
 
       final tip = await _fingertipOnnx.detect(jpeg);
       int? cellId;
       final map = _cellMap;
-      if (tip != null &&
-          map != null &&
+      if (tip == null) {
+        _tipDwell.lost();
+      } else if (map != null &&
           (phase == HandsFreePhase.reading ||
               phase == HandsFreePhase.dwelling ||
               phase == HandsFreePhase.lockBeeps ||
               phase == HandsFreePhase.cooldown ||
               phase == HandsFreePhase.pageCountdown)) {
-        cellId = await _cheapCellId(jpeg, tip);
+        cellId = _tipDwell.track(tip.contactPoint, tip.imageWidth, map);
       }
 
       if (!mounted) return;
@@ -203,33 +230,6 @@ class _LearningScreenState extends State<LearningScreen> {
     }
   }
 
-  /// Cheap cell identity for dwell (not the announce path).
-  Future<int?> _cheapCellId(Uint8List jpeg, FingertipDetection tip) async {
-    final map = _cellMap;
-    if (map == null) return null;
-
-    final liveBoxes = await _prescanBridge.detectCellBoxes(jpeg);
-    Offset probe = tip.contactPoint;
-    for (final b in liveBoxes) {
-      if (b.contains(tip.contactPoint)) {
-        probe = b.center;
-        break;
-      }
-    }
-
-    final mapped = _lastAlignH != null
-        ? _lastAlignH!.transform(probe)
-        : CoordinateMapper.mapFingerTipToPrescan(
-            tipInFingerImage: probe,
-            prescanWidth: map.imageWidth,
-            prescanHeight: map.imageHeight,
-            fingerImageWidth: tip.imageWidth,
-            fingerImageHeight: tip.imageHeight,
-          );
-
-    return CellHitTest.hitTest(mapped, map, skipEmpty: true)?.id;
-  }
-
   Future<void> _dispatch(List<HandsFreeAction> actions) async {
     for (final a in actions) {
       if (!mounted || _isExiting) return;
@@ -238,7 +238,10 @@ class _LearningScreenState extends State<LearningScreen> {
           setState(() => _statusLine = message);
           if (speech != null) await _voiceStatus(speech);
         case HandsFreeSpeak(:final text, :final sinhala):
-          if (sinhala) {
+          final replacement = SinhalaPrompts.sessionLine(text);
+          if (replacement != null) {
+            await widget.audioService.speakSinhala(replacement);
+          } else if (sinhala) {
             await widget.audioService.speakSinhala(text);
           } else {
             await widget.audioService.speak(text);
@@ -248,6 +251,7 @@ class _LearningScreenState extends State<LearningScreen> {
             :final intervalMs,
             :final kind
           ):
+          _commands.pause();
           // Not awaited: sampling must continue so a returning tip can abort.
           unawaited(_runCountdown(count, intervalMs, kind));
         case HandsFreeAbortCountdown():
@@ -272,11 +276,21 @@ class _LearningScreenState extends State<LearningScreen> {
     }
     _lastVoiced = text;
     _lastVoicedAt = now;
-    await widget.audioService.speak(text);
+    final sinhala = SinhalaPrompts.sessionLine(text) ??
+        (_isSinhalaScript(text) ? text : null);
+    if (sinhala != null) {
+      await widget.audioService.speakSinhala(sinhala);
+    } else {
+      debugPrint('[Learning] no Sinhala for "$text"');
+      await widget.audioService.speak(text);
+    }
   }
 
+  static bool _isSinhalaScript(String text) =>
+      RegExp('[\u0D80-\u0DFF]').hasMatch(text);
+
   Future<void> _voiceCaptureFailed() =>
-      _voiceStatus('Camera capture failed. Check the camera and try again.');
+      widget.audioService.speakSinhala(SinhalaPrompts.retryError);
 
   Future<void> _runCountdown(
     int count,
@@ -294,8 +308,20 @@ class _LearningScreenState extends State<LearningScreen> {
     await _dispatch(_session.onCountdownFinished(kind));
   }
 
+  /// Waits for an in-flight sample capture to return before a full capture:
+  /// the camera plugin rejects a second takePicture while one is pending.
+  /// Bounded, so a stuck sample cannot hold the round forever.
+  Future<void> _waitForSampleIdle() async {
+    final deadline = DateTime.now().add(const Duration(seconds: 3));
+    while (_sampleInFlight && DateTime.now().isBefore(deadline)) {
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    }
+  }
+
   Future<void> _autoPrescan() async {
     _session.pause();
+    _commands.pause();
+    await _waitForSampleIdle();
     setState(() {
       _busy = true;
       _statusLine = 'Scanning the page for Braille cells…';
@@ -318,6 +344,8 @@ class _LearningScreenState extends State<LearningScreen> {
 
   Future<void> _autoFinger() async {
     _session.pause();
+    _commands.pause();
+    await _waitForSampleIdle();
     setState(() {
       _busy = true;
       _statusLine = 'Detecting fingertip…';
@@ -344,6 +372,8 @@ class _LearningScreenState extends State<LearningScreen> {
 
   Future<void> _autoSoftRescan() async {
     _session.pause();
+    _commands.pause();
+    await _waitForSampleIdle();
     _resultClearTimer?.cancel();
     setState(() {
       _busy = true;
@@ -370,15 +400,12 @@ class _LearningScreenState extends State<LearningScreen> {
         _busy = false;
         _statusLine = 'Finger still visible — refresh skipped';
       });
-      await _voiceStatus(
-        'Your finger is still on the page, so the old page map is kept.',
-      );
+      await _voiceStatus(SinhalaPrompts.fingerStillOnPage);
       await _dispatch(_session.onSoftRescanFinished(success: false));
       _session.resume();
       return;
     }
     final ok = await _runPrescanFromJpeg(jpeg, speakOnSuccess: false);
-    if (ok) _lastAlignH = null;
     await _dispatch(_session.onSoftRescanFinished(success: ok));
     _session.resume();
   }
@@ -424,7 +451,7 @@ class _LearningScreenState extends State<LearningScreen> {
         _busy = false;
         _statusLine = _camera.source?.lastError ?? 'Camera capture failed';
       });
-      await widget.audioService.speak('Capture failed. Try again.');
+      await widget.audioService.speakSinhala(SinhalaPrompts.retryError);
       return;
     }
     await _runPrescanFromJpeg(jpeg, speakOnSuccess: true);
@@ -442,7 +469,7 @@ class _LearningScreenState extends State<LearningScreen> {
         _busy = false;
         _statusLine = _camera.source?.lastError ?? 'Camera capture failed';
       });
-      await widget.audioService.speak('Capture failed. Try again.');
+      await widget.audioService.speakSinhala(SinhalaPrompts.retryError);
       return;
     }
     await _runFingerLookupFromJpeg(
@@ -486,11 +513,9 @@ class _LearningScreenState extends State<LearningScreen> {
         _statusLine =
             '${fixed.cells.length} cells found · place a finger, then $_captureHint';
       });
-      await _voiceStatus('Found ${fixed.cells.length} Braille cells.');
+      await _voiceStatus(SinhalaPrompts.cellsFound(fixed.cells.length));
       if (speakOnSuccess) {
-        await widget.audioService.speakSinhala(
-          'පිටුව ස්කෑන් කර අවසන්. දැන් ඔබේ ඇඟිල්ල අකුරක් මත තබන්න.',
-        );
+        await widget.audioService.speakSinhala(SinhalaPrompts.pageReady);
       }
       return true;
     } on PrescanUnavailableException catch (e) {
@@ -500,9 +525,7 @@ class _LearningScreenState extends State<LearningScreen> {
         _statusLine = e.message;
       });
       if (speakOnSuccess) {
-        await widget.audioService.speak(
-          'Page scan failed. Hold the page steady with good lighting and try again.',
-        );
+        await widget.audioService.speakSinhala(SinhalaPrompts.retryError);
       }
       return false;
     } catch (e) {
@@ -533,7 +556,7 @@ class _LearningScreenState extends State<LearningScreen> {
         _statusLine = 'No fingertip — tap on your finger tip on screen';
       });
       if (!allowTapFallback) {
-        await widget.audioService.speak('No fingertip detected. Try again.');
+        await widget.audioService.speakSinhala(SinhalaPrompts.retryError);
       }
       return null;
     }
@@ -554,13 +577,6 @@ class _LearningScreenState extends State<LearningScreen> {
       prescanJpeg: _prescanJpeg,
     );
 
-    // Cache a cheap similarity from tip→prescan for the next dwell samples.
-    if (result.hasHit) {
-      final dx = result.tipInPrescan.dx - tip.contactPoint.dx;
-      final dy = result.tipInPrescan.dy - tip.contactPoint.dy;
-      _lastAlignH = Homography([1, 0, dx, 0, 1, dy, 0, 0, 1]);
-    }
-
     if (!mounted) return null;
     setState(() {
       _fingerJpeg = jpeg;
@@ -579,32 +595,22 @@ class _LearningScreenState extends State<LearningScreen> {
         await widget.audioService.hapticLight();
       }
       final ch = result.headline;
-      if (ch == '—') {
-        await widget.audioService.speak(
-          'The detected cell is an indicator, not a standalone character.',
-        );
+      if (!isNameableSinhala(ch)) {
+        await widget.audioService.speakSinhala(SinhalaPrompts.notALetter);
       } else {
         final name = sinhalaLetterName(ch);
         await widget.audioService.speakSinhala(
           name.isEmpty ? ch : 'අක්ෂරය $name',
         );
       }
-      final dots = RegExp(r'[1-6]')
-          .allMatches(result.compactDots)
-          .map((m) => m.group(0))
-          .join(' ');
+      final dots = SinhalaPrompts.dots(result.compactDots);
       if (dots.isNotEmpty) {
-        await widget.audioService.speak('Dots $dots.');
+        await widget.audioService.speakSinhala(dots);
       }
       return result.cell?.id;
     }
 
-    await widget.audioService.speak(
-      result.alignMode.startsWith('scale')
-          ? 'No character found. The page is not aligned; hold the camera '
-              'the way you did for the page scan.'
-          : 'No character found under your finger.',
-    );
+    await widget.audioService.speakSinhala(SinhalaPrompts.retryError);
     return null;
   }
 
@@ -640,10 +646,40 @@ class _LearningScreenState extends State<LearningScreen> {
     );
   }
 
+  /// Commands are heard only while the learner is between letters or
+  /// hunting for the page — not during a prompt, countdown or capture.
+  bool _commandsCanListen() {
+    if (_isExiting || _busy || _session.paused) {
+      return false;
+    }
+    // With the glasses as a Bluetooth headset, starting the recogniser tears
+    // the headset audio link down and up, which drops the video feed the
+    // finger sampling reads from — the flow then stalls at the finger step.
+    // The frame button still captures.
+    if (_camera.usingGlasses) return false;
+    final phase = _session.phase;
+    return phase == HandsFreePhase.pageHunt ||
+        phase == HandsFreePhase.reading ||
+        phase == HandsFreePhase.cooldown;
+  }
+
+  Future<void> _onCommand(ScreenCommand command) async {
+    switch (command) {
+      case ScreenCommand.back:
+        await _exit();
+      case ScreenCommand.retry:
+        _rescan();
+      case ScreenCommand.capture:
+        await _onCapturePressed();
+      case ScreenCommand.help:
+        await widget.audioService.speakSinhala(SinhalaPrompts.learningHelp);
+    }
+  }
+
   void _rescan() {
     _countdownGen++;
     _resultClearTimer?.cancel();
-    _lastAlignH = null;
+    _tipDwell.lost();
     setState(() {
       _stage = _LearningStage.prescan;
       _prescanJpeg = null;
@@ -654,26 +690,27 @@ class _LearningScreenState extends State<LearningScreen> {
       _statusLine = null;
     });
     _session.resetToPageHunt();
-    widget.audioService.speak(
-      'Rescanning page. Clear the page for automatic scan, or capture manually.',
-    );
+    // Back to Stage 1.
+    widget.audioService.speakSinhala(SinhalaPrompts.prescan);
   }
 
   Future<void> _exit() async {
     if (_isExiting) return;
     setState(() => _isExiting = true);
+    _commands.stop();
     _countdownGen++;
     _handsFreeEnabled = false;
     _stopSampleLoop();
     _session.pause();
     await widget.audioService.stopSpeech();
     await widget.audioService.hapticLight();
-    await widget.audioService.speak('Returning to main menu.');
+    await widget.audioService.speakSinhala(SinhalaPrompts.returningHome);
     if (mounted) Navigator.pop(context);
   }
 
   @override
   void dispose() {
+    _commands.stop();
     _countdownGen++;
     _resultClearTimer?.cancel();
     _handsFreeEnabled = false;

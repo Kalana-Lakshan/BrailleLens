@@ -7,8 +7,10 @@ import '../services/bluetooth_service.dart';
 import '../widgets/glass_device_picker.dart';
 import '../theme/app_theme.dart';
 import '../utils/answer_match.dart';
+import '../utils/sinhala_prompts.dart';
 import 'learning_screen.dart';
 import 'model_check_screen.dart';
+import 'stt_test_screen.dart';
 import 'testing_screen.dart';
 
 /// Entry screen — accessible split-screen mode selector.
@@ -105,12 +107,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     await Future.delayed(const Duration(milliseconds: 700));
     if (!mounted) return;
 
-    await _audioService.speak(
-      'Welcome to BrailleLens. '
-      "Tap the left half of the screen for Learning Mode, "
-      "or the right half for Testing Mode. "
-      "You can also say 'Learning' or 'Testing'.",
-    );
+    await _audioService.speakSinhala(SinhalaPrompts.welcome);
+    if (!mounted) return;
+    await _audioService.speakSinhala(SinhalaPrompts.homeInstructions);
 
     _startVoiceCommandLoop();
   }
@@ -178,6 +177,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         await _navigateTo(mode);
         break;
       }
+      if (parseScreenCommand(command) == ScreenCommand.help) {
+        await _audioService.speakSinhala(SinhalaPrompts.homeInstructions);
+        if (!mounted || _navigating) break;
+      }
 
       // Brief gap before re-opening mic
       await Future.delayed(const Duration(milliseconds: 500));
@@ -214,12 +217,31 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       setState(() => _navigating = false);
       await Future.delayed(const Duration(milliseconds: 600));
       if (!mounted || _navigating) return;
-      await _audioService.speak(
-        "Back at main menu. Say 'Learning' or 'Testing', or tap a side.",
-      );
+      await _audioService.speakSinhala(SinhalaPrompts.homeInstructions);
       if (!mounted || _navigating) return;
       _startVoiceCommandLoop();
     }
+  }
+
+  /// STT bench screen. The voice-command loop holds the mic through Android's
+  /// recogniser, so it is stopped first — otherwise the bench records
+  /// near-silence while the two fight over the microphone.
+  Future<void> _openSttTest() async {
+    if (_navigating || !mounted) return;
+    setState(() => _navigating = true);
+    _audioService.stopListening();
+    await _audioService.stopSpeech();
+    if (!mounted) return;
+
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => SttTestScreen(audioService: _audioService),
+      ),
+    );
+
+    if (!mounted) return;
+    setState(() => _navigating = false);
+    _startVoiceCommandLoop();
   }
 
   // ── Dispose ───────────────────────────────────────────────────────────────────
@@ -318,6 +340,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               btState: _btState,
               btDevice: _btService.connectedDevice,
               onPickGlasses: _pickGlasses,
+              onOpenSttTest: _openSttTest,
             ),
           ),
 
@@ -474,10 +497,13 @@ class _StatusBar extends StatelessWidget {
   /// the target is large and does not need a separate button to hunt for.
   final VoidCallback onPickGlasses;
 
+  final VoidCallback onOpenSttTest;
+
   const _StatusBar({
     required this.isChecking,
     required this.btState,
     required this.onPickGlasses,
+    required this.onOpenSttTest,
     this.btDevice,
   });
 
@@ -506,6 +532,17 @@ class _StatusBar extends StatelessWidget {
               },
               child: const Text(
                 'ONNX',
+                style: TextStyle(
+                  color: AppTheme.primaryYellow,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1.0,
+                ),
+              ),
+            ),
+            TextButton(
+              onPressed: onOpenSttTest,
+              child: const Text(
+                'STT',
                 style: TextStyle(
                   color: AppTheme.primaryYellow,
                   fontWeight: FontWeight.bold,

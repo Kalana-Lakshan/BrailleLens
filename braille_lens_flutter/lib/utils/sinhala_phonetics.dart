@@ -53,7 +53,9 @@ bool _isCombiningMark(String ch) {
 ///
 /// Accepts the bare letter, its name, and the name with the recogniser's
 /// spacing or missing final consonant — CTC output routinely drops or splits
-/// a trailing syllable, and failing a learner for that would be wrong.
+/// a trailing syllable, and failing a learner for that would be wrong. Both
+/// sides go through [_normalise] first (Unicode composition, zero-width
+/// characters, homophones).
 bool sinhalaAnswerMatches(String? spoken, String character) {
   final said = _normalise(spoken);
   if (said.isEmpty) return false;
@@ -62,29 +64,112 @@ bool sinhalaAnswerMatches(String? spoken, String character) {
   if (ch.isEmpty) return false;
   final name = _normalise(sinhalaLetterName(character));
 
+  // CTC output sometimes splits a name into syllables ("ක යන්න").
+  final saidJoined = said.replaceAll(' ', '');
+
   for (final candidate in {ch, name}) {
     if (candidate.isEmpty) continue;
-    if (said == candidate) return true;
+    if (said == candidate || saidJoined == candidate) return true;
     // "කයන්න කයි" or "අකුර කයන්න" — the answer is in there as a word.
     if (said.split(' ').contains(candidate)) return true;
   }
 
-  // Name said without its ending, e.g. "කයන" or "කය" for "කයන්න".
+  // Name said without its ending, e.g. "කයන" for "කයන්න".
   if (name.length > 2 && said.length >= ch.length) {
     final stem = name.substring(0, name.length - 2);
-    if (said == stem || said.split(' ').contains(stem)) return true;
+    if (said == stem ||
+        saidJoined == stem ||
+        said.split(' ').contains(stem)) {
+      return true;
+    }
+  }
+
+  // The MMS recogniser gets the consonants of a letter name right but not
+  // its vowel signs, and runs on into a suffix: "කයන්න" comes back as
+  // "කියන්නෙක්", "හයන්න" as "හොයන්නෙක්", "තයන්න" as "තියෙන්ව". Comparing
+  // consonant skeletons from the start of a word accepts those while still
+  // telling letters apart — the letter itself is the first consonant, and
+  // that must match. The bare letter is never prefix-matched: every word
+  // starting with ක would pass.
+  final nameSkeleton = _skeleton(name);
+  if (nameSkeleton.length >= 3) {
+    final stemSkeleton = nameSkeleton.substring(0, nameSkeleton.length - 1);
+    for (final word in {...said.split(' '), saidJoined}) {
+      if (_skeleton(word).startsWith(stemSkeleton)) return true;
+    }
   }
   return false;
 }
 
-/// Lowercases, strips punctuation and collapses whitespace. Zero-width joiners
-/// matter in Sinhala rendering but not in comparison, so they go too.
+/// [value] with dependent vowel signs and the virama removed, leaving the
+/// consonants and independent vowels: "කියන්නෙක්" → "කයනනක".
+String _skeleton(String value) =>
+    value.replaceAll(RegExp('[\u0DCA-\u0DDF\u0DF2\u0DF3]'), '');
+
+/// True when [a] and [b] are the same letter or two letters that sound the
+/// same in everyday speech (ණ/න, ළ/ල, ශ/ෂ/ස, aspirated/plain pairs) — the
+/// comparison Testing Mode uses on the speech classifier's answer.
+bool sinhalaLettersSoundAlike(String a, String b) {
+  final x = _normalise(a);
+  return x.isNotEmpty && x == _normalise(b);
+}
+
+/// Canonical compositions (Unicode NFC) for the split vowel signs. Dart has
+/// no built-in normaliser, and a CTC vocabulary can emit either form: "ො" may
+/// arrive as "ෙ" + "ා". The three-mark rule runs first, so a fully split
+/// "ෝ" composes in one step instead of stopping at "ො" + "්".
+const List<(String, String)> _compositions = [
+  ('\u0DD9\u0DCF\u0DCA', '\u0DDD'), // e-sign + aa-sign + virama -> oo-sign
+  ('\u0DDC\u0DCA', '\u0DDD'), // o-sign + virama -> oo-sign
+  ('\u0DD9\u0DCF', '\u0DDC'), // e-sign + aa-sign -> o-sign
+  ('\u0DD9\u0DCA', '\u0DDA'), // e-sign + virama -> ee-sign
+  ('\u0DD9\u0DDF', '\u0DDE'), // e-sign + gayanukitta -> au-sign
+];
+
+/// Letters a speaker says the same way in everyday Sinhala, folded onto one
+/// representative. The recogniser only hears sound, so without this a learner
+/// who correctly names ණ ("නයන්න") or ඛ ("කයන්න") would be marked wrong for
+/// a distinction no microphone can pick up. Applied to both sides of the
+/// comparison. Distinct-sounding pairs (e.g. ග/ඟ, ද/ඳ) are deliberately left
+/// alone.
+const Map<String, String> _homophones = {
+  'ණ': 'න', // retroflex ණ ≈ dental න
+  'ළ': 'ල', // retroflex ළ ≈ dental ල
+  'ශ': 'ස', 'ෂ': 'ස', // sibilants
+  // Aspirates (mahaprana) ≈ their unaspirated pairs in speech.
+  'ඛ': 'ක', 'ඝ': 'ග', 'ඡ': 'ච', 'ඣ': 'ජ', 'ඨ': 'ට',
+  'ඪ': 'ඩ', 'ථ': 'ත', 'ධ': 'ද', 'ඵ': 'ප', 'භ': 'බ',
+};
+
+/// Comparison form: composes split vowel signs, drops zero-width and
+/// formatting characters (they matter in rendering, not meaning), folds
+/// homophones, strips punctuation, collapses whitespace and lowercases any
+/// Latin the recogniser let through.
 String _normalise(String? value) {
   if (value == null) return '';
-  return value
-      .replaceAll(RegExp(r'[‌‍]'), '')
+  var s = value
+      // ZWNJ, ZWJ, zero-width space, BOM, soft hyphen.
+      .replaceAll(RegExp('[\u200B-\u200D\uFEFF\u00AD]'), '');
+  for (final (from, to) in _compositions) {
+    s = s.replaceAll(from, to);
+  }
+  final folded = StringBuffer();
+  for (final rune in s.runes) {
+    final c = String.fromCharCode(rune);
+    folded.write(_homophones[c] ?? c);
+  }
+  return folded
+      .toString()
       .replaceAll(RegExp(r'[^඀-෿\sa-zA-Z0-9]'), ' ')
       .replaceAll(RegExp(r'\s+'), ' ')
       .trim()
       .toLowerCase();
+}
+
+/// True when [character] is something a learner can be asked to name aloud:
+/// Sinhala script, not an indicator label ("[IND-A]") or a blank cell.
+bool isNameableSinhala(String character) {
+  final ch = character.trim();
+  if (ch.isEmpty || ch.startsWith('[')) return false;
+  return RegExp(r'[඀-෿]').hasMatch(ch);
 }
