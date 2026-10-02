@@ -46,12 +46,12 @@ flutter:
 
   assets:
     - assets/audio/
-    # Whole directory rather than one line per file: the speech model
-    # (sinhala_mms_ctc.onnx + vocab.json) is not in the repo yet, and naming a
-    # missing file here fails the build. Everything present is bundled:
+    # Whole directory rather than one line per file, so swapping a model in
+    # or out never fails the build. Everything present is bundled:
     #   braille_cell_yolo26n[_mobile].onnx - page cell detector
     #   braille_cnn.onnx + braille_labels.json - cell classifier + Sinhala map
     #   fingertip_braille_yolo26n[_mobile].onnx - fingertip detector
-    #   sinhala_mms_ctc.onnx + vocab.json - speech recognition (to be added)
+    #   sinhala_mms_small_int8.onnx + letters.json - spoken-letter
+    #     classifier (STT_model_training_small.ipynb)
     - assets/models/
     - assets/samples/

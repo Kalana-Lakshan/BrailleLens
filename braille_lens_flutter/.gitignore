@@ -43,3 +43,6 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Speech model is 317 MB, over GitHub's 100 MB file limit; copy it in locally.
+assets/models/sinhala_mms_ctc_quantized.onnx

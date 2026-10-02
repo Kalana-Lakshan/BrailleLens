@@ -1,66 +1,73 @@
 import 'dart:convert';
-import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:onnxruntime/onnxruntime.dart';
 
-/// On-device Sinhala speech recognition: a wav2vec2/MMS-style CTC model
-/// exported to ONNX.
+import '../utils/letter_ctc.dart';
+
+/// The classifier's answer for one recording, with how long it took.
+class SpokenLetter {
+  final LetterGuess guess;
+  final Duration elapsed;
+
+  const SpokenLetter(this.guess, this.elapsed);
+
+  String get letter => guess.best.letter;
+  double get confidence => guess.best.confidence;
+  bool get heard => guess.heard;
+}
+
+/// On-device recognition of a spoken Sinhala letter.
 ///
-/// Contract (see `assets/models/`):
-/// * input  `input_values`  float32 `[1, samples]` — 16 kHz mono waveform,
-///   normalised to zero mean and unit variance, which is what the wav2vec2
-///   feature extractor does and what the model was trained on.
-/// * output `logits` float32 `[1, frames, vocab]` — vocab is 79 for the
-///   Sinhala MMS head; the size is read from the model output rather than
-///   hard-coded, so a re-export with a different vocabulary still works.
+/// Model: `sinhala_mms_small_int8.onnx` (~51 MB) — MMS-300M cut down to its
+/// first transformer layers, fine-tuned on OpenSLR 30 Sinhala and int8
+/// quantised (STT_model_training_small.ipynb).
+/// * input  `input_values` float32 `[1, samples]`, 16 kHz mono
+/// * output `logits` float32 `[1, frames, 79]`, CTC over Sinhala tokens
 ///
-/// The model is not in the repo yet. Every entry point fails soft:
-/// [isAvailable] stays false and [transcribe] returns null, so Testing mode
-/// can say "speech model missing" instead of crashing.
+/// It is used as a closed-set classifier, not a transcriber: `letters.json`
+/// lists the 57 letters that may be answered and their token ids, and
+/// [classify] returns the most likely of them (see `utils/letter_ctc.dart`).
+/// The learner therefore says the letter itself ("ක"), not its name.
+///
+/// Every entry point fails soft: with the model or `letters.json` missing,
+/// [isAvailable] stays false and [classify] returns null, so Testing Mode
+/// can read the answer out instead of crashing.
 class SttOnnxService {
   SttOnnxService._();
 
-  /// One session for the app: the model is tens of MB and loading it per
-  /// screen would both stall the UI and leak native memory.
+  /// One session for the app: loading tens of MB per screen would stall the
+  /// UI and leak native memory.
   static final SttOnnxService instance = SttOnnxService._();
 
   /// Sample rate the model expects. The glasses mic and the phone recorder
   /// are both configured to match, so no resampling is needed.
   static const int sampleRate = 16000;
 
-  static const List<String> _modelAssets = [
-    'assets/models/sinhala_mms_ctc.onnx',
-    'assets/models/sinhala_stt.onnx',
-  ];
-  static const String _vocabAsset = 'assets/models/vocab.json';
-
-  /// Tokens that never appear in a transcript.
-  static const Set<String> _specialTokens = {
-    '<pad>',
-    '<s>',
-    '</s>',
-    '<unk>',
-  };
-
-  /// wav2vec2 writes word boundaries as this token.
-  static const String _wordDelimiter = '|';
+  static const String _modelAsset = 'assets/models/sinhala_mms_small_int8.onnx';
+  static const String _lettersAsset = 'assets/models/letters.json';
 
   OrtSession? _session;
-  List<String> _idToToken = const [];
+  List<String> _letters = const [];
+  List<int> _tokenIds = const [];
   int _blankId = 0;
-  String? _loadedAsset;
   String? _lastError;
   bool _ready = false;
   Future<bool>? _loading;
 
   bool get isAvailable => _ready;
-  String? get loadedAsset => _loadedAsset;
+  String? get loadedAsset => _ready ? _modelAsset : null;
   String? get lastError => _lastError;
-  int get vocabSize => _idToToken.length;
 
-  /// Loads model + vocabulary once. Concurrent callers share one load.
+  /// The letters the model can answer with, in `letters.json` order.
+  List<String> get letters => _letters;
+
+  /// Whether [letter] is one the model can recognise. Signs and indicators
+  /// (ං, ඃ, vowel signs) are not, so they cannot be quizzed by voice.
+  bool canRecognise(String letter) => _letters.contains(letter.trim());
+
+  /// Loads the model and letter table once. Concurrent callers share a load.
   Future<bool> initialize() {
     if (_ready) return Future.value(true);
     return _loading ??= _load().whenComplete(() => _loading = null);
@@ -68,24 +75,26 @@ class SttOnnxService {
 
   Future<bool> _load() async {
     try {
-      if (!await _loadVocab()) return false;
+      if (!await _loadLetters()) return false;
 
-      for (final asset in _modelAssets) {
-        final bytes = await _tryLoadAsset(asset);
-        if (bytes == null) continue;
-        OrtEnv.instance.init();
-        _session?.release();
-        _session = OrtSession.fromBuffer(bytes, OrtSessionOptions());
-        _loadedAsset = asset;
-        _lastError = null;
-        _ready = true;
-        debugPrint('[SttOnnx] loaded $asset · vocab ${_idToToken.length}');
-        return true;
+      final ByteData data;
+      try {
+        data = await rootBundle.load(_modelAsset);
+      } catch (_) {
+        _lastError = 'No speech model bundled — add $_modelAsset';
+        debugPrint('[SttOnnx] ${_lastError!}');
+        return false;
       }
-      _lastError =
-          'No speech model bundled — add ${_modelAssets.first} to assets/models/';
-      debugPrint('[SttOnnx] ${_lastError!}');
-      return false;
+      OrtEnv.instance.init();
+      _session?.release();
+      _session = OrtSession.fromBuffer(
+        data.buffer.asUint8List(),
+        OrtSessionOptions(),
+      );
+      _lastError = null;
+      _ready = true;
+      debugPrint('[SttOnnx] loaded $_modelAsset · ${_letters.length} letters');
+      return true;
     } catch (e) {
       _lastError = e.toString();
       debugPrint('[SttOnnx] load failed: $e');
@@ -93,93 +102,88 @@ class SttOnnxService {
     }
   }
 
-  Future<Uint8List?> _tryLoadAsset(String asset) async {
+  /// `letters.json`: `{"letters": [...], "token_ids": [...], "blank_id": n}`,
+  /// written by the training notebook alongside the model.
+  Future<bool> _loadLetters() async {
     try {
-      final data = await rootBundle.load(asset);
-      return data.buffer.asUint8List();
-    } catch (_) {
-      return null; // not bundled
-    }
-  }
-
-  /// `vocab.json` is HuggingFace's `{"token": id}` map; inverted here into an
-  /// id-indexed table so decoding is a lookup rather than a search.
-  Future<bool> _loadVocab() async {
-    try {
-      final raw = await rootBundle.loadString(_vocabAsset);
-      final decoded = jsonDecode(raw);
-
-      final Map<String, int> tokenToId;
-      if (decoded is Map) {
-        tokenToId = decoded.map(
-          (k, v) => MapEntry(k.toString(), (v as num).toInt()),
-        );
-      } else if (decoded is List) {
-        // Alternative export: a plain id-ordered list of tokens.
-        tokenToId = {
-          for (var i = 0; i < decoded.length; i++) decoded[i].toString(): i,
-        };
-      } else {
-        _lastError = 'vocab.json is neither an object nor a list';
+      final decoded = jsonDecode(await rootBundle.loadString(_lettersAsset));
+      final letters = (decoded['letters'] as List).cast<String>();
+      final ids = (decoded['token_ids'] as List)
+          .map((v) => (v as num).toInt())
+          .toList();
+      if (letters.isEmpty || letters.length != ids.length) {
+        _lastError = 'letters.json: ${letters.length} letters but '
+            '${ids.length} token ids';
+        debugPrint('[SttOnnx] ${_lastError!}');
         return false;
       }
-      if (tokenToId.isEmpty) {
-        _lastError = 'vocab.json is empty';
-        return false;
-      }
-
-      final size = tokenToId.values.reduce(math.max) + 1;
-      final table = List<String>.filled(size, '');
-      tokenToId.forEach((token, id) {
-        if (id >= 0 && id < size) table[id] = token;
-      });
-      _idToToken = table;
-      // CTC blank is <pad> in wav2vec2 exports; id 0 if the model names it
-      // something else.
-      _blankId = tokenToId['<pad>'] ?? tokenToId['<blank>'] ?? 0;
+      _letters = List.unmodifiable(letters);
+      _tokenIds = List.unmodifiable(ids);
+      _blankId = (decoded['blank_id'] as num).toInt();
       return true;
     } catch (e) {
-      _lastError = 'vocab.json missing or unreadable: $e';
+      _lastError = 'letters.json missing or unreadable: $e';
       debugPrint('[SttOnnx] ${_lastError!}');
       return false;
     }
   }
 
-  /// Transcribes 16 kHz mono [samples] in [-1, 1]. Returns null when the
-  /// model is unavailable or the audio is too short to decode.
-  Future<String?> transcribe(Float32List samples) async {
+  /// Classifies 16 kHz mono [samples] in [-1, 1] as one of [letters].
+  /// Null when the model is unavailable or the clip holds no usable sound.
+  Future<SpokenLetter?> classify(Float32List samples) async {
     if (!_ready && !await initialize()) return null;
     final session = _session;
     if (session == null) return null;
 
-    // Under ~0.2 s there is nothing for the CTC head to align to.
-    if (samples.length < sampleRate ~/ 5) {
-      debugPrint('[SttOnnx] ${samples.length} samples is too short');
+    // Feed check: [-1, 1] floats with real speech peaking around 0.05-0.9. A
+    // peak near 0 is silence; above 1 means the PCM was not scaled.
+    var lo = 0.0, hi = 0.0;
+    for (final s in samples) {
+      if (s < lo) lo = s;
+      if (s > hi) hi = s;
+    }
+    final clip = prepareLetterClip(samples);
+    debugPrint('[SttOnnx] input ${samples.length} samples '
+        'min=${lo.toStringAsFixed(3)} max=${hi.toStringAsFixed(3)} '
+        '-> ${clip.length} after trim+pad');
+
+    // Under ~50 ms of sound there is nothing for the CTC head to align to.
+    if (clip.length < 2 * edgePaddingSamples + sampleRate ~/ 20) {
+      debugPrint('[SttOnnx] clip too short to classify');
       return null;
     }
 
-    final normalised = _zeroMeanUnitVariance(samples);
     OrtValueTensor? input;
     List<OrtValue?>? outputs;
     OrtRunOptions? runOptions;
     try {
-      input = OrtValueTensor.createTensorWithDataList(
-        normalised,
-        [1, normalised.length],
-      );
+      input = OrtValueTensor.createTensorWithDataList(clip, [1, clip.length]);
       runOptions = OrtRunOptions();
-      final inputName =
-          session.inputNames.isNotEmpty ? session.inputNames.first : 'input_values';
+      final inputName = session.inputNames.isNotEmpty
+          ? session.inputNames.first
+          : 'input_values';
+      final watch = Stopwatch()..start();
+      // runAsync executes the model off the UI isolate.
       outputs = await session.runAsync(runOptions, {inputName: input});
       if (outputs == null || outputs.isEmpty) return null;
 
-      final logits = outputs.first?.value;
-      final ids = _argmaxPerFrame(logits);
-      if (ids == null) {
-        debugPrint('[SttOnnx] unexpected logits shape: ${logits.runtimeType}');
+      final frames = _frames(outputs.first?.value);
+      if (frames == null) {
+        debugPrint('[SttOnnx] unexpected logits shape');
         return null;
       }
-      return decodeGreedy(ids);
+      final guess = classifyLetter(
+        logits: frames,
+        letters: _letters,
+        tokenIds: _tokenIds,
+        blankId: _blankId,
+      );
+      watch.stop();
+      debugPrint('[SttOnnx] logits [1, ${frames.length}, '
+          '${frames.isEmpty ? 0 : frames.first.length}] in '
+          '${watch.elapsedMilliseconds} ms -> '
+          '${guess.ranked.take(3).join(', ')} heard=${guess.heard}');
+      return SpokenLetter(guess, watch.elapsed);
     } catch (e) {
       _lastError = e.toString();
       debugPrint('[SttOnnx] inference failed: $e');
@@ -195,104 +199,15 @@ class SttOnnxService {
     }
   }
 
-  /// wav2vec2's feature extractor normalisation. A waveform left at raw
-  /// amplitude decodes to noise, so this is not optional.
-  static Float32List _zeroMeanUnitVariance(Float32List samples) {
-    if (samples.isEmpty) return samples;
-    var sum = 0.0;
-    for (final s in samples) {
-      sum += s;
-    }
-    final mean = sum / samples.length;
-
-    var sqSum = 0.0;
-    for (final s in samples) {
-      final d = s - mean;
-      sqSum += d * d;
-    }
-    // +1e-7 mirrors HuggingFace's epsilon and avoids dividing by zero on
-    // digital silence.
-    final std = math.sqrt(sqSum / samples.length) + 1e-7;
-
-    final out = Float32List(samples.length);
-    for (var i = 0; i < samples.length; i++) {
-      out[i] = (samples[i] - mean) / std;
-    }
-    return out;
-  }
-
-  /// `[1, frames, vocab]` logits → the winning token id per frame.
-  ///
-  /// onnxruntime hands back nested lists, but a flat list shows up too
-  /// depending on the export, so both are handled.
-  List<int>? _argmaxPerFrame(dynamic logits) {
+  /// `[1, frames, vocab]` nested lists → `[frames][vocab]` doubles.
+  static List<List<double>>? _frames(dynamic logits) {
     if (logits is! List || logits.isEmpty) return null;
-
-    // [1, frames, vocab]
     final batch = logits.first;
-    if (batch is List && batch.isNotEmpty && batch.first is List) {
-      final ids = <int>[];
-      for (final frame in batch) {
-        ids.add(_argmax((frame as List).cast<num>()));
-      }
-      return ids;
-    }
-
-    // [1, frames * vocab] flattened.
-    if (batch is List && batch.isNotEmpty && batch.first is num) {
-      final flat = batch.cast<num>();
-      final vocab = _idToToken.length;
-      if (vocab == 0 || flat.length % vocab != 0) return null;
-      final ids = <int>[];
-      for (var f = 0; f < flat.length; f += vocab) {
-        ids.add(_argmax(flat.sublist(f, f + vocab)));
-      }
-      return ids;
-    }
-    return null;
-  }
-
-  static int _argmax(List<num> row) {
-    var best = 0;
-    var bestValue = double.negativeInfinity;
-    for (var i = 0; i < row.length; i++) {
-      final v = row[i].toDouble();
-      if (v > bestValue) {
-        bestValue = v;
-        best = i;
-      }
-    }
-    return best;
-  }
-
-  /// CTC greedy decode: collapse runs of the same id, drop the blank, map the
-  /// rest through the vocabulary, turn `|` into a space and drop the special
-  /// tokens. Exposed for unit tests, which need no model.
-  @visibleForTesting
-  String decodeGreedy(List<int> ids) {
-    final buffer = StringBuffer();
-    var previous = -1;
-
-    for (final id in ids) {
-      // Repeats of a token within one run are the same emission.
-      if (id == previous) continue;
-      previous = id;
-      if (id == _blankId) continue;
-      if (id < 0 || id >= _idToToken.length) continue;
-
-      final token = _idToToken[id];
-      if (token.isEmpty || _specialTokens.contains(token)) continue;
-      buffer.write(token == _wordDelimiter ? ' ' : token);
-    }
-
-    return buffer.toString().replaceAll(RegExp(r'\s+'), ' ').trim();
-  }
-
-  /// Test seam: lets the decoder be exercised without an ONNX model.
-  @visibleForTesting
-  void loadVocabForTest(List<String> idToToken, {int blankId = 0}) {
-    _idToToken = idToToken;
-    _blankId = blankId;
+    if (batch is! List || batch.isEmpty || batch.first is! List) return null;
+    return [
+      for (final frame in batch)
+        [for (final v in frame as List) (v as num).toDouble()],
+    ];
   }
 
   void dispose() {
