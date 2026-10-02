@@ -82,3 +82,36 @@ bool spokenContainsStopKeyword(String? spoken) {
       .where((t) => t.isNotEmpty);
   return tokens.contains('stop');
 }
+
+/// In-screen voice commands for Learning and Testing.
+enum ScreenCommand { back, retry, help, capture }
+
+/// English command words, matched as whole words so the app's own prompts
+/// ("Ayeth try karanna", "Refresh cancelled") cannot trigger one.
+const Map<String, ScreenCommand> _screenCommandWords = {
+  'back': ScreenCommand.back,
+  'home': ScreenCommand.back,
+  'menu': ScreenCommand.back,
+  'retry': ScreenCommand.retry,
+  'rescan': ScreenCommand.retry,
+  'restart': ScreenCommand.retry,
+  'help': ScreenCommand.help,
+  'capture': ScreenCommand.capture,
+};
+
+/// The command in [spoken], or null. The recogniser's close mishearings of
+/// the short words ("bak", "re try") are folded in too.
+ScreenCommand? parseScreenCommand(String? spoken) {
+  if (spoken == null) return null;
+  final text = spoken
+      .toLowerCase()
+      .replaceAll(RegExp(r'[^a-z\s]'), ' ')
+      .replaceAllMapped(RegExp(r'\bre\s+(try|scan)\b'), (m) => 're${m[1]}')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+  for (final word in text.split(' ')) {
+    final hit = _screenCommandWords[word == 'bak' ? 'back' : word];
+    if (hit != null) return hit;
+  }
+  return null;
+}
