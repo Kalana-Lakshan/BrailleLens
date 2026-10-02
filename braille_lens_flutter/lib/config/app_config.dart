@@ -47,4 +47,17 @@ class AppConfig {
 
   static const String cellDetectorOnnxFallbackAsset =
       'assets/models/braille_cell_yolo26n_degraded.onnx';
+
+  /// Minimum box score for [cellDetectorOnnxAsset]. Belongs with the model,
+  /// not the detector code: scores are calibrated per export.
+  ///
+  /// The degraded model's raw head scores lower than the old end-to-end one,
+  /// so the old 0.50 threw most cells away — on live phone frames all of them
+  /// (page scan found 0 cells in both modes). On the 24 annotated Gold pages
+  /// (5,875 cells): 0.50 → P 0.96 / R 0.41; 0.25 → P 0.74 / R 0.75 (F1 0.747,
+  /// vs 0.52 at best for the old model). 0.25 is also what the model's own
+  /// meta.json specifies, and phone frames score lower still, so recall
+  /// matters more than the last few points of precision.
+  /// If reverting to `braille_cell_yolo26n[_mobile].onnx`, set this to 0.50.
+  static const double cellDetectorConfThreshold = 0.25;
 }

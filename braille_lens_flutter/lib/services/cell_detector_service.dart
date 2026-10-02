@@ -28,7 +28,7 @@ class CellDetectorService {
   bool _ready = false;
 
   static const int _imgsz = 1280;
-  static const double _confThreshold = 0.50;
+  static const double _confThreshold = AppConfig.cellDetectorConfThreshold;
   static const double _iouThreshold = 0.40;
 
   bool get isReady => _ready;
@@ -242,7 +242,15 @@ class CellDetectorService {
     final scale = min(size / src.width, size / src.height);
     final nw = (src.width * scale).round();
     final nh = (src.height * scale).round();
-    final resized = img.copyResize(src, width: nw, height: nh);
+    // Linear, not the package's nearest-neighbour default: shrinking a phone
+    // frame by ~0.67 with nearest drops pixels out of small Braille dots
+    // (7-10 fewer cells per phone photo with the degraded model).
+    final resized = img.copyResize(
+      src,
+      width: nw,
+      height: nh,
+      interpolation: img.Interpolation.linear,
+    );
     final canvas = img.Image(width: size, height: size);
     img.fill(canvas, color: img.ColorRgb8(114, 114, 114));
     final padX = ((size - nw) / 2).round();
