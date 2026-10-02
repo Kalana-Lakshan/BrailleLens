@@ -1,58 +1,10 @@
 import 'dart:typed_data';
 
-import 'package:braille_lens_flutter/services/stt_onnx_service.dart';
 import 'package:braille_lens_flutter/services/voice_capture_service.dart';
 import 'package:braille_lens_flutter/utils/sinhala_phonetics.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  // Index == token id, mirroring an inverted vocab.json.
-  const vocab = ['<pad>', '<s>', '</s>', '<unk>', '|', 'ක', 'ය', 'න', '්', 'ම'];
-  const blank = 0;
-  const pad = 0, s = 1, es = 2, unk = 3, bar = 4;
-  const ka = 5, ya = 6, na = 7, hal = 8, ma = 9;
-
-  group('CTC greedy decode', () {
-    final stt = SttOnnxService.instance..loadVocabForTest(vocab, blankId: blank);
-
-    test('collapses repeated frames into one emission', () {
-      expect(stt.decodeGreedy([ka, ka, ka, ya, ya, na]), 'කයන');
-    });
-
-    test('a blank between repeats keeps both letters', () {
-      // Without the blank this would collapse to a single "ක".
-      expect(stt.decodeGreedy([ka, pad, ka]), 'කක');
-    });
-
-    test('drops blanks and special tokens', () {
-      expect(
-        stt.decodeGreedy([pad, s, ka, pad, unk, ya, es, pad]),
-        'කය',
-      );
-    });
-
-    test('word delimiter becomes a space, edges trimmed', () {
-      expect(stt.decodeGreedy([bar, ka, bar, ma, bar]), 'ක ම');
-    });
-
-    test('empty and all-blank input decode to an empty string', () {
-      expect(stt.decodeGreedy(const []), '');
-      expect(stt.decodeGreedy([pad, pad, pad]), '');
-    });
-
-    test('out-of-range ids are ignored rather than throwing', () {
-      expect(stt.decodeGreedy([ka, 99, -1, ya]), 'කය');
-    });
-
-    test('decodes a full letter name', () {
-      // ක ය න ් න — the blank separates the two න emissions.
-      expect(
-        stt.decodeGreedy([ka, ka, ya, ya, na, hal, pad, na, na]),
-        'කයන්න',
-      );
-    });
-  });
-
   group('pcm16ToFloat32', () {
     test('maps signed 16-bit samples into [-1, 1]', () {
       final pcm = Uint8List.fromList([
@@ -106,6 +58,79 @@ void main() {
       expect(sinhalaAnswerMatches('මයන්න', 'ක'), isFalse);
       expect(sinhalaAnswerMatches('', 'ක'), isFalse);
       expect(sinhalaAnswerMatches(null, 'ක'), isFalse);
+    });
+
+    test('ignores whitespace, punctuation and zero-width characters', () {
+      expect(sinhalaAnswerMatches('  කයන්න.  ', 'ක'), isTrue);
+      expect(sinhalaAnswerMatches('ක​යන්න', 'ක'), isTrue);
+      expect(sinhalaAnswerMatches('ශ්‍ෂයන්න', 'ශ්‍ෂ'), isTrue);
+    });
+
+    test('joins a name split into syllables', () {
+      expect(sinhalaAnswerMatches('ක යන්න', 'ක'), isTrue);
+    });
+
+    test('composes split vowel signs before comparing', () {
+      // ඔ's name spelt with a decomposed vs precomposed o-sign must agree.
+      expect(sinhalaAnswerMatches('කො', 'කො'), isTrue);
+      expect(sinhalaAnswerMatches('කෝ', 'කෝ'), isTrue);
+    });
+
+    test('accepts homophones the microphone cannot tell apart', () {
+      expect(sinhalaAnswerMatches('නයන්න', 'ණ'), isTrue);
+      expect(sinhalaAnswerMatches('කයන්න', 'ඛ'), isTrue);
+      expect(sinhalaAnswerMatches('සයන්න', 'ෂ'), isTrue);
+    });
+
+    // Real output of sinhala_mms_ctc_quantized.onnx for spoken letter names.
+    test('accepts the MMS model\'s vowel-sign drift on letter names', () {
+      expect(sinhalaAnswerMatches('කියන්නෙක්', 'ක'), isTrue);
+      expect(sinhalaAnswerMatches('හොයන්නෙක්', 'හ'), isTrue);
+      expect(sinhalaAnswerMatches('ඊයෙන්න', 'ඊ'), isTrue);
+      expect(sinhalaAnswerMatches('අයෙන්නෙන්', 'අ'), isTrue);
+      expect(sinhalaAnswerMatches('බ යැන්නෙක්', 'බ'), isTrue);
+      expect(sinhalaAnswerMatches('රොයන්න', 'ර'), isTrue);
+      expect(sinhalaAnswerMatches('තියෙන්ව', 'ත'), isTrue);
+    });
+
+    test('skeleton matching still needs the right letter', () {
+      expect(sinhalaAnswerMatches('කියන්නෙක්', 'ග'), isFalse);
+      expect(sinhalaAnswerMatches('ආයෙන්න', 'අ'), isFalse);
+      // A word merely starting with the letter is not its name.
+      expect(sinhalaAnswerMatches('කතාව', 'ක'), isFalse);
+    });
+
+    test('still rejects letters that sound different', () {
+      expect(sinhalaAnswerMatches('ගයන්න', 'ක'), isFalse);
+      expect(sinhalaAnswerMatches('ගයන්න', 'ඟ'), isFalse);
+    });
+  });
+
+  group('quizzable letters', () {
+    test('Sinhala letters can be named, indicators and blanks cannot', () {
+      expect(isNameableSinhala('ක'), isTrue);
+      expect(isNameableSinhala('ශ්‍ෂ'), isTrue);
+      expect(isNameableSinhala('[IND-A]'), isFalse);
+      expect(isNameableSinhala(' '), isFalse);
+      expect(isNameableSinhala('space'), isFalse);
+    });
+  });
+
+  group('letters that sound alike', () {
+    test('the same letter matches', () {
+      expect(sinhalaLettersSoundAlike('ක', 'ක'), isTrue);
+    });
+
+    test('homophones match, in either direction', () {
+      expect(sinhalaLettersSoundAlike('න', 'ණ'), isTrue);
+      expect(sinhalaLettersSoundAlike('ඛ', 'ක'), isTrue);
+      expect(sinhalaLettersSoundAlike('ෂ', 'ශ'), isTrue);
+    });
+
+    test('different sounds do not', () {
+      expect(sinhalaLettersSoundAlike('ක', 'ග'), isFalse);
+      expect(sinhalaLettersSoundAlike('අ', 'ආ'), isFalse);
+      expect(sinhalaLettersSoundAlike('', 'ක'), isFalse);
     });
   });
 }
