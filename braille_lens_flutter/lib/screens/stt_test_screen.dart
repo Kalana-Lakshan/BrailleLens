@@ -3,59 +3,82 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
+import '../services/audio_service.dart';
 import '../services/glass_device_service.dart';
 import '../services/stt_onnx_service.dart';
 import '../services/voice_capture_service.dart';
 import '../theme/app_theme.dart';
+import '../utils/letter_ctc.dart';
 import '../utils/sinhala_phonetics.dart';
 
-/// Bench screen for the on-device Sinhala STT model on its own: tap, speak,
-/// and see exactly what the model heard, character by character.
+/// Bench screen for measuring the spoken-letter classifier by hand: pick the
+/// letter you are about to say, tap, say it, and see what the model heard.
+/// A running tally gives the accuracy over everything said so far.
 ///
-/// Uses the same [VoiceCaptureService] + [SttOnnxService] path as Testing
-/// Mode, so a result here is what Testing Mode will score. The optional
-/// "expected" field runs Testing Mode's [sinhalaAnswerMatches] too.
+/// Uses the same [VoiceCaptureService] + [SttOnnxService.classify] path and
+/// the same right/wrong rule ([sinhalaLettersSoundAlike]) as Testing Mode, so
+/// the score here is the score Testing Mode would give.
 ///
 ///   flutter run -t lib/main_stt_test.dart
 class SttTestScreen extends StatefulWidget {
-  const SttTestScreen({super.key});
+  /// Plays the same mic-open / mic-close chimes as Testing Mode.
+  final AudioService audioService;
+
+  const SttTestScreen({super.key, required this.audioService});
 
   @override
   State<SttTestScreen> createState() => _SttTestScreenState();
 }
 
 class _Attempt {
-  final String text;
+  final String expected;
+
+  /// Null when nothing usable was heard.
+  final SpokenLetter? answer;
   final VoiceSource source;
   final double seconds;
   final double peak;
-  final int inferenceMs;
 
   const _Attempt({
-    required this.text,
+    required this.expected,
+    required this.answer,
     required this.source,
     required this.seconds,
     required this.peak,
-    required this.inferenceMs,
   });
+
+  bool get heard => answer != null;
+
+  /// Testing Mode's verdict.
+  bool get correct =>
+      heard && sinhalaLettersSoundAlike(answer!.letter, expected);
+
+  bool get inTopThree =>
+      heard &&
+      answer!.guess.ranked
+          .take(3)
+          .any((s) => sinhalaLettersSoundAlike(s.letter, expected));
 }
 
 class _SttTestScreenState extends State<SttTestScreen> {
   final SttOnnxService _stt = SttOnnxService.instance;
   final VoiceCaptureService _voice = VoiceCaptureService();
-  final TextEditingController _expected = TextEditingController();
   StreamSubscription<GlassButtonClicked>? _glassButtonSub;
 
   static const _durations = [2, 3, 5];
-  int _seconds = 3;
+  int _seconds = 2;
 
   bool _loading = true;
   bool _recording = false;
-  bool _decoding = false;
+  bool _classifying = false;
+
+  /// Move to the next letter after each attempt, to sweep the whole set.
+  bool _autoAdvance = true;
   String _status = 'Loading speech model…';
+  String? _expected;
   final List<_Attempt> _history = [];
 
-  bool get _busy => _loading || _recording || _decoding;
+  bool get _busy => _loading || _recording || _classifying;
 
   @override
   void initState() {
@@ -71,20 +94,24 @@ class _SttTestScreenState extends State<SttTestScreen> {
     if (!mounted) return;
     setState(() {
       _loading = false;
+      if (ok && _stt.letters.isNotEmpty) _expected = _stt.letters.first;
       _status = ok
-          ? '${_stt.loadedAsset?.split('/').last} · vocab ${_stt.vocabSize}'
-              ' · loaded in ${sw.elapsedMilliseconds} ms'
+          ? '${_stt.loadedAsset?.split('/').last} · ${_stt.letters.length} '
+              'letters · loaded in ${sw.elapsedMilliseconds} ms'
           : 'STT unavailable: ${_stt.lastError}';
     });
   }
 
   Future<void> _record() async {
-    if (_busy || !_stt.isAvailable) return;
+    final expected = _expected;
+    if (_busy || !_stt.isAvailable || expected == null) return;
     setState(() {
       _recording = true;
-      _status = 'Listening for $_seconds s — speak now';
+      _status = 'Say "$expected" now ($_seconds s)';
     });
+    await widget.audioService.playMicOpen();
     final capture = await _voice.record(duration: Duration(seconds: _seconds));
+    await widget.audioService.playMicClose();
     if (!mounted) return;
     if (!capture.hasAudio) {
       setState(() {
@@ -96,29 +123,30 @@ class _SttTestScreenState extends State<SttTestScreen> {
 
     setState(() {
       _recording = false;
-      _decoding = true;
-      _status = 'Transcribing…';
+      _classifying = true;
+      _status = 'Classifying…';
     });
-    final sw = Stopwatch()..start();
-    final text = await _stt.transcribe(capture.samples);
-    final ms = sw.elapsedMilliseconds;
+    final result = await _stt.classify(capture.samples);
     if (!mounted) return;
 
     setState(() {
-      _decoding = false;
+      _classifying = false;
       _history.insert(
         0,
         _Attempt(
-          text: text ?? '',
+          expected: expected,
+          // An unheard clip is counted separately, as Testing Mode does.
+          answer: (result != null && result.heard) ? result : null,
           source: capture.source,
           seconds: capture.samples.length / SttOnnxService.sampleRate,
           peak: _peak(capture.samples),
-          inferenceMs: ms,
         ),
       );
-      _status = text == null
-          ? 'Transcription failed: ${_stt.lastError ?? 'audio too short'}'
-          : 'Tap to speak again';
+      _status = 'Pick a letter and tap to speak';
+      if (_autoAdvance) {
+        final letters = _stt.letters;
+        _expected = letters[(letters.indexOf(expected) + 1) % letters.length];
+      }
     });
   }
 
@@ -137,7 +165,6 @@ class _SttTestScreenState extends State<SttTestScreen> {
   void dispose() {
     _glassButtonSub?.cancel();
     _voice.dispose();
-    _expected.dispose();
     // The STT session is app-wide and shared, so it is not disposed here.
     super.dispose();
   }
@@ -150,12 +177,12 @@ class _SttTestScreenState extends State<SttTestScreen> {
       appBar: AppBar(
         backgroundColor: Colors.black,
         foregroundColor: AppTheme.primaryYellow,
-        title: const Text('STT TEST'),
+        title: const Text('STT ACCURACY TEST'),
         actions: [
           if (_history.isNotEmpty)
             IconButton(
-              tooltip: 'Clear history',
-              icon: const Icon(Icons.delete_outline),
+              tooltip: 'Reset score',
+              icon: const Icon(Icons.restart_alt),
               onPressed: _busy ? null : () => setState(_history.clear),
             ),
         ],
@@ -169,32 +196,20 @@ class _SttTestScreenState extends State<SttTestScreen> {
               textAlign: TextAlign.center,
               style: const TextStyle(color: Colors.white54, fontSize: 12),
             ),
+            const SizedBox(height: 12),
+            _buildScore(),
+            const SizedBox(height: 12),
+            _buildResult(latest),
             const SizedBox(height: 16),
-            _buildTranscript(latest),
-            const SizedBox(height: 16),
-            if (latest != null && latest.text.isNotEmpty)
-              _buildCharacters(latest.text),
-            const SizedBox(height: 16),
-            _buildExpected(latest),
-            const SizedBox(height: 20),
             _buildControls(),
-            if (_history.length > 1) ...[
-              const SizedBox(height: 24),
-              const Text('EARLIER',
-                  style: TextStyle(
-                      color: Colors.white54,
-                      fontSize: 12,
-                      letterSpacing: 1.1)),
-              const SizedBox(height: 6),
-              for (final a in _history.skip(1))
-                ListTile(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                  title: Text(a.text.isEmpty ? '—' : a.text,
-                      style: const TextStyle(color: Colors.white, fontSize: 20)),
-                  subtitle: Text(_meta(a),
-                      style: const TextStyle(color: Colors.white38, fontSize: 11)),
-                ),
+            const SizedBox(height: 16),
+            _buildLetterPicker(),
+            if (_history.isNotEmpty) ...[
+              const SizedBox(height: 20),
+              _buildMistakes(),
+              const SizedBox(height: 16),
+              const _SectionLabel('ATTEMPTS'),
+              for (final a in _history) _buildAttemptRow(a),
             ],
           ],
         ),
@@ -202,121 +217,257 @@ class _SttTestScreenState extends State<SttTestScreen> {
     );
   }
 
-  String _meta(_Attempt a) =>
-      '${a.source.name} mic · ${a.seconds.toStringAsFixed(1)} s audio · '
-      'peak ${(a.peak * 100).round()}% · ${a.inferenceMs} ms';
+  static const _good = Color(0xFF00E5FF);
+  static const _bad = Color(0xFFFF5252);
 
-  Widget _buildTranscript(_Attempt? latest) {
+  Widget _buildScore() {
+    final heard = _history.where((a) => a.heard).toList();
+    final correct = heard.where((a) => a.correct).length;
+    final topThree = heard.where((a) => a.inTopThree).length;
+    final unheard = _history.length - heard.length;
+    String pct(int n, int of) =>
+        of == 0 ? '—' : '${(100 * n / of).round()}%';
+
+    Widget stat(String label, String value, {Color color = Colors.white}) =>
+        Expanded(
+          child: Column(
+            children: [
+              Text(value,
+                  style: TextStyle(
+                      color: color, fontSize: 22, fontWeight: FontWeight.bold)),
+              Text(label,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white54, fontSize: 11)),
+            ],
+          ),
+        );
+
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+      decoration: BoxDecoration(
+        color: Colors.white10,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          stat('correct', '$correct / ${heard.length}',
+              color: AppTheme.primaryYellow),
+          stat('accuracy', pct(correct, heard.length), color: _good),
+          stat('in top 3', pct(topThree, heard.length)),
+          stat('not heard', '$unheard'),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildResult(_Attempt? latest) {
+    final answer = latest?.answer;
+    final color = latest == null
+        ? AppTheme.primaryYellow
+        : (latest.correct ? _good : _bad);
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        border: Border.all(color: AppTheme.primaryYellow, width: 2),
+        border: Border.all(color: color, width: 2),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
         children: [
-          const Text('YOU SAID',
-              style: TextStyle(
-                  color: Colors.white70, fontSize: 12, letterSpacing: 1.1)),
-          const SizedBox(height: 6),
-          SelectableText(
-            latest == null ? '…' : (latest.text.isEmpty ? '(nothing recognised)' : latest.text),
-            textAlign: TextAlign.center,
+          Text(
+            latest == null ? 'MODEL HEARD' : 'YOU SAID ${latest.expected} · MODEL HEARD',
+            style: const TextStyle(
+                color: Colors.white70, fontSize: 12, letterSpacing: 1.1),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            latest == null ? '…' : (answer?.letter ?? 'nothing'),
             style: TextStyle(
-              color: AppTheme.primaryYellow,
-              fontSize: latest?.text.isNotEmpty == true ? 44 : 20,
+              color: color,
+              fontSize: answer == null ? 24 : 64,
               fontWeight: FontWeight.bold,
             ),
           ),
+          if (answer != null) ...[
+            Text(
+              latest!.correct ? '✓ CORRECT' : '✗ WRONG',
+              style: TextStyle(color: color, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            _buildRanking(answer.guess, latest.expected),
+          ],
           if (latest != null) ...[
             const SizedBox(height: 6),
-            Text(_meta(latest),
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  // A near-silent capture is the first thing to rule out.
-                  color: latest.peak < 0.02 ? const Color(0xFFFF5252) : Colors.white38,
-                  fontSize: 11,
-                )),
+            Text(
+              _meta(latest),
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                // A near-silent capture is the first thing to rule out.
+                color: latest.peak < 0.02 ? _bad : Colors.white38,
+                fontSize: 11,
+              ),
+            ),
           ],
         ],
       ),
     );
   }
 
-  /// One chip per code point, so combining vowel signs and the virama the
-  /// model emitted are visible rather than folded into the rendered syllable.
-  Widget _buildCharacters(String text) {
-    final chars = text.runes.map(String.fromCharCode).toList();
+  /// The model's five most likely letters with their share of the
+  /// probability; the expected letter is highlighted wherever it lands.
+  Widget _buildRanking(LetterGuess guess, String expected) {
     return Wrap(
       spacing: 6,
       runSpacing: 6,
       alignment: WrapAlignment.center,
       children: [
-        for (final ch in chars)
+        for (final s in guess.ranked.take(5))
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
             decoration: BoxDecoration(
-              color: Colors.white10,
+              color: sinhalaLettersSoundAlike(s.letter, expected)
+                  ? _good.withValues(alpha: 0.25)
+                  : Colors.white10,
               borderRadius: BorderRadius.circular(8),
             ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(ch == ' ' ? '␣' : ch,
-                    style: const TextStyle(color: Colors.white, fontSize: 26)),
-                Text(
-                  'U+${ch.runes.first.toRadixString(16).toUpperCase().padLeft(4, '0')}',
-                  style: const TextStyle(color: Colors.white38, fontSize: 10),
-                ),
-              ],
+            child: Text(
+              '${s.letter}  ${(s.confidence * 100).round()}%',
+              style: const TextStyle(color: Colors.white, fontSize: 16),
             ),
           ),
       ],
     );
   }
 
-  /// Optional: type the letter you meant and see whether Testing Mode would
-  /// have marked the transcript correct.
-  Widget _buildExpected(_Attempt? latest) {
-    final expected = _expected.text.trim();
-    final verdict = latest == null || expected.isEmpty
-        ? null
-        : sinhalaAnswerMatches(latest.text, expected);
-    return Row(
+  String _meta(_Attempt a) =>
+      '${a.source.name} mic · ${a.seconds.toStringAsFixed(1)} s · '
+      'peak ${(a.peak * 100).round()}%'
+      '${a.answer == null ? '' : ' · ${a.answer!.elapsed.inMilliseconds} ms'}';
+
+  Widget _buildLetterPicker() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Expanded(
-          child: TextField(
-            controller: _expected,
-            onChanged: (_) => setState(() {}),
-            style: const TextStyle(color: Colors.white, fontSize: 20),
-            decoration: InputDecoration(
-              labelText: 'Expected letter (optional)',
-              labelStyle: const TextStyle(color: Colors.white54),
-              helperText: expected.isEmpty
-                  ? 'e.g. ක — Testing Mode accepts it or its name'
-                  : 'Accepted: $expected or ${sinhalaLetterName(expected)}',
-              helperStyle: const TextStyle(color: Colors.white38),
-              enabledBorder: const OutlineInputBorder(
-                  borderSide: BorderSide(color: Colors.white24)),
+        Row(
+          children: [
+            const Expanded(child: _SectionLabel('LETTER YOU WILL SAY')),
+            const Text('auto-next',
+                style: TextStyle(color: Colors.white54, fontSize: 12)),
+            Switch(
+              value: _autoAdvance,
+              activeThumbColor: AppTheme.primaryYellow,
+              onChanged: (v) => setState(() => _autoAdvance = v),
             ),
-          ),
+          ],
         ),
-        const SizedBox(width: 12),
-        if (verdict != null)
-          Text(
-            verdict ? '✓ MATCH' : '✗ NO MATCH',
-            style: TextStyle(
-              color: verdict ? const Color(0xFF00E5FF) : const Color(0xFFFF5252),
-              fontWeight: FontWeight.bold,
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: [
+            for (final letter in _stt.letters)
+              ChoiceChip(
+                label: Text(letter, style: const TextStyle(fontSize: 18)),
+                selected: letter == _expected,
+                onSelected:
+                    _busy ? null : (_) => setState(() => _expected = letter),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  /// "said → heard" pairs, most frequent first: which letters the model
+  /// mixes up.
+  Widget _buildMistakes() {
+    final counts = <String, int>{};
+    for (final a in _history) {
+      if (a.heard && !a.correct) {
+        final key = '${a.expected} → ${a.answer!.letter}';
+        counts[key] = (counts[key] ?? 0) + 1;
+      }
+    }
+    if (counts.isEmpty) return const SizedBox.shrink();
+    final sorted = counts.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const _SectionLabel('MISTAKES (SAID → HEARD)'),
+        const SizedBox(height: 4),
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: [
+            for (final e in sorted)
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: _bad.withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  e.value > 1 ? '${e.key}  ×${e.value}' : e.key,
+                  style: const TextStyle(color: Colors.white, fontSize: 16),
+                ),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildAttemptRow(_Attempt a) {
+    final color = !a.heard ? Colors.white38 : (a.correct ? _good : _bad);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 96,
+            child: Text(
+              '${a.expected} → ${a.answer?.letter ?? '—'}',
+              style: TextStyle(color: color, fontSize: 20),
             ),
           ),
-      ],
+          Expanded(
+            child: Text(
+              a.heard
+                  ? '${a.answer!.guess.ranked.take(3).join(' · ')}\n${_meta(a)}'
+                  : 'not heard\n${_meta(a)}',
+              style: const TextStyle(color: Colors.white38, fontSize: 11),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
   Widget _buildControls() {
     return Column(
       children: [
+        SizedBox(
+          width: double.infinity,
+          height: 72,
+          child: ElevatedButton.icon(
+            onPressed:
+                (_busy || !_stt.isAvailable || _expected == null) ? null : _record,
+            icon: Icon(_recording ? Icons.mic : Icons.mic_none, size: 30),
+            label: Text(
+              _recording
+                  ? 'LISTENING…'
+                  : _classifying
+                      ? 'CLASSIFYING…'
+                      : 'TAP, THEN SAY  ${_expected ?? ''}',
+              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _recording ? _bad : AppTheme.primaryYellow,
+              foregroundColor: Colors.black,
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
         Wrap(
           spacing: 8,
           alignment: WrapAlignment.center,
@@ -329,29 +480,7 @@ class _SttTestScreenState extends State<SttTestScreen> {
               ),
           ],
         ),
-        const SizedBox(height: 12),
-        SizedBox(
-          width: double.infinity,
-          height: 72,
-          child: ElevatedButton.icon(
-            onPressed: (_busy || !_stt.isAvailable) ? null : _record,
-            icon: Icon(_recording ? Icons.mic : Icons.mic_none, size: 30),
-            label: Text(
-              _recording
-                  ? 'LISTENING…'
-                  : _decoding
-                      ? 'TRANSCRIBING…'
-                      : 'TAP TO SPEAK',
-              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-            ),
-            style: ElevatedButton.styleFrom(
-              backgroundColor:
-                  _recording ? const Color(0xFFFF5252) : AppTheme.primaryYellow,
-              foregroundColor: Colors.black,
-            ),
-          ),
-        ),
-        const SizedBox(height: 6),
+        const SizedBox(height: 4),
         Text(
           GlassDeviceService.instance.isConnected
               ? 'Glasses connected: their mic is used · glasses button also records'
@@ -362,4 +491,17 @@ class _SttTestScreenState extends State<SttTestScreen> {
       ],
     );
   }
+}
+
+class _SectionLabel extends StatelessWidget {
+  final String text;
+
+  const _SectionLabel(this.text);
+
+  @override
+  Widget build(BuildContext context) => Text(
+        text,
+        style: const TextStyle(
+            color: Colors.white54, fontSize: 12, letterSpacing: 1.1),
+      );
 }

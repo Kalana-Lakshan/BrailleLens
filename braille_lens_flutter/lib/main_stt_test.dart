@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'services/audio_service.dart';
 import 'screens/stt_test_screen.dart';
 import 'theme/app_theme.dart';
 
@@ -15,7 +16,7 @@ void main() {
       title: 'BrailleLens STT Test',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.darkHighContrastTheme,
-      home: const SttTestScreen(),
+      home: SttTestScreen(audioService: AudioService()),
     ),
   );
 }
