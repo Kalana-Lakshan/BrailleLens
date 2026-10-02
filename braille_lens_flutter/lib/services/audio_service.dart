@@ -294,12 +294,44 @@ class AudioService {
 
   // ── STT ──────────────────────────────────────────────────────────────────────
 
+  /// True while Android's recogniser actually holds the microphone.
+  bool _recognizerMicOpen = false;
+
+  /// Start/stop chimes for the recogniser (Home and in-screen voice
+  /// commands), the same ones the answer recording plays. Driven by the
+  /// recogniser's own status, not by the request to listen: an attempt that
+  /// fails before the mic opens (error_busy) must not beep. The flag gives
+  /// one chime per open and one per close — Android reports both
+  /// `notListening` and `done` when a session ends.
+  void _onRecognizerStatus(String status) {
+    debugPrint('[AudioService] STT status: $status');
+    if (status == stt.SpeechToText.listeningStatus) {
+      if (_recognizerMicOpen) return;
+      _recognizerMicOpen = true;
+      unawaited(playStartListeningTone());
+    } else if (status == stt.SpeechToText.notListeningStatus ||
+        status == stt.SpeechToText.doneStatus) {
+      _closeRecognizerMic();
+    }
+  }
+
+  void _closeRecognizerMic() {
+    if (!_recognizerMicOpen) return;
+    _recognizerMicOpen = false;
+    unawaited(playStopListeningTone());
+  }
+
   Future<bool> initStt() async {
     if (!_isSpeechInitialized) {
       try {
         _isSpeechInitialized = await _speech.initialize(
-          onError: (val) => debugPrint('[AudioService] STT error: $val'),
-          onStatus: (val) => debugPrint('[AudioService] STT status: $val'),
+          onError: (val) {
+            debugPrint('[AudioService] STT error: $val');
+            // A permanent error ends the session without always sending
+            // a final status.
+            if (val.permanent) _closeRecognizerMic();
+          },
+          onStatus: _onRecognizerStatus,
         );
       } catch (e) {
         debugPrint('[AudioService] STT init exception: $e');
