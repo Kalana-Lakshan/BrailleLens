@@ -10,6 +10,9 @@ Outputs in this folder:
   fingertip_braille_yolo26n.onnx          — FP32, fixed 640×640 (max compatibility)
   fingertip_braille_yolo26n_mobile.onnx   — dynamic-quantized UINT8 (smaller/faster CPU)
   fingertip_braille_yolo26n_meta.json     — input/output names + shapes for Flutter
+
+``--stem`` renames all three (e.g. ``--weights ../weights/yolo26n_fingertip_combined_best.pt
+--stem fingertip_combined_yolo26n``).
 """
 
 from __future__ import annotations
@@ -22,9 +25,7 @@ from pathlib import Path
 _HERE = Path(__file__).resolve().parent
 _FCT = _HERE.parent
 _DEFAULT_WEIGHTS = _FCT / "weights" / "yolo26n_fingertip_braille_best.pt"
-_OUT_FP32 = _HERE / "fingertip_braille_yolo26n.onnx"
-_OUT_MOBILE = _HERE / "fingertip_braille_yolo26n_mobile.onnx"
-_OUT_META = _HERE / "fingertip_braille_yolo26n_meta.json"
+_DEFAULT_STEM = "fingertip_braille_yolo26n"
 
 IMGSZ = 640
 CLASS_NAMES = ["fingertip"]
@@ -68,7 +69,7 @@ def quantize_mobile(fp32_path: Path, out_path: Path) -> bool:
     return out_path.exists()
 
 
-def write_metadata(onnx_path: Path, imgsz: int) -> None:
+def write_metadata(onnx_path: Path, meta_path: Path, imgsz: int) -> None:
     import onnx
 
     model = onnx.load(str(onnx_path))
@@ -106,38 +107,43 @@ def write_metadata(onnx_path: Path, imgsz: int) -> None:
             "Tip point = box center."
         ),
     }
-    _OUT_META.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
 
 def main() -> None:
     p = argparse.ArgumentParser(description="Export fingertip YOLO to mobile ONNX")
     p.add_argument("--weights", type=Path, default=_DEFAULT_WEIGHTS)
     p.add_argument("--imgsz", type=int, default=IMGSZ)
+    p.add_argument("--stem", default=_DEFAULT_STEM, help="Output file stem")
     p.add_argument("--skip-quant", action="store_true", help="Skip UINT8 mobile variant")
     args = p.parse_args()
 
     if not args.weights.exists():
         raise SystemExit(f"Weights not found: {args.weights}")
 
+    out_fp32 = _HERE / f"{args.stem}.onnx"
+    out_mobile = _HERE / f"{args.stem}_mobile.onnx"
+    out_meta = _HERE / f"{args.stem}_meta.json"
+
     print(f"Exporting {args.weights} -> ONNX (imgsz={args.imgsz})")
     exported = export_onnx(args.weights, args.imgsz)
-    shutil.copy2(exported, _OUT_FP32)
-    print(f"FP32 ONNX: {_OUT_FP32} ({_OUT_FP32.stat().st_size / 1e6:.1f} MB)")
+    shutil.copy2(exported, out_fp32)
+    print(f"FP32 ONNX: {out_fp32} ({out_fp32.stat().st_size / 1e6:.1f} MB)")
 
-    write_metadata(_OUT_FP32, args.imgsz)
-    print(f"Metadata:  {_OUT_META}")
+    write_metadata(out_fp32, out_meta, args.imgsz)
+    print(f"Metadata:  {out_meta}")
 
     if not args.skip_quant:
-        if quantize_mobile(_OUT_FP32, _OUT_MOBILE):
+        if quantize_mobile(out_fp32, out_mobile):
             print(
-                f"Mobile ONNX (UINT8): {_OUT_MOBILE} "
-                f"({_OUT_MOBILE.stat().st_size / 1e6:.1f} MB)"
+                f"Mobile ONNX (UINT8): {out_mobile} "
+                f"({out_mobile.stat().st_size / 1e6:.1f} MB)"
             )
         else:
             print("Mobile quant skipped — use FP32 file for Flutter")
 
     print("\nDone. Copy to Flutter:")
-    print("  braille_lens_flutter/assets/models/fingertip_braille_yolo26n.onnx")
+    print(f"  braille_lens_flutter/assets/models/{args.stem}.onnx (+ _mobile, _meta)")
 
 
 if __name__ == "__main__":
