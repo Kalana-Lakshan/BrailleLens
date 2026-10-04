@@ -1,0 +1,32 @@
+Local app-style check of the mobile ONNX files (letterbox 640, best row). Gold page 5 = low_pg10: a thumb holds the page edge (real fingertip, test-set error; now excluded in pack_for_colab.py).
+=== current ===  (neg rows: false-tip rate; pos rows: found rate)
+set                                      n     0.25  0.35  0.45  0.50  0.55  0.60  0.65  0.70
+Gold pages unseen x6 light (neg)         36    0.00  0.00  0.00  0.00  0.00  0.00  0.00  0.00
+Gold pages seen x6 light (neg)           96    0.00  0.00  0.00  0.00  0.00  0.00  0.00  0.00
+glasses no-hand frames (neg)             183   0.00  0.00  0.00  0.00  0.00  0.00  0.00  0.00
+glasses finger frames 900-1160 (pos)     261   0.91  0.87  0.80  0.80  0.78  0.74  0.69  0.64
+Braille test x6 light (pos)              36    0.86  0.83  0.83  0.83  0.83  0.83  0.78  0.69
+unseen Gold page scores (rows=pages, cols=orig/dim/side/warm/blur/shadow):
+ [[0.   0.   0.   0.01 0.   0.  ]
+ [0.   0.   0.   0.01 0.02 0.  ]
+ [0.   0.   0.   0.   0.   0.  ]
+ [0.   0.   0.   0.   0.   0.  ]
+ [0.12 0.   0.01 0.03 0.11 0.01]
+ [0.   0.   0.   0.   0.   0.  ]]
+longest miss streak (frames @30fps): {0.25: 5, 0.35: 10, 0.45: 11, 0.5: 11, 0.55: 11, 0.6: 12, 0.65: 18, 0.7: 18}
+
+=== new ===  (neg rows: false-tip rate; pos rows: found rate)
+set                                      n     0.25  0.35  0.45  0.50  0.55  0.60  0.65  0.70
+Gold pages unseen x6 light (neg)         36    0.17  0.17  0.14  0.11  0.08  0.08  0.08  0.08
+Gold pages seen x6 light (neg)           96    0.01  0.01  0.00  0.00  0.00  0.00  0.00  0.00
+glasses no-hand frames (neg)             183   0.00  0.00  0.00  0.00  0.00  0.00  0.00  0.00
+glasses finger frames 900-1160 (pos)     261   0.95  0.92  0.57  0.25  0.08  0.03  0.00  0.00
+Braille test x6 light (pos)              36    1.00  1.00  0.97  0.97  0.97  0.97  0.97  0.97
+unseen Gold page scores (rows=pages, cols=orig/dim/side/warm/blur/shadow):
+ [[0.02 0.   0.01 0.01 0.04 0.02]
+ [0.01 0.04 0.03 0.01 0.12 0.01]
+ [0.   0.   0.   0.   0.01 0.  ]
+ [0.04 0.02 0.02 0.02 0.06 0.02]
+ [0.52 0.72 0.74 0.44 0.46 0.74]
+ [0.   0.   0.   0.   0.   0.  ]]
+longest miss streak (frames @30fps): {0.25: 11, 0.35: 11, 0.45: 15, 0.5: 44, 0.55: 102, 0.6: 130, 0.65: 261, 0.7: 261}

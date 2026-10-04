@@ -1,0 +1,85 @@
+set,model,thr,n_pos,found,hit,iou50,err_pct,n_neg,false_tip
+Braille test photos,current,own thr 0.10,6.0,1.0,1.0,1.0,0.071,,
+Braille test photos,current,@0.25 0.25,6.0,1.0,1.0,1.0,0.071,,
+Braille test photos,combined,own thr 0.20,6.0,0.333,0.333,0.0,1.11,,
+Braille test photos,combined,@0.25 0.25,6.0,0.333,0.333,0.0,1.11,,
+Braille test photos,new,own thr 0.35,6.0,1.0,1.0,1.0,0.14,,
+Braille test photos,new,@0.25 0.25,6.0,1.0,1.0,1.0,0.14,,
+public test,current,own thr 0.10,221.0,0.0,0.0,0.0,,85.0,0.012
+public test,current,@0.25 0.25,221.0,0.0,0.0,0.0,,85.0,0.0
+public test,combined,own thr 0.20,221.0,0.928,0.923,0.9,1.085,85.0,0.035
+public test,combined,@0.25 0.25,221.0,0.919,0.914,0.896,1.081,85.0,0.024
+public test,new,own thr 0.35,221.0,0.837,0.833,0.828,0.995,85.0,0.059
+public test,new,@0.25 0.25,221.0,0.873,0.869,0.851,1.005,85.0,0.059
+"glasses video, finger present (held-out segment)",current,own thr 0.10,131.0,0.969,1.0,0.967,0.081,,
+"glasses video, finger present (held-out segment)",current,@0.25 0.25,131.0,0.954,1.0,0.967,0.081,,
+"glasses video, finger present (held-out segment)",combined,own thr 0.20,131.0,0.0,0.0,0.0,,,
+"glasses video, finger present (held-out segment)",combined,@0.25 0.25,131.0,0.0,0.0,0.0,,,
+"glasses video, finger present (held-out segment)",new,own thr 0.35,131.0,0.954,1.0,0.959,0.144,,
+"glasses video, finger present (held-out segment)",new,@0.25 0.25,131.0,0.962,1.0,0.959,0.144,,
+"glasses video, no hand (held-out segment)",current,own thr 0.10,,,,,,68.0,0.029
+"glasses video, no hand (held-out segment)",current,@0.25 0.25,,,,,,68.0,0.0
+"glasses video, no hand (held-out segment)",combined,own thr 0.20,,,,,,68.0,0.029
+"glasses video, no hand (held-out segment)",combined,@0.25 0.25,,,,,,68.0,0.0
+"glasses video, no hand (held-out segment)",new,own thr 0.35,,,,,,68.0,0.0
+"glasses video, no hand (held-out segment)",new,@0.25 0.25,,,,,,68.0,0.0
+"Gold Braille pages, no hand (+lighting)",current,own thr 0.10,,,,,,20.0,0.0
+"Gold Braille pages, no hand (+lighting)",current,@0.25 0.25,,,,,,20.0,0.0
+"Gold Braille pages, no hand (+lighting)",combined,own thr 0.20,,,,,,20.0,0.3
+"Gold Braille pages, no hand (+lighting)",combined,@0.25 0.25,,,,,,20.0,0.2
+"Gold Braille pages, no hand (+lighting)",new,own thr 0.35,,,,,,20.0,0.25
+"Gold Braille pages, no hand (+lighting)",new,@0.25 0.25,,,,,,20.0,0.25
+tip-free crops of Braille test photos,current,own thr 0.10,,,,,,30.0,0.0
+tip-free crops of Braille test photos,current,@0.25 0.25,,,,,,30.0,0.0
+tip-free crops of Braille test photos,combined,own thr 0.20,,,,,,30.0,0.133
+tip-free crops of Braille test photos,combined,@0.25 0.25,,,,,,30.0,0.133
+tip-free crops of Braille test photos,new,own thr 0.35,,,,,,30.0,0.0
+tip-free crops of Braille test photos,new,@0.25 0.25,,,,,,30.0,0.0
+COCO scenes without people,current,own thr 0.10,,,,,,11.0,0.091
+COCO scenes without people,current,@0.25 0.25,,,,,,11.0,0.091
+COCO scenes without people,combined,own thr 0.20,,,,,,11.0,0.182
+COCO scenes without people,combined,@0.25 0.25,,,,,,11.0,0.182
+COCO scenes without people,new,own thr 0.35,,,,,,11.0,0.0
+COCO scenes without people,new,@0.25 0.25,,,,,,11.0,0.091
+Braille test + dark (sev 2),current,own thr 0.10,6.0,0.5,0.5,0.5,0.237,,
+Braille test + dark (sev 2),current,@0.25 0.25,6.0,0.333,0.333,0.333,0.24,,
+Braille test + dark (sev 2),combined,own thr 0.20,6.0,0.333,0.333,0.0,1.211,,
+Braille test + dark (sev 2),combined,@0.25 0.25,6.0,0.333,0.333,0.0,1.211,,
+Braille test + dark (sev 2),new,own thr 0.35,6.0,1.0,1.0,1.0,0.135,,
+Braille test + dark (sev 2),new,@0.25 0.25,6.0,1.0,1.0,1.0,0.135,,
+Braille test + side_light (sev 2),current,own thr 0.10,6.0,1.0,1.0,1.0,0.065,,
+Braille test + side_light (sev 2),current,@0.25 0.25,6.0,1.0,1.0,1.0,0.065,,
+Braille test + side_light (sev 2),combined,own thr 0.20,6.0,0.333,0.333,0.0,1.107,,
+Braille test + side_light (sev 2),combined,@0.25 0.25,6.0,0.333,0.333,0.0,1.107,,
+Braille test + side_light (sev 2),new,own thr 0.35,6.0,1.0,1.0,1.0,0.137,,
+Braille test + side_light (sev 2),new,@0.25 0.25,6.0,1.0,1.0,1.0,0.137,,
+Braille test + shadow (sev 2),current,own thr 0.10,6.0,1.0,1.0,1.0,0.057,,
+Braille test + shadow (sev 2),current,@0.25 0.25,6.0,1.0,1.0,1.0,0.057,,
+Braille test + shadow (sev 2),combined,own thr 0.20,6.0,0.333,0.333,0.0,1.126,,
+Braille test + shadow (sev 2),combined,@0.25 0.25,6.0,0.333,0.333,0.0,1.126,,
+Braille test + shadow (sev 2),new,own thr 0.35,6.0,1.0,1.0,1.0,0.138,,
+Braille test + shadow (sev 2),new,@0.25 0.25,6.0,1.0,1.0,1.0,0.138,,
+Braille test + blur (sev 2),current,own thr 0.10,6.0,1.0,1.0,1.0,0.059,,
+Braille test + blur (sev 2),current,@0.25 0.25,6.0,1.0,1.0,1.0,0.059,,
+Braille test + blur (sev 2),combined,own thr 0.20,6.0,0.167,0.167,0.0,1.055,,
+Braille test + blur (sev 2),combined,@0.25 0.25,6.0,0.167,0.167,0.0,1.055,,
+Braille test + blur (sev 2),new,own thr 0.35,6.0,1.0,1.0,1.0,0.107,,
+Braille test + blur (sev 2),new,@0.25 0.25,6.0,1.0,1.0,1.0,0.107,,
+Braille test + glasses (sev 2),current,own thr 0.10,6.0,1.0,1.0,1.0,0.077,,
+Braille test + glasses (sev 2),current,@0.25 0.25,6.0,1.0,1.0,1.0,0.077,,
+Braille test + glasses (sev 2),combined,own thr 0.20,6.0,0.333,0.333,0.0,1.171,,
+Braille test + glasses (sev 2),combined,@0.25 0.25,6.0,0.333,0.333,0.0,1.171,,
+Braille test + glasses (sev 2),new,own thr 0.35,6.0,1.0,1.0,1.0,0.124,,
+Braille test + glasses (sev 2),new,@0.25 0.25,6.0,1.0,1.0,1.0,0.124,,
+Braille test + color_temp (sev 2),current,own thr 0.10,6.0,1.0,1.0,1.0,0.262,,
+Braille test + color_temp (sev 2),current,@0.25 0.25,6.0,1.0,1.0,1.0,0.262,,
+Braille test + color_temp (sev 2),combined,own thr 0.20,6.0,0.333,0.333,0.0,1.229,,
+Braille test + color_temp (sev 2),combined,@0.25 0.25,6.0,0.333,0.333,0.0,1.229,,
+Braille test + color_temp (sev 2),new,own thr 0.35,6.0,1.0,1.0,1.0,0.147,,
+Braille test + color_temp (sev 2),new,@0.25 0.25,6.0,1.0,1.0,1.0,0.147,,
+Braille test + glare (sev 2),current,own thr 0.10,6.0,1.0,1.0,1.0,0.093,,
+Braille test + glare (sev 2),current,@0.25 0.25,6.0,1.0,1.0,1.0,0.093,,
+Braille test + glare (sev 2),combined,own thr 0.20,6.0,0.333,0.333,0.0,1.259,,
+Braille test + glare (sev 2),combined,@0.25 0.25,6.0,0.333,0.333,0.0,1.259,,
+Braille test + glare (sev 2),new,own thr 0.35,6.0,1.0,1.0,1.0,0.12,,
+Braille test + glare (sev 2),new,@0.25 0.25,6.0,1.0,1.0,1.0,0.12,,
