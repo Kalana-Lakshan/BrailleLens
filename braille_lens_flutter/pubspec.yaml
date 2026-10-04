@@ -50,7 +50,8 @@ flutter:
     # or out never fails the build. Everything present is bundled:
     #   braille_cell_yolo26n[_mobile].onnx - page cell detector
     #   braille_cnn.onnx + braille_labels.json - cell classifier + Sinhala map
-    #   fingertip_braille_yolo26n[_mobile].onnx - fingertip detector
+    #   fingertip_robust_yolo26n[_mobile].onnx - fingertip detector
+    #     (fingertip_braille_yolo26n[_mobile].onnx kept for reverting)
     #   sinhala_mms_small_int8.onnx + letters.json - spoken-letter
     #     classifier (STT_model_training_small.ipynb)
     - assets/models/

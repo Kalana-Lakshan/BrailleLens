@@ -23,11 +23,24 @@ class AppConfig {
   static const String brailleLabelsAsset = 'assets/models/braille_labels.json';
 
   /// Fingertip YOLO26n — UINT8 quantized first (phone CPU), FP32 fallback.
+  ///
+  /// Active: `fingertip_robust_yolo26n[_mobile].onnx` (from
+  /// `finger_cell_track/weights/yolo26n_fingertip_robust_best.pt`,
+  /// `finger_cell_track/fingertip_robust/BrailleLens_Fingertip_Robust_Colab.ipynb`)
+  /// — trained on public fingertips plus oversampled Braille photos and
+  /// glasses-camera frames, with lighting augmentation and no-fingertip
+  /// negatives. Previous default: `fingertip_braille_yolo26n[_mobile].onnx`,
+  /// still bundled for reverting (with threshold 0.25).
   static const String fingertipOnnxAsset =
-      'assets/models/fingertip_braille_yolo26n_mobile.onnx';
+      'assets/models/fingertip_robust_yolo26n_mobile.onnx';
 
   static const String fingertipOnnxFallbackAsset =
-      'assets/models/fingertip_braille_yolo26n.onnx';
+      'assets/models/fingertip_robust_yolo26n.onnx';
+
+  /// Minimum score of the best fingertip row; below it there is no fingertip.
+  /// Chosen on validation data that includes no-fingertip images
+  /// (`fingertip_robust_yolo26n_meta.json`).
+  static const double fingertipConfThreshold = 0.35;
 
   /// Multi-cell page detector — single-class YOLO26n (`braille_cell`),
   /// 1280×1280 input, up to 800 boxes per page. Exported by
