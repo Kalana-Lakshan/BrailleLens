@@ -5,7 +5,7 @@
 | Model | Asset | Stage | Role |
 |-------|-------|-------|------|
 | `braille_model.onnx` | `assets/models/braille_model.onnx` | Photo 1 | Classify each cell crop (26 English letters a–z) |
-| `fingertip_braille_yolo26n_mobile.onnx` | `assets/models/..._mobile.onnx` | Photo 2 | Fingertip box → hit-test → letter from photo 1 map |
+| `fingertip_robust_yolo26n_mobile.onnx` | `assets/models/..._mobile.onnx` | Photo 2 | Fingertip box → hit-test → letter from photo 1 map |
 
 **No PC server required** for basic testing.
 
@@ -29,7 +29,7 @@
 
 3. You should see:
    - ✓ `CNN  braille_model.onnx`
-   - ✓ `YOLO  fingertip_braille_yolo26n_mobile.onnx`
+   - ✓ `YOLO  fingertip_robust_yolo26n_mobile.onnx`
 
 4. Tap **CNN · 26 samples** — runs bundled test images (may not be 100% accurate; model is a prototype).
 
@@ -40,7 +40,7 @@
 ## Step 2 — Full two-photo flow
 
 1. Home → **Learning Mode**
-2. Bottom should show: `CNN: braille_model.onnx · YOLO: fingertip_braille_yolo26n_mobile.onnx`
+2. Bottom should show: `CNN: braille_model.onnx · YOLO: fingertip_robust_yolo26n_mobile.onnx`
 3. **Stage 1:** Page only, no finger → **Capture page**
    - Wait for “Classifying cells N/M…”
    - Yellow boxes appear on frozen image
@@ -65,7 +65,7 @@
 | Symptom | Fix |
 |---------|-----|
 | CNN FAILED on ONNX screen | Run `flutter clean` then `flutter pub get`; confirm `assets/models/braille_model.onnx` exists |
-| YOLO FAILED | Confirm `fingertip_braille_yolo26n_mobile.onnx` in assets and pubspec |
+| YOLO FAILED | Confirm `fingertip_robust_yolo26n_mobile.onnx` in assets and pubspec |
 | No cells on page capture | More even light; fill frame with page; avoid shadows |
 | Wrong letter under finger | Rescan page; keep same angle for both photos |
 | YOLO no box | Retake finger photo; or tap fingertip when prompted |

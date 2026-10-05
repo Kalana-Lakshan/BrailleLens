@@ -23,11 +23,24 @@ class AppConfig {
   static const String brailleLabelsAsset = 'assets/models/braille_labels.json';
 
   /// Fingertip YOLO26n — UINT8 quantized first (phone CPU), FP32 fallback.
+  ///
+  /// Active: `fingertip_robust_yolo26n[_mobile].onnx` (from
+  /// `finger_cell_track/weights/yolo26n_fingertip_robust_best.pt`,
+  /// `finger_cell_track/fingertip_robust/BrailleLens_Fingertip_Robust_Colab.ipynb`)
+  /// — trained on public fingertips plus oversampled Braille photos and
+  /// glasses-camera frames, with lighting augmentation and no-fingertip
+  /// negatives. Previous default: `fingertip_braille_yolo26n[_mobile].onnx`,
+  /// still bundled for reverting (with threshold 0.25).
   static const String fingertipOnnxAsset =
-      'assets/models/fingertip_braille_yolo26n_mobile.onnx';
+      'assets/models/fingertip_robust_yolo26n_mobile.onnx';
 
   static const String fingertipOnnxFallbackAsset =
-      'assets/models/fingertip_braille_yolo26n.onnx';
+      'assets/models/fingertip_robust_yolo26n.onnx';
+
+  /// Minimum score of the best fingertip row; below it there is no fingertip.
+  /// Chosen on validation data that includes no-fingertip images
+  /// (`fingertip_robust_yolo26n_meta.json`).
+  static const double fingertipConfThreshold = 0.35;
 
   /// Multi-cell page detector — single-class YOLO26n (`braille_cell`),
   /// 1280×1280 input, up to 800 boxes per page. Exported by
@@ -42,11 +55,17 @@ class AppConfig {
   /// quantized first (phone CPU), FP32 fallback — same dual-asset pattern as
   /// [fingertipOnnxAsset]. Previous default: `braille_cell_yolo26n[_mobile].onnx`
   /// (from `braille_cell_best.pt`), still bundled as an asset if reverting.
+  ///
+  /// Active: `braille_cell_yolo26n_lighting[_mobile].onnx` (from
+  /// `braille_cell_lighting.pt`) — the degraded model further fine-tuned for
+  /// dim and side light and on Braille-free negatives
+  /// (`lighting_robust/BrailleLens_LightingRobust_Colab.ipynb`). The degraded
+  /// files stay bundled for reverting (with threshold 0.25).
   static const String cellDetectorOnnxAsset =
-      'assets/models/braille_cell_yolo26n_degraded_mobile.onnx';
+      'assets/models/braille_cell_yolo26n_lighting_mobile.onnx';
 
   static const String cellDetectorOnnxFallbackAsset =
-      'assets/models/braille_cell_yolo26n_degraded.onnx';
+      'assets/models/braille_cell_yolo26n_lighting.onnx';
 
   /// Minimum box score for [cellDetectorOnnxAsset]. Belongs with the model,
   /// not the detector code: scores are calibrated per export.
@@ -59,5 +78,13 @@ class AppConfig {
   /// meta.json specifies, and phone frames score lower still, so recall
   /// matters more than the last few points of precision.
   /// If reverting to `braille_cell_yolo26n[_mobile].onnx`, set this to 0.50.
-  static const double cellDetectorConfThreshold = 0.25;
+  ///
+  /// Lighting model: 0.40, from a sweep of the UINT8 file run like this
+  /// service (letterbox, NMS 0.40) on held-out Gold pages 10/11 and
+  /// Braille-free images. F1 peaks at 0.40-0.45 (0.944-0.945); 0.40 keeps more
+  /// recall for phone frames. vs the degraded model at 0.25: F1 0.944 vs
+  /// 0.875, real low-light recall 0.978 vs 0.940, false boxes on Braille-free
+  /// images 5.9/img vs 58.2. Details: `lighting_robust/results/`.
+  /// If reverting to the degraded model, set this back to 0.25.
+  static const double cellDetectorConfThreshold = 0.40;
 }

@@ -88,7 +88,7 @@ class FingertipOnnxService {
     }
 
     final rows = _parseOutputRows(outValue);
-    const confThresh = 0.25;
+    const confThresh = AppConfig.fingertipConfThreshold;
     Map<String, dynamic>? best;
     for (final row in rows) {
       if (row.length < 6) continue;
