@@ -17,6 +17,10 @@ Outputs, written directly into braille_lens_flutter/assets/models/:
   braille_cell_yolo26n.onnx          — FP32, fixed 1280x1280 (max compatibility)
   braille_cell_yolo26n_mobile.onnx   — dynamic-quantized UINT8 (smaller/faster CPU)
   braille_cell_yolo26n_meta.json     — input/output shapes + provenance for Flutter
+
+``--stem`` renames all three (e.g. ``--stem braille_cell_yolo26n_lighting``) so a
+new variant can be bundled next to the active one; ``--conf`` sets the meta
+file's conf_threshold (scores are calibrated per export).
 """
 
 from __future__ import annotations
@@ -30,9 +34,7 @@ _HERE = Path(__file__).resolve().parent
 _ROOT = _HERE.parent
 _DEFAULT_WEIGHTS = _HERE / "weights" / "braille_cell_best.pt"
 _ASSET_DIR = _ROOT / "braille_lens_flutter" / "assets" / "models"
-_OUT_FP32 = _ASSET_DIR / "braille_cell_yolo26n.onnx"
-_OUT_MOBILE = _ASSET_DIR / "braille_cell_yolo26n_mobile.onnx"
-_OUT_META = _ASSET_DIR / "braille_cell_yolo26n_meta.json"
+_DEFAULT_STEM = "braille_cell_yolo26n"
 
 IMGSZ = 1280
 CLASS_NAMES = ["braille_cell"]
@@ -104,7 +106,8 @@ def quantize_mobile(fp32_path: Path, out_path: Path) -> bool:
     return out_path.exists()
 
 
-def write_metadata(onnx_path: Path, imgsz: int, weights: Path, ir_version: int) -> None:
+def write_metadata(onnx_path: Path, meta_path: Path, imgsz: int, weights: Path, ir_version: int,
+                   conf: float, notes: str | None) -> None:
     import onnx
 
     model = onnx.load(str(onnx_path))
@@ -131,7 +134,7 @@ def write_metadata(onnx_path: Path, imgsz: int, weights: Path, ir_version: int) 
         "input_layout": "NCHW",
         "color_format": "RGB",
         "normalize": {"scale": 1.0 / 255.0, "mean": [0.0, 0.0, 0.0], "std": [1.0, 1.0, 1.0]},
-        "conf_threshold": CONF_THRESH,
+        "conf_threshold": conf,
         "iou_threshold": IOU_THRESH,
         "max_det": MAX_DET,
         "nms_in_app": True,
@@ -140,6 +143,7 @@ def write_metadata(onnx_path: Path, imgsz: int, weights: Path, ir_version: int) 
         "source_weights_sha256_16": _sha256_16(weights),
         "inputs": inputs,
         "outputs": outputs,
+        **({"provenance_notes": notes} if notes else {}),
         "flutter_notes": (
             "Preprocess: resize letterbox to 1280x1280, RGB, divide by 255. "
             "Postprocess: YOLO26 detection head, output already de-duplicated "
@@ -148,13 +152,16 @@ def write_metadata(onnx_path: Path, imgsz: int, weights: Path, ir_version: int) 
             "single best row). Box centers are the cell centroids."
         ),
     }
-    _OUT_META.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
 
 def main() -> None:
     p = argparse.ArgumentParser(description="Export the Braille cell detector to ONNX")
     p.add_argument("--weights", type=Path, default=_DEFAULT_WEIGHTS)
     p.add_argument("--imgsz", type=int, default=IMGSZ)
+    p.add_argument("--stem", default=_DEFAULT_STEM, help="Output file stem in assets/models/")
+    p.add_argument("--conf", type=float, default=CONF_THRESH, help="conf_threshold written to the meta file")
+    p.add_argument("--notes", default=None, help="provenance_notes written to the meta file")
     p.add_argument("--skip-quant", action="store_true", help="Skip UINT8 mobile variant")
     args = p.parse_args()
 
@@ -162,27 +169,30 @@ def main() -> None:
         raise SystemExit(f"Weights not found: {args.weights}")
 
     _ASSET_DIR.mkdir(parents=True, exist_ok=True)
+    out_fp32 = _ASSET_DIR / f"{args.stem}.onnx"
+    out_mobile = _ASSET_DIR / f"{args.stem}_mobile.onnx"
+    out_meta = _ASSET_DIR / f"{args.stem}_meta.json"
 
     print(f"Exporting {args.weights} -> ONNX (imgsz={args.imgsz})")
     print(f"  source sha256[:16] = {_sha256_16(args.weights)}")
     exported = export_onnx(args.weights, args.imgsz)
-    if exported.resolve() != _OUT_FP32.resolve():
+    if exported.resolve() != out_fp32.resolve():
         import shutil
 
-        shutil.copy2(exported, _OUT_FP32)
-    print(f"FP32 ONNX: {_OUT_FP32} ({_OUT_FP32.stat().st_size / 1e6:.1f} MB)")
+        shutil.copy2(exported, out_fp32)
+    print(f"FP32 ONNX: {out_fp32} ({out_fp32.stat().st_size / 1e6:.1f} MB)")
 
-    ir_version = clamp_ir_version(_OUT_FP32)
+    ir_version = clamp_ir_version(out_fp32)
     print(f"  IR version: {ir_version}")
 
-    write_metadata(_OUT_FP32, args.imgsz, args.weights, ir_version)
-    print(f"Metadata:  {_OUT_META}")
+    write_metadata(out_fp32, out_meta, args.imgsz, args.weights, ir_version, args.conf, args.notes)
+    print(f"Metadata:  {out_meta}")
 
     if not args.skip_quant:
-        if quantize_mobile(_OUT_FP32, _OUT_MOBILE):
+        if quantize_mobile(out_fp32, out_mobile):
             print(
-                f"Mobile ONNX (UINT8): {_OUT_MOBILE} "
-                f"({_OUT_MOBILE.stat().st_size / 1e6:.1f} MB)"
+                f"Mobile ONNX (UINT8): {out_mobile} "
+                f"({out_mobile.stat().st_size / 1e6:.1f} MB)"
             )
         else:
             print("Mobile quant skipped — use FP32 file for Flutter")

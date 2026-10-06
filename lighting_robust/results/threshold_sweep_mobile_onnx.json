@@ -1,0 +1,762 @@
+{
+ "current": {
+  "0.25": {
+   "val pages": {
+    "F1": 0.883,
+    "P": 0.819,
+    "R": 0.957,
+    "FPimg": 44.0
+   },
+   "val negatives": {
+    "F1": 0.0,
+    "P": 0.0,
+    "R": 0.0,
+    "FPimg": 47.0
+   },
+   "test pages": {
+    "F1": 0.875,
+    "P": 0.813,
+    "R": 0.946,
+    "FPimg": 59.5
+   },
+   "test real low-light": {
+    "F1": 0.9,
+    "P": 0.864,
+    "R": 0.94,
+    "FPimg": 40.5
+   },
+   "test dark s2": {
+    "F1": 0.172,
+    "P": 0.861,
+    "R": 0.096,
+    "FPimg": 4.25
+   },
+   "test side_light s2": {
+    "F1": 0.694,
+    "P": 0.644,
+    "R": 0.752,
+    "FPimg": 114.0
+   },
+   "test negatives": {
+    "F1": 0.0,
+    "P": 0.0,
+    "R": 0.0,
+    "FPimg": 58.21
+   },
+   "val combined": {
+    "F1": 0.581,
+    "P": 0.417,
+    "R": 0.957,
+    "FPimg": 46.5
+   },
+   "glasses frames boxes median/mean": [
+    47.0,
+    51.2
+   ]
+  },
+  "0.3": {
+   "val pages": {
+    "F1": 0.889,
+    "P": 0.871,
+    "R": 0.908,
+    "FPimg": 28.0
+   },
+   "val negatives": {
+    "F1": 0.0,
+    "P": 0.0,
+    "R": 0.0,
+    "FPimg": 26.7
+   },
+   "test pages": {
+    "F1": 0.874,
+    "P": 0.847,
+    "R": 0.902,
+    "FPimg": 44.5
+   },
+   "test real low-light": {
+    "F1": 0.884,
+    "P": 0.897,
+    "R": 0.872,
+    "FPimg": 27.5
+   },
+   "test dark s2": {
+    "F1": 0.093,
+    "P": 0.915,
+    "R": 0.049,
+    "FPimg": 1.25
+   },
+   "test side_light s2": {
+    "F1": 0.642,
+    "P": 0.664,
+    "R": 0.621,
+    "FPimg": 86.0
+   },
+   "test negatives": {
+    "F1": 0.0,
+    "P": 0.0,
+    "R": 0.0,
+    "FPimg": 34.82
+   },
+   "val combined": {
+    "F1": 0.677,
+    "P": 0.54,
+    "R": 0.908,
+    "FPimg": 26.92
+   },
+   "glasses frames boxes median/mean": [
+    30.0,
+    32.9
+   ]
+  },
+  "0.35": {
+   "val pages": {
+    "F1": 0.868,
+    "P": 0.912,
+    "R": 0.828,
+    "FPimg": 16.75
+   },
+   "val negatives": {
+    "F1": 0.0,
+    "P": 0.0,
+    "R": 0.0,
+    "FPimg": 15.7
+   },
+   "test pages": {
+    "F1": 0.86,
+    "P": 0.884,
+    "R": 0.838,
+    "FPimg": 30.25
+   },
+   "test real low-light": {
+    "F1": 0.845,
+    "P": 0.934,
+    "R": 0.771,
+    "FPimg": 15.0
+   },
+   "test dark s2": {
+    "F1": 0.043,
+    "P": 0.889,
+    "R": 0.022,
+    "FPimg": 0.75
+   },
+   "test side_light s2": {
+    "F1": 0.601,
+    "P": 0.701,
+    "R": 0.527,
+    "FPimg": 61.75
+   },
+   "test negatives": {
+    "F1": 0.0,
+    "P": 0.0,
+    "R": 0.0,
+    "FPimg": 20.82
+   },
+   "val combined": {
+    "F1": 0.725,
+    "P": 0.645,
+    "R": 0.828,
+    "FPimg": 15.88
+   },
+   "glasses frames boxes median/mean": [
+    16.5,
+    20.1
+   ]
+  },
+  "0.4": {
+   "val pages": {
+    "F1": 0.828,
+    "P": 0.941,
+    "R": 0.739,
+    "FPimg": 9.75
+   },
+   "val negatives": {
+    "F1": 0.0,
+    "P": 0.0,
+    "R": 0.0,
+    "FPimg": 8.6
+   },
+   "test pages": {
+    "F1": 0.821,
+    "P": 0.903,
+    "R": 0.753,
+    "FPimg": 22.25
+   },
+   "test real low-light": {
+    "F1": 0.769,
+    "P": 0.957,
+    "R": 0.644,
+    "FPimg": 8.0
+   },
+   "test dark s2": {
+    "F1": 0.016,
+    "P": 0.9,
+    "R": 0.008,
+    "FPimg": 0.25
+   },
+   "test side_light s2": {
+    "F1": 0.562,
+    "P": 0.759,
+    "R": 0.447,
+    "FPimg": 39.0
+   },
+   "test negatives": {
+    "F1": 0.0,
+    "P": 0.0,
+    "R": 0.0,
+    "FPimg": 12.43
+   },
+   "val combined": {
+    "F1": 0.742,
+    "P": 0.745,
+    "R": 0.739,
+    "FPimg": 8.79
+   },
+   "glasses frames boxes median/mean": [
+    6.0,
+    11.2
+   ]
+  },
+  "0.45": {
+   "val pages": {
+    "F1": 0.749,
+    "P": 0.959,
+    "R": 0.614,
+    "FPimg": 5.5
+   },
+   "val negatives": {
+    "F1": 0.0,
+    "P": 0.0,
+    "R": 0.0,
+    "FPimg": 5.15
+   },
+   "test pages": {
+    "F1": 0.756,
+    "P": 0.923,
+    "R": 0.641,
+    "FPimg": 14.75
+   },
+   "test real low-light": {
+    "F1": 0.64,
+    "P": 0.974,
+    "R": 0.477,
+    "FPimg": 3.5
+   },
+   "test dark s2": {
+    "F1": 0.004,
+    "P": 0.667,
+    "R": 0.002,
+    "FPimg": 0.25
+   },
+   "test side_light s2": {
+    "F1": 0.496,
+    "P": 0.792,
+    "R": 0.361,
+    "FPimg": 26.0
+   },
+   "test negatives": {
+    "F1": 0.0,
+    "P": 0.0,
+    "R": 0.0,
+    "FPimg": 7.46
+   },
+   "val combined": {
+    "F1": 0.697,
+    "P": 0.804,
+    "R": 0.614,
+    "FPimg": 5.21
+   },
+   "glasses frames boxes median/mean": [
+    2.0,
+    5.5
+   ]
+  },
+  "0.5": {
+   "val pages": {
+    "F1": 0.657,
+    "P": 0.974,
+    "R": 0.496,
+    "FPimg": 2.75
+   },
+   "val negatives": {
+    "F1": 0.0,
+    "P": 0.0,
+    "R": 0.0,
+    "FPimg": 3.5
+   },
+   "test pages": {
+    "F1": 0.663,
+    "P": 0.932,
+    "R": 0.514,
+    "FPimg": 10.25
+   },
+   "test real low-light": {
+    "F1": 0.448,
+    "P": 0.994,
+    "R": 0.289,
+    "FPimg": 0.5
+   },
+   "test dark s2": {
+    "F1": 0.002,
+    "P": 1.0,
+    "R": 0.001,
+    "FPimg": 0.0
+   },
+   "test side_light s2": {
+    "F1": 0.416,
+    "P": 0.842,
+    "R": 0.276,
+    "FPimg": 14.25
+   },
+   "test negatives": {
+    "F1": 0.0,
+    "P": 0.0,
+    "R": 0.0,
+    "FPimg": 4.61
+   },
+   "val combined": {
+    "F1": 0.623,
+    "P": 0.836,
+    "R": 0.496,
+    "FPimg": 3.38
+   },
+   "glasses frames boxes median/mean": [
+    0.5,
+    2.7
+   ]
+  },
+  "0.55": {
+   "val pages": {
+    "F1": 0.553,
+    "P": 0.985,
+    "R": 0.384,
+    "FPimg": 1.25
+   },
+   "val negatives": {
+    "F1": 0.0,
+    "P": 0.0,
+    "R": 0.0,
+    "FPimg": 2.15
+   },
+   "test pages": {
+    "F1": 0.563,
+    "P": 0.938,
+    "R": 0.402,
+    "FPimg": 7.25
+   },
+   "test real low-light": {
+    "F1": 0.235,
+    "P": 1.0,
+    "R": 0.133,
+    "FPimg": 0.0
+   },
+   "test dark s2": {
+    "F1": 0.002,
+    "P": 1.0,
+    "R": 0.001,
+    "FPimg": 0.0
+   },
+   "test side_light s2": {
+    "F1": 0.309,
+    "P": 0.873,
+    "R": 0.188,
+    "FPimg": 7.5
+   },
+   "test negatives": {
+    "F1": 0.0,
+    "P": 0.0,
+    "R": 0.0,
+    "FPimg": 2.93
+   },
+   "val combined": {
+    "F1": 0.533,
+    "P": 0.87,
+    "R": 0.384,
+    "FPimg": 2.0
+   },
+   "glasses frames boxes median/mean": [
+    0.0,
+    1.0
+   ]
+  }
+ },
+ "new": {
+  "0.25": {
+   "val pages": {
+    "F1": 0.907,
+    "P": 0.845,
+    "R": 0.98,
+    "FPimg": 37.5
+   },
+   "val negatives": {
+    "F1": 0.0,
+    "P": 0.0,
+    "R": 0.0,
+    "FPimg": 17.75
+   },
+   "test pages": {
+    "F1": 0.927,
+    "P": 0.881,
+    "R": 0.979,
+    "FPimg": 36.25
+   },
+   "test real low-light": {
+    "F1": 0.931,
+    "P": 0.882,
+    "R": 0.985,
+    "FPimg": 36.0
+   },
+   "test dark s2": {
+    "F1": 0.839,
+    "P": 0.784,
+    "R": 0.902,
+    "FPimg": 68.25
+   },
+   "test side_light s2": {
+    "F1": 0.829,
+    "P": 0.756,
+    "R": 0.916,
+    "FPimg": 81.0
+   },
+   "test negatives": {
+    "F1": 0.0,
+    "P": 0.0,
+    "R": 0.0,
+    "FPimg": 11.68
+   },
+   "val combined": {
+    "F1": 0.758,
+    "P": 0.618,
+    "R": 0.98,
+    "FPimg": 21.04
+   },
+   "glasses frames boxes median/mean": [
+    57.0,
+    68.1
+   ]
+  },
+  "0.3": {
+   "val pages": {
+    "F1": 0.919,
+    "P": 0.867,
+    "R": 0.977,
+    "FPimg": 31.25
+   },
+   "val negatives": {
+    "F1": 0.0,
+    "P": 0.0,
+    "R": 0.0,
+    "FPimg": 14.55
+   },
+   "test pages": {
+    "F1": 0.935,
+    "P": 0.898,
+    "R": 0.976,
+    "FPimg": 30.5
+   },
+   "test real low-light": {
+    "F1": 0.939,
+    "P": 0.897,
+    "R": 0.985,
+    "FPimg": 31.0
+   },
+   "test dark s2": {
+    "F1": 0.847,
+    "P": 0.817,
+    "R": 0.881,
+    "FPimg": 54.25
+   },
+   "test side_light s2": {
+    "F1": 0.831,
+    "P": 0.771,
+    "R": 0.901,
+    "FPimg": 73.25
+   },
+   "test negatives": {
+    "F1": 0.0,
+    "P": 0.0,
+    "R": 0.0,
+    "FPimg": 9.04
+   },
+   "val combined": {
+    "F1": 0.79,
+    "P": 0.662,
+    "R": 0.977,
+    "FPimg": 17.33
+   },
+   "glasses frames boxes median/mean": [
+    49.5,
+    60.4
+   ]
+  },
+  "0.35": {
+   "val pages": {
+    "F1": 0.925,
+    "P": 0.885,
+    "R": 0.969,
+    "FPimg": 26.25
+   },
+   "val negatives": {
+    "F1": 0.0,
+    "P": 0.0,
+    "R": 0.0,
+    "FPimg": 12.05
+   },
+   "test pages": {
+    "F1": 0.941,
+    "P": 0.914,
+    "R": 0.97,
+    "FPimg": 25.0
+   },
+   "test real low-light": {
+    "F1": 0.943,
+    "P": 0.907,
+    "R": 0.982,
+    "FPimg": 27.5
+   },
+   "test dark s2": {
+    "F1": 0.857,
+    "P": 0.852,
+    "R": 0.863,
+    "FPimg": 41.25
+   },
+   "test side_light s2": {
+    "F1": 0.833,
+    "P": 0.785,
+    "R": 0.887,
+    "FPimg": 66.75
+   },
+   "test negatives": {
+    "F1": 0.0,
+    "P": 0.0,
+    "R": 0.0,
+    "FPimg": 7.46
+   },
+   "val combined": {
+    "F1": 0.813,
+    "P": 0.7,
+    "R": 0.969,
+    "FPimg": 14.42
+   },
+   "glasses frames boxes median/mean": [
+    39.5,
+    52.8
+   ]
+  },
+  "0.4": {
+   "val pages": {
+    "F1": 0.928,
+    "P": 0.903,
+    "R": 0.956,
+    "FPimg": 21.5
+   },
+   "val negatives": {
+    "F1": 0.0,
+    "P": 0.0,
+    "R": 0.0,
+    "FPimg": 9.8
+   },
+   "test pages": {
+    "F1": 0.944,
+    "P": 0.928,
+    "R": 0.96,
+    "FPimg": 20.5
+   },
+   "test real low-light": {
+    "F1": 0.947,
+    "P": 0.918,
+    "R": 0.978,
+    "FPimg": 24.0
+   },
+   "test dark s2": {
+    "F1": 0.854,
+    "P": 0.882,
+    "R": 0.829,
+    "FPimg": 30.5
+   },
+   "test side_light s2": {
+    "F1": 0.83,
+    "P": 0.794,
+    "R": 0.87,
+    "FPimg": 62.0
+   },
+   "test negatives": {
+    "F1": 0.0,
+    "P": 0.0,
+    "R": 0.0,
+    "FPimg": 5.86
+   },
+   "val combined": {
+    "F1": 0.833,
+    "P": 0.739,
+    "R": 0.956,
+    "FPimg": 11.75
+   },
+   "glasses frames boxes median/mean": [
+    35.5,
+    45.6
+   ]
+  },
+  "0.45": {
+   "val pages": {
+    "F1": 0.931,
+    "P": 0.919,
+    "R": 0.944,
+    "FPimg": 17.25
+   },
+   "val negatives": {
+    "F1": 0.0,
+    "P": 0.0,
+    "R": 0.0,
+    "FPimg": 7.8
+   },
+   "test pages": {
+    "F1": 0.945,
+    "P": 0.944,
+    "R": 0.946,
+    "FPimg": 15.5
+   },
+   "test real low-light": {
+    "F1": 0.952,
+    "P": 0.93,
+    "R": 0.974,
+    "FPimg": 20.0
+   },
+   "test dark s2": {
+    "F1": 0.847,
+    "P": 0.916,
+    "R": 0.788,
+    "FPimg": 19.75
+   },
+   "test side_light s2": {
+    "F1": 0.829,
+    "P": 0.81,
+    "R": 0.85,
+    "FPimg": 54.75
+   },
+   "test negatives": {
+    "F1": 0.0,
+    "P": 0.0,
+    "R": 0.0,
+    "FPimg": 4.86
+   },
+   "val combined": {
+    "F1": 0.853,
+    "P": 0.778,
+    "R": 0.944,
+    "FPimg": 9.38
+   },
+   "glasses frames boxes median/mean": [
+    27.5,
+    39.0
+   ]
+  },
+  "0.5": {
+   "val pages": {
+    "F1": 0.935,
+    "P": 0.935,
+    "R": 0.935,
+    "FPimg": 13.5
+   },
+   "val negatives": {
+    "F1": 0.0,
+    "P": 0.0,
+    "R": 0.0,
+    "FPimg": 5.05
+   },
+   "test pages": {
+    "F1": 0.941,
+    "P": 0.95,
+    "R": 0.933,
+    "FPimg": 13.5
+   },
+   "test real low-light": {
+    "F1": 0.951,
+    "P": 0.936,
+    "R": 0.967,
+    "FPimg": 18.0
+   },
+   "test dark s2": {
+    "F1": 0.82,
+    "P": 0.944,
+    "R": 0.725,
+    "FPimg": 11.75
+   },
+   "test side_light s2": {
+    "F1": 0.823,
+    "P": 0.824,
+    "R": 0.822,
+    "FPimg": 48.25
+   },
+   "test negatives": {
+    "F1": 0.0,
+    "P": 0.0,
+    "R": 0.0,
+    "FPimg": 3.68
+   },
+   "val combined": {
+    "F1": 0.882,
+    "P": 0.834,
+    "R": 0.935,
+    "FPimg": 6.46
+   },
+   "glasses frames boxes median/mean": [
+    19.5,
+    32.8
+   ]
+  },
+  "0.55": {
+   "val pages": {
+    "F1": 0.932,
+    "P": 0.945,
+    "R": 0.92,
+    "FPimg": 11.25
+   },
+   "val negatives": {
+    "F1": 0.0,
+    "P": 0.0,
+    "R": 0.0,
+    "FPimg": 3.45
+   },
+   "test pages": {
+    "F1": 0.934,
+    "P": 0.954,
+    "R": 0.915,
+    "FPimg": 12.0
+   },
+   "test real low-light": {
+    "F1": 0.952,
+    "P": 0.941,
+    "R": 0.963,
+    "FPimg": 16.5
+   },
+   "test dark s2": {
+    "F1": 0.765,
+    "P": 0.961,
+    "R": 0.635,
+    "FPimg": 7.0
+   },
+   "test side_light s2": {
+    "F1": 0.809,
+    "P": 0.836,
+    "R": 0.783,
+    "FPimg": 42.0
+   },
+   "test negatives": {
+    "F1": 0.0,
+    "P": 0.0,
+    "R": 0.0,
+    "FPimg": 2.57
+   },
+   "val combined": {
+    "F1": 0.895,
+    "P": 0.871,
+    "R": 0.92,
+    "FPimg": 4.75
+   },
+   "glasses frames boxes median/mean": [
+    11.5,
+    26.4
+   ]
+  }
+ }
+}

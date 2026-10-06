@@ -1,0 +1,7 @@
+set,n_pos,found,hit,iou50,err_pct,n_neg,false_tip
+Braille test photos,6.0,1.0,1.0,1.0,0.121,,
+"glasses video, finger present (held-out segment)",131.0,0.893,0.934,0.934,0.173,,
+"glasses video, no hand (held-out segment)",,,,,,68.0,0.0
+"Gold Braille pages, no hand (+lighting)",,,,,,20.0,0.25
+tip-free crops of Braille test photos,,,,,,30.0,0.0
+Braille test + dark (sev 2),6.0,1.0,1.0,1.0,0.141,,

@@ -1,0 +1,50 @@
+{
+  "model": "fingertip_combined_yolo26n.onnx",
+  "task": "detect",
+  "class_names": [
+    "fingertip"
+  ],
+  "num_classes": 1,
+  "imgsz": 640,
+  "input_layout": "NCHW",
+  "color_format": "RGB",
+  "normalize": {
+    "scale": 0.00392156862745098,
+    "mean": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "std": [
+      1.0,
+      1.0,
+      1.0
+    ]
+  },
+  "conf_threshold": 0.25,
+  "iou_threshold": 0.45,
+  "nms_in_app": true,
+  "inputs": [
+    {
+      "name": "images",
+      "shape": [
+        1,
+        3,
+        640,
+        640
+      ],
+      "dtype": "float32"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "output0",
+      "shape": [
+        1,
+        300,
+        6
+      ]
+    }
+  ],
+  "flutter_notes": "Preprocess: resize letterbox to 640x640, RGB, divide by 255. Postprocess: YOLO26 detection head \u2014 decode boxes, NMS, take highest-conf fingertip. Tip point = box center."
+}
