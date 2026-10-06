@@ -56,6 +56,8 @@ braille_cnn/checkpoints/*.npy
 !braille_cnn/checkpoints/braille_cnn_mixed.pt
 # Gold-page fine-tuned Stage 4b checkpoint (95.93% held-out gold pg-10/11 acc) -- tracked
 !braille_cnn/checkpoints/braille_cnn_gold_finetuned.pt
+# Lighting-robust Stage 4b checkpoint (lighting_robust/; not used by the app) -- tracked
+!braille_cnn/checkpoints/braille_cnn_lighting.pt
 
 # Nested clone leftovers
 experiments/DotNeuralNet/.git/
@@ -71,6 +73,8 @@ finger_cell_track/**/*.pt
 finger_cell_track/**/*.zip
 # Robust fingertip checkpoint, source of the app's fingertip model (finger_cell_track/fingertip_robust/) -- tracked
 !finger_cell_track/weights/yolo26n_fingertip_robust_best.pt
+# Combined public+Braille fingertip checkpoint (superseded by the robust one) -- tracked
+!finger_cell_track/weights/yolo26n_fingertip_combined_best.pt
 
 # Gradle build output (Flutter only ignores braille_lens_flutter/build)
 braille_lens_flutter/android/build/
