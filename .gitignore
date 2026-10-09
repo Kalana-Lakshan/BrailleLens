@@ -84,3 +84,24 @@ braille_lens_flutter/android/*/build/
 # reference, not our source. The AARs we actually build against are vendored
 # into braille_lens_flutter/android/app/libs/.
 Android_AIGlass_APP_Sourcecode_v*/
+
+# main-compact: the GitHub "Download ZIP" of this branch must stay under 50 MB.
+# Everything below is still tracked on main. Must stay last so it overrides the
+# checkpoint exceptions above.
+**/*.mp4
+**/*.pptx
+**/*.pt
+Gold Dataset/Braille_fingertip/
+Gold Dataset/Braille_fingertip_2nd/
+finger_cell_track/yolo_domain_specific/datasets/
+finger_cell_track/yolo_domain_specific/*.onnx
+finger_cell_track/video tests/
+finger_cell_track/_video_review/
+experiments/DotNeuralNet/
+docs/CNN paper.pdf
+docs/DSBI paper.pdf
+docs/sinhala paper.pdf
+braille_lens_flutter/assets/models/*.onnx
+!braille_lens_flutter/assets/models/braille_cell_yolo26n_lighting_mobile.onnx
+!braille_lens_flutter/assets/models/fingertip_robust_yolo26n_mobile.onnx
+!braille_lens_flutter/assets/models/braille_cnn.onnx

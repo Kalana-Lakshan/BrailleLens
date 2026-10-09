@@ -23,6 +23,7 @@ CS3501 Data Science and Engineering Project, **Group 15**:
 - [Mobile app](#mobile-app)
 - [Models and results](#models-and-results)
 - [Datasets](#datasets)
+- [What's not in this branch](#whats-not-in-this-branch)
 - [Repository layout](#repository-layout)
 - [Getting started](#getting-started)
 - [Testing](#testing)
@@ -118,12 +119,12 @@ All are in `braille_lens_flutter/assets/models/` and selected in [`lib/config/ap
 
 | Role | Active file | Size | Threshold |
 |---|---|---|---|
-| Cell detector | `braille_cell_yolo26n_lighting_mobile.onnx` (UINT8; FP32 fallback) | 3.2 MB | conf 0.40 |
+| Cell detector | `braille_cell_yolo26n_lighting_mobile.onnx` (UINT8) | 3.2 MB | conf 0.40 |
 | Cell classifier | `braille_cnn.onnx` + `braille_labels.json` | 0.6 MB | — |
-| Fingertip detector | `fingertip_robust_yolo26n_mobile.onnx` (UINT8; FP32 fallback) | 2.7 MB | conf 0.35 |
+| Fingertip detector | `fingertip_robust_yolo26n_mobile.onnx` (UINT8) | 2.7 MB | conf 0.35 |
 | Spoken-letter recogniser | `sinhala_mms_small_int8.onnx` + `letters.json` | 49 MB | — |
 
-Earlier models (`braille_cell_yolo26n[_degraded]`, `fingertip_braille_yolo26n`) are still bundled so you can revert; the thresholds to use for each are noted in `app_config.dart`.
+On this branch the speech model, the FP32 fallbacks and the earlier models (`braille_cell_yolo26n[_degraded]`, `fingertip_braille_yolo26n`) are not included; see [What's not in this branch](#whats-not-in-this-branch). The thresholds to use for each earlier model are noted in `app_config.dart`.
 
 **Export path:** PyTorch checkpoint → ONNX → bundled in assets → ONNX Runtime on device. `ClassifierService` mirrors the Python preprocessing (decode, grayscale, resize, normalise, softmax).
 
@@ -210,7 +211,7 @@ On held-out test sets:
 - **0%** false tips on glasses frames with no hand and on COCO scenes with no people;
 - 95% detection on the held-out glasses video.
 
-Training and validation curves are in [`finger_cell_track/fingertip_robust/results/results.png`](finger_cell_track/fingertip_robust/results/results.png). To regenerate them from the checkpoint without retraining, run `plot_training_curves.py`.
+Training and validation curves are in [`finger_cell_track/fingertip_robust/results/results.png`](finger_cell_track/fingertip_robust/results/results.png). To regenerate them from the checkpoint without retraining, run `plot_training_curves.py` (the checkpoint is on `main`).
 
 We prioritise **precision** over recall for this model. A false fingertip makes the app speak a cell the learner isn't touching, whereas a missed frame is recovered on the next sample during the 3-second dwell.
 
@@ -256,6 +257,24 @@ Train/test splits are grouped by page, so there's **no page-level leakage**; a t
 
 ---
 
+## What's not in this branch
+
+This branch (`main-compact`) is trimmed so GitHub's **Download ZIP** stays under 50 MB. The following files are left out, and all of them are still available on the [`main` branch](https://github.com/Kalana-Lakshan/BrailleLens/tree/main):
+
+| Left out | Size | Where to get it |
+|---|---|---|
+| Sinhala speech model `sinhala_mms_small_int8.onnx` (needed for Testing Mode speech recognition) | 49 MB | [Download from `main`](https://github.com/Kalana-Lakshan/BrailleLens/raw/main/braille_lens_flutter/assets/models/sinhala_mms_small_int8.onnx) and place it in `braille_lens_flutter/assets/models/` |
+| FP32 fallback and earlier app models (`*_lighting.onnx`, `fingertip_robust_yolo26n.onnx`, `braille_cell_yolo26n[_degraded]*`, `fingertip_braille_yolo26n*`), plus the older fingertip exports in `finger_cell_track/yolo_domain_specific/` | 81 MB | [`braille_lens_flutter/assets/models/` on `main`](https://github.com/Kalana-Lakshan/BrailleLens/tree/main/braille_lens_flutter/assets/models) |
+| Our PyTorch checkpoints (`*.pt`: cell detector, CNN, fingertip) | 35 MB | [`cell_detect/weights/`](https://github.com/Kalana-Lakshan/BrailleLens/tree/main/cell_detect/weights), [`braille_cnn/checkpoints/`](https://github.com/Kalana-Lakshan/BrailleLens/tree/main/braille_cnn/checkpoints), [`finger_cell_track/weights/`](https://github.com/Kalana-Lakshan/BrailleLens/tree/main/finger_cell_track/weights) on `main` |
+| Braille Fingertip dataset photos (two annotation rounds) and the YOLO-format copy | 477 MB | [`Gold Dataset/`](https://github.com/Kalana-Lakshan/BrailleLens/tree/main/Gold%20Dataset) and `finger_cell_track/yolo_domain_specific/datasets/` on `main` |
+| Demo and test videos (`*.mp4`) and their extracted frames | 234 MB | `Manual_Tests/` and `finger_cell_track/video tests/` on `main` |
+| Presentations (`*.pptx`) | 65 MB | `docs/` and `paper/` on `main` |
+| Third-party material: the DotNeuralNet repo copy (YOLOv5/v8 Braille weights) and the reference papers (CNN, DSBI, Sinhala) | 97 MB | `experiments/DotNeuralNet/` and `docs/` on `main` |
+
+The Gold page labels (`Gold Dataset/High quality dataset/`, `Low quality dataset/`), all source code, notebooks, results and documentation are included.
+
+---
+
 ## Repository layout
 
 ```
@@ -273,7 +292,7 @@ BrailleLens/
 ├── reports/                   <- EDA, evaluation reports, cleaning log
 ├── paper/                     <- NeurIPS 2026 Global South AI Workshop paper
 ├── docs/                      <- Proposal, SRS, test reports
-├── Manual_Tests/              <- Manual test evidence (app, phone camera, glasses)
+├── Manual_Tests/              <- Manual test evidence (screenshots; videos are on main)
 ├── marketing/                 <- Marketing video script
 ├── Gold Dataset/              <- Our annotated Sinhala Braille pages
 ├── data DBSI/, data Angelina/ <- Public datasets (gitignored)
@@ -299,7 +318,7 @@ On the phone:
 - install Google's **Sinhala (si-LK)** text-to-speech voice data for Sinhala speech;
 - keep **media volume** up, or the beeps and speech won't be heard.
 
-The models are already committed in `assets/models/`, and the AiSee AARs are committed in `android/app/libs/`, so the app builds from a fresh clone.
+The detection and classification models are committed in `assets/models/`, and the AiSee AARs are committed in `android/app/libs/`, so the app builds from a fresh clone. For Testing Mode speech recognition, first download `sinhala_mms_small_int8.onnx` into `braille_lens_flutter/assets/models/` (see [What's not in this branch](#whats-not-in-this-branch)).
 
 ### Python pipeline
 
