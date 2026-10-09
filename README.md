@@ -25,7 +25,7 @@ CS3501 Data Science and Engineering Project, **Group 15**:
 - [Datasets](#datasets)
 - [What's not in this branch](#whats-not-in-this-branch)
 - [Repository layout](#repository-layout)
-- [Getting started](#getting-started)
+- [Getting started](#getting-started) (including [installing and using the app](#mobile-app-install-and-use-new-users))
 - [Testing](#testing)
 - [Limitations and next steps](#limitations-and-next-steps)
 - [Team contributions](#team-contributions)
@@ -303,22 +303,144 @@ BrailleLens/
 
 ## Getting started
 
-### Mobile app
+### Mobile app: install and use (new users)
 
-Requirements: Flutter SDK, Android SDK, and an Android phone with USB debugging enabled.
+The steps below take you from the downloaded ZIP of this branch to reading Braille with the app.
+
+#### What you need
+
+| | Requirement |
+|---|---|
+| Phone | Android **7.0 or newer** (API 24+), with a camera and microphone |
+| Computer | Windows, macOS or Linux, with: |
+| | the [Flutter SDK](https://docs.flutter.dev/get-started/install) (stable channel, Dart 3); |
+| | Android Studio, or the Android SDK command-line tools; |
+| | JDK 17 (bundled with Android Studio) |
+| Cable | A USB cable that carries data, not just charging |
+| Optional | AiSee smart glasses, for hands-free use |
+| Practice material | A page of embossed Sinhala Braille |
+
+Run `flutter doctor` after installing Flutter. Fix anything it marks with ✗ under **Flutter** and **Android toolchain**, and accept the Android licences with `flutter doctor --android-licenses`.
+
+#### Step 1: Get the code
+
+1. On GitHub, open the `main-compact` branch, click **Code → Download ZIP**, and extract it. The folder is called `BrailleLens-main-compact`.
+2. **Optional but recommended:** download the Sinhala speech model. Testing Mode uses it to recognise the letter you say.
+   - Download [`sinhala_mms_small_int8.onnx`](https://github.com/Kalana-Lakshan/BrailleLens/raw/main/braille_lens_flutter/assets/models/sinhala_mms_small_int8.onnx) (49 MB).
+   - Put it in `BrailleLens-main-compact/braille_lens_flutter/assets/models/`, next to `letters.json`.
+   
+   Without it, the app still works: in Testing Mode it tells you the correct letter instead of checking your answer.
+
+Everything else the app needs, including the detection models and the AiSee glasses libraries, is already in the ZIP.
+
+#### Step 2: Prepare the phone
+
+1. **Turn on Developer options:** go to **Settings → About phone → Software information** and tap **Build number** 7 times.
+2. **Turn on USB debugging:** go to **Settings → Developer options** and switch on **USB debugging**.
+3. Connect the phone to the computer by USB. When the phone asks **Allow USB debugging?**, tap **Allow**.
+4. Check that the computer can see the phone:
+   ```bash
+   flutter devices
+   ```
+   Your phone should appear in the list.
+
+#### Step 3: Build and install
+
+From the extracted folder:
 
 ```bash
 cd braille_lens_flutter
 flutter pub get
-flutter build apk --release
-adb install -r build/app/outputs/flutter-apk/app-release.apk
+flutter run --release
 ```
 
-On the phone:
-- install Google's **Sinhala (si-LK)** text-to-speech voice data for Sinhala speech;
-- keep **media volume** up, or the beeps and speech won't be heard.
+`flutter run --release` builds the app, installs it on the connected phone and opens it. The first build downloads dependencies and can take 5–10 minutes.
 
-The detection and classification models are committed in `assets/models/`, and the AiSee AARs are committed in `android/app/libs/`, so the app builds from a fresh clone. For Testing Mode speech recognition, first download `sinhala_mms_small_int8.onnx` into `braille_lens_flutter/assets/models/` (see [What's not in this branch](#whats-not-in-this-branch)).
+**Alternative: build an APK file** to install on any phone, or to share:
+
+```bash
+flutter build apk --release
+```
+
+The APK is saved at `braille_lens_flutter/build/app/outputs/flutter-apk/app-release.apk`. Install it in either of these ways:
+- by USB: `adb install -r build/app/outputs/flutter-apk/app-release.apk`;
+- by copying the file to the phone and opening it. If asked, allow **Install unknown apps** for the file manager you used.
+
+#### Step 4: First-time setup on the phone
+
+1. **Allow permissions.** When BrailleLens asks, allow:
+   - **Camera**, to see the Braille page;
+   - **Microphone**, for voice commands and spoken answers;
+   - **Nearby devices**, to connect the glasses.
+2. **Install the Sinhala voice** so the app can speak Sinhala. On Samsung phones:
+   - go to **Settings → General management → Text-to-speech**;
+   - set the **Preferred engine** to **Speech Services by Google**;
+   - tap the ⚙ next to it, then **Install voice data**, then **සිංහල (Sinhala)**, and download it.
+   
+   On other phones, search Settings for "Text-to-speech". Without the Sinhala voice, the app falls back to English speech.
+3. **Turn up the media volume.** The beeps and speech play on the media volume, so if it's at 0 the app seems silent.
+
+#### Step 5 (optional): Connect AiSee smart glasses
+
+1. Turn on the glasses and pair them with the phone in **Settings → Connections → Bluetooth**.
+2. Open BrailleLens and tap **GLASSES** at the top of the home screen. Choose the glasses from the list of paired devices.
+3. The app announces the connection. From then on, the **glasses camera, microphone and speaker** are used, and the phone can stay in your pocket.
+
+If the glasses aren't connected, the app uses the phone's own camera, microphone and speaker.
+
+#### Step 6: Use the app
+
+The home screen is split in two: **tap the left half for Learning Mode** or **the right half for Testing Mode**. You can also say **"Learning"** or **"Testing"**. Say **"Help"** at any time to hear the instructions. All spoken guidance is in Sinhala.
+
+**Learning Mode** (the app reads the letter you touch):
+
+1. Hold the phone, or look with the glasses, so the **whole page** is in view, about 30 cm above it, and keep your hands off the page.
+2. The app plays **8 beeps** and then scans the page automatically. It announces how many Braille cells it found.
+3. Put **one finger on a letter** and **hold still for about 3 seconds**.
+4. You'll hear short **lock beeps**. The app then speaks the **Sinhala letter** and its **dot numbers** (for example, "dots one, two, four").
+5. Move to the next letter and repeat.
+6. If you lift your finger, the app offers to re-scan the page after a few beeps. Touch a letter to cancel the re-scan and keep reading.
+
+**Testing Mode** (the app checks you):
+
+1. The page is scanned the same way as in Learning Mode.
+2. Hold a finger on a letter until the beeps finish.
+3. The app asks, *"What is the letter under your finger?"* Say the letter aloud in Sinhala.
+4. The app answers **correct** or **incorrect** and tells you the right letter. If your finger is slightly off a cell, it tells you which way to move (left, right, up or down).
+
+**Voice commands** (in English) work on every screen:
+
+| Say | What happens |
+|---|---|
+| **Learning** / **Testing** | Opens that mode (from the home screen) |
+| **Back** | Returns to the home screen |
+| **Retry** | Scans the page again |
+| **Help** | Repeats the instructions |
+| **Capture** | Takes the picture now instead of waiting for the beeps |
+
+#### Tips for good results
+
+- Use **even lighting** and avoid strong shadows across the page. The models handle dim and side light, but even light works best.
+- During the scan, keep the **whole page in view** and **no hands** on the page.
+- While reading, keep the phone or your head at roughly the **same position and angle** as during the scan. The app corrects small movements, but if it says the page isn't aligned, say **"Retry"** to re-scan.
+- Rest the finger pad flat on the cell and keep it still until the lock beeps finish.
+
+#### Check that the models loaded
+
+On the home screen, tap **ONNX** (top right). It shows whether the cell classifier (**CNN**) and the fingertip detector (**YOLO**) loaded, and **YOLO · camera** lets you point the camera at your finger to see the fingertip box live. The cell detector is checked when Learning Mode scans a page: it announces how many cells it found. If the speech model is missing, Testing Mode says so when it starts.
+
+#### App troubleshooting
+
+| Problem | Fix |
+|---|---|
+| `flutter devices` doesn't show the phone | Use a data USB cable, re-plug, accept **Allow USB debugging** on the phone, and switch the USB mode to **File transfer** |
+| Build fails on a fresh machine | Run `flutter doctor`, fix the Android toolchain items, then `flutter clean` and `flutter pub get` |
+| No sound at all | Raise **media** volume; check the Sinhala voice is installed (Step 4) |
+| App speaks English instead of Sinhala | The Sinhala text-to-speech voice isn't installed (Step 4) |
+| "Page scan failed" / 0 cells found | Better, even lighting; fit the whole page in view; hold steady; say **"Retry"** |
+| "No cell under your finger · page not aligned" | Frame the page as you did when scanning, or say **"Retry"** to re-scan |
+| Testing Mode tells the letter instead of checking your answer | The speech model is missing; add it (Step 1) and rebuild |
+| Glasses not in the list | Pair them in Android Bluetooth settings first, and allow **Nearby devices** for BrailleLens |
 
 ### Python pipeline
 
