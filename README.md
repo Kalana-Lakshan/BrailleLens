@@ -354,7 +354,7 @@ flutter pub get
 flutter run --release
 ```
 
-`flutter run --release` builds the app, installs it on the connected phone and opens it. The first build downloads dependencies and can take 5–10 minutes.
+`flutter run --release` builds the app, installs it on the connected phone and opens it. The first build needs an internet connection, because it downloads Gradle and plugin dependencies. It can take **10–15 minutes**; later builds are much faster. On Windows, if `flutter pub get` asks you to enable **Developer Mode**, run `start ms-settings:developers` and switch it on.
 
 **Alternative: build an APK file** to install on any phone, or to share:
 
