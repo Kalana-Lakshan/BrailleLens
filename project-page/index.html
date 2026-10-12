@@ -1,0 +1,606 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BrailleLens</title>
+<meta name="description" content="BrailleLens: an interactive, fully on-device Braille learning system for phones and AiSee smart glasses. University of Moratuwa.">
+<link rel="icon" type="image/svg+xml" href="images/logo.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    color-scheme:light;
+    --paper:#ffffff;
+    --paper-2:#f4f6fb;
+    --hero:linear-gradient(100deg,#edf1f9 0%,#ecf3f2 55%,#e9f4ee 100%);
+    --ink:#0a0a0a;
+    --text-2:#4a4f5a;
+    --text-3:#6e7480;
+    --rule:#dde1ea;
+    --accent:#15317a;          /* poster navy */
+    --accent-2:#0f6b4d;        /* poster green */
+    --accent-on:#ffffff;
+    --accent-soft:rgba(15,107,77,.06);
+    --grad:linear-gradient(100deg,#143973 0%,#124669 35%,#105b58 70%,#0f694e 100%);
+    --sans:"Inter","Helvetica Neue",Helvetica,Arial,sans-serif;
+    --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --gutter:clamp(16px,5vw,80px);
+    --max:1280px;
+  }
+
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{background:var(--paper);color:var(--ink);font-family:var(--sans);font-weight:400;line-height:1.6;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+  img{display:block;max-width:100%}
+  a{color:inherit}
+  .wrap{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
+
+  /* type */
+  .meta{font-family:var(--mono);font-size:13px;font-weight:500;letter-spacing:.14em;text-transform:uppercase;color:var(--text-3)}
+  .cat{font-family:var(--mono);font-size:13px;font-weight:600;letter-spacing:.15em;text-transform:uppercase;color:var(--accent-2)}
+  h1,h2,h3{font-weight:200;letter-spacing:-.035em;line-height:1}
+  h2{font-size:clamp(36px,5.4vw,72px);margin-top:14px}
+  h3{font-size:clamp(20px,1.8vw,24px);font-weight:400;letter-spacing:-.015em;line-height:1.25}
+  p{color:var(--text-2);font-size:17px}
+  .lead{font-size:clamp(18px,1.6vw,22px);font-weight:300;color:var(--ink);line-height:1.5;max-width:60ch}
+
+  /* top nav */
+  .topbar{position:sticky;top:0;z-index:20;background:var(--paper);border-bottom:1px solid var(--rule)}
+  .topbar::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:3px;background:var(--grad)}
+  .topbar .wrap{display:flex;align-items:center;justify-content:space-between;height:56px;gap:16px}
+  .brand{font-weight:600;letter-spacing:-.01em;text-decoration:none;display:flex;align-items:center;gap:10px}
+  .brand img{width:28px;height:28px}
+  .topbar nav{display:flex;gap:22px;overflow-x:auto;scrollbar-width:none}
+  .topbar nav a{font-family:var(--mono);font-size:12px;letter-spacing:.12em;text-transform:uppercase;text-decoration:none;color:var(--text-3);white-space:nowrap}
+  .topbar nav a:hover{color:var(--accent)}
+  @media (max-width:760px){.topbar nav{display:none}}
+
+  /* hero */
+  .hero{background:var(--hero);color:var(--ink);position:relative;overflow:hidden;border-bottom:1px solid var(--rule)}
+  .hero .dots{position:absolute;right:-4vw;top:0;bottom:0;width:46vw;opacity:.16;color:var(--accent-2);
+    background-image:radial-gradient(currentColor 2px,transparent 2.4px);background-size:22px 22px;pointer-events:none}
+  .hero .wrap{position:relative;padding-top:clamp(48px,8vw,104px);padding-bottom:clamp(48px,7vw,96px)}
+  .hero-grid{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4vw;align-items:center}
+  .hero-mark{width:clamp(180px,22vw,300px);height:auto}
+  @media (max-width:860px){.hero-grid{grid-template-columns:1fr}.hero-mark{display:none}}
+  .hero .org{display:flex;align-items:center;gap:14px}
+  .hero .org img{height:48px;width:auto}
+  .hero h1{font-size:clamp(60px,10vw,148px);line-height:.9;margin:26px 0 26px;color:var(--ink)}
+  .hero h1 em{font-style:italic;font-weight:300;color:var(--accent-2)}
+  .hero .lead{max-width:44ch}
+  .hero .badge{display:inline-flex;align-items:center;gap:10px;margin-top:30px;padding:10px 14px;border:1px solid var(--accent);background:#fff;font-family:var(--mono);font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent)}
+  .hero .badge i{width:8px;height:8px;background:var(--accent);flex:none}
+  .actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:34px}
+  .btn{display:inline-flex;align-items:center;gap:10px;padding:14px 20px;font-family:var(--mono);font-size:13px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;text-decoration:none;border:1px solid currentColor;transition:background .15s,color .15s}
+  .btn svg{width:16px;height:16px;flex:none}
+  .hero .btn.primary{background:var(--grad);color:#fff;border-color:transparent}
+  .hero .btn.primary:hover{background:var(--accent);border-color:var(--accent)}
+  .hero .btn.ghost{color:var(--accent);background:#fff}
+  .hero .btn.ghost:hover{background:var(--accent);color:#fff}
+  .hero .people{margin-top:clamp(40px,6vw,72px);padding-top:20px;border-top:1px solid var(--rule);display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px 32px}
+  .hero .people span{font-family:var(--mono);font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--text-2)}
+
+  /* sections */
+  section.block{padding:clamp(64px,9vw,128px) 0;border-bottom:1px solid var(--rule)}
+  .head{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:24px 5vw;align-items:end;margin-bottom:clamp(36px,5vw,64px)}
+  .head p{max-width:56ch}
+  @media (max-width:860px){.head{grid-template-columns:1fr}}
+
+  /* problem / solution */
+  .duo{display:grid;grid-template-columns:1fr 1px 1fr;gap:0 4vw}
+  .duo .vr{background:var(--rule)}
+  .duo .col{display:flex;flex-direction:column;gap:16px}
+  .duo .num{font-family:var(--mono);font-size:12px;font-weight:600;letter-spacing:.12em;border:1px solid currentColor;padding:3px 8px;align-self:flex-start}
+  .duo .col.accent .num,.duo .col.accent h3{color:var(--accent-2)}
+  .duo h3{font-size:clamp(28px,3.4vw,44px);font-weight:200;letter-spacing:-.03em;line-height:1.05}
+  .duo p{font-size:18px;max-width:46ch}
+  @media (max-width:760px){.duo{grid-template-columns:1fr;gap:40px}.duo .vr{display:none}}
+
+  /* objectives */
+  .objectives{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+  .obj{background:var(--paper-2);padding:28px 24px 30px;display:flex;flex-direction:column;gap:18px;min-height:220px}
+  .obj .n{font-weight:200;font-size:clamp(48px,5vw,72px);line-height:.9;color:var(--accent);letter-spacing:-.04em}
+  .obj:nth-child(even) .n{color:var(--accent-2)}
+  .obj h3{margin-top:auto}
+  @media (max-width:860px){.objectives{grid-template-columns:1fr}.obj{min-height:0}}
+
+  /* architecture */
+  .pipeline{display:grid;grid-template-columns:repeat(5,1fr);border-top:1px solid var(--ink)}
+  .stage{padding:22px 20px 26px 0;display:flex;flex-direction:column;gap:12px;position:relative}
+  .stage + .stage{padding-left:20px;border-left:1px solid var(--rule)}
+  .stage .step{display:flex;align-items:center;gap:10px}
+  .stage .step i{width:8px;height:8px;background:var(--ink)}
+  .stage.out .step i{background:var(--accent-2)}
+  .stage.out h3{color:var(--accent-2)}
+  .stage p{font-size:16px}
+  .stage .kpi{margin-top:auto;padding-top:14px;font-family:var(--mono);font-size:13px;font-weight:500;color:var(--accent-2);letter-spacing:.04em}
+  @media (max-width:1000px){.pipeline{grid-template-columns:1fr}.stage,.stage + .stage{padding:22px 0;border-left:0;border-bottom:1px solid var(--rule)}}
+
+  /* results */
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;align-items:end}
+  .kpi-col{display:flex;flex-direction:column;justify-content:flex-end;border:1px solid var(--rule);padding:22px 20px;min-height:var(--h)}
+  .kpi-col.hi{background:var(--grad);border-color:transparent;color:var(--accent-on)}
+  .kpi-col.hi .meta,.kpi-col.hi p{color:rgba(255,255,255,.82)}
+  .kpi-col .v{font-weight:200;font-size:clamp(44px,5.4vw,80px);letter-spacing:-.045em;line-height:.95;margin:10px 0 8px;font-feature-settings:"tnum"}
+  .kpi-col .v small{font-size:.4em;font-weight:300;margin-left:.06em;vertical-align:.9em}
+  .kpi-col p{font-size:15px}
+  @media (max-width:860px){.kpis{grid-template-columns:1fr 1fr}.kpi-col{min-height:0}}
+  @media (max-width:480px){.kpis{grid-template-columns:1fr}}
+
+  /* modes */
+  .modes{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}
+  .mode{padding:32px 28px;display:flex;flex-direction:column;gap:16px;border-top:2px solid var(--ink);background:var(--paper-2)}
+  .mode.accent{border-top-color:var(--accent-2)}
+  .mode.accent h3{color:var(--accent-2)}
+  .mode h3{font-size:clamp(28px,3vw,40px);font-weight:200;letter-spacing:-.03em}
+  .mode ul{list-style:none;display:flex;flex-direction:column;gap:10px;margin-top:6px;padding-top:16px;border-top:1px solid var(--rule)}
+  .mode li{padding-left:22px;position:relative;color:var(--text-2);font-size:16px}
+  .mode li::before{content:"";position:absolute;left:0;top:.75em;width:10px;height:1px;background:currentColor}
+  .mode.accent li::before{background:var(--accent-2);height:2px}
+  @media (max-width:760px){.modes{grid-template-columns:1fr}}
+
+  /* features */
+  .features{display:grid;grid-template-columns:repeat(5,1fr);gap:0;border-top:1px solid var(--rule)}
+  .feat{padding:22px 18px 4px 0;display:flex;flex-direction:column;gap:10px}
+  .feat + .feat{padding-left:18px;border-left:1px solid var(--rule)}
+  .feat svg{width:26px;height:26px;stroke:var(--accent);fill:none;stroke-width:1.5;stroke-linecap:square}
+  .feat p{font-size:15px}
+  @media (max-width:1000px){.features{grid-template-columns:1fr 1fr}.feat,.feat + .feat{padding:22px 18px 22px 0;border-left:0;border-bottom:1px solid var(--rule)}}
+  @media (max-width:480px){.features{grid-template-columns:1fr}}
+
+  /* media (poster + video) */
+  .media-grid{display:grid;grid-template-columns:minmax(0,7fr) minmax(0,5fr);gap:24px;align-items:start}
+  figure{margin:0;display:flex;flex-direction:column;gap:12px}
+  figcaption{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+  figcaption a{font-family:var(--mono);font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);text-decoration:none}
+  figcaption a:hover{text-decoration:underline}
+  .poster{border:1px solid var(--rule);background:#fff}
+  .poster img{width:100%;height:auto}
+  .video{position:relative;aspect-ratio:16/9;background:#000;overflow:hidden}
+  .video img{width:100%;height:100%;object-fit:cover}
+  .video button{position:absolute;inset:0;border:0;background:transparent;cursor:pointer;display:flex;align-items:center;justify-content:center}
+  .video button span{width:76px;height:76px;background:var(--grad);display:flex;align-items:center;justify-content:center;transition:transform .15s}
+  .video button:hover span{transform:scale(1.06)}
+  .video button svg{width:28px;height:28px;fill:#fff;margin-left:4px}
+  .video iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
+  .side-stack{display:flex;flex-direction:column;gap:28px}
+  @media (max-width:900px){.media-grid{grid-template-columns:1fr}}
+
+  /* methodology timeline */
+  .timeline{position:relative;display:grid;grid-template-columns:repeat(5,1fr);gap:0}
+  .timeline::before{content:"";position:absolute;left:0;right:0;top:7px;height:1px;background:repeating-linear-gradient(to right,var(--text-3) 0 4px,transparent 4px 8px)}
+  .tl{position:relative;padding-right:16px}
+  .tl i{display:block;width:14px;height:14px;background:var(--ink);position:relative;z-index:1}
+  .tl:nth-child(even) i{background:var(--accent-2)}
+  .tl:last-child i{background:var(--accent)}
+  .tl .meta{margin:20px 0 6px;display:block}
+  .tl h3{font-size:19px}
+  @media (max-width:860px){
+    .timeline{grid-template-columns:1fr;gap:26px;padding-left:28px}
+    .timeline::before{left:6px;right:auto;top:0;bottom:0;width:1px;height:auto;background:repeating-linear-gradient(to bottom,var(--text-3) 0 4px,transparent 4px 8px)}
+    .tl i{position:absolute;left:-28px;top:4px}
+    .tl .meta{margin-top:0}
+  }
+
+  /* tech */
+  .tech{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+  .tech div{background:var(--paper-2);padding:20px 18px;display:flex;flex-direction:column;gap:6px;min-height:104px}
+  .tech b{font-weight:400;font-size:19px;letter-spacing:-.01em}
+  .tech span{font-size:14px;color:var(--text-3)}
+  @media (max-width:860px){.tech{grid-template-columns:1fr 1fr}}
+
+  /* team */
+  .team{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+  .person{padding:26px 22px;border-top:1px solid var(--ink);display:flex;flex-direction:column;gap:8px;min-height:150px}
+  .person.lead-p{background:var(--grad);color:var(--accent-on);border-top-color:transparent}
+  .person.lead-p .meta{color:rgba(255,255,255,.8)}
+  .person h3{font-size:clamp(22px,2vw,28px);font-weight:300;letter-spacing:-.02em;margin-top:auto}
+  .affil{margin-top:32px;display:flex;flex-wrap:wrap;align-items:center;gap:12px 28px}
+  .affil img{height:56px;width:auto}
+  @media (max-width:860px){.team{grid-template-columns:1fr 1fr}}
+  @media (max-width:520px){.team{grid-template-columns:1fr}}
+
+  /* links / footer */
+  .links{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+  .link-card{display:flex;flex-direction:column;gap:14px;padding:26px 24px;border:1px solid var(--rule);text-decoration:none;transition:border-color .15s,background .15s;min-height:190px}
+  .link-card:hover{border-color:var(--accent-2);background:var(--accent-soft)}
+  .link-card h3{margin-top:auto}
+  .link-card .url{font-family:var(--mono);font-size:13px;color:var(--accent);word-break:break-all}
+  .link-card.static{cursor:default}
+  .link-card.static:hover{border-color:var(--rule);background:transparent}
+  @media (max-width:860px){.links{grid-template-columns:1fr}.link-card{min-height:0}}
+  footer{padding:36px 0 48px}
+  footer{border-top:1px solid var(--rule);background:var(--paper-2)}
+  footer .wrap{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px}
+  footer .left{display:flex;align-items:center;gap:12px}
+  footer img{height:28px;width:auto}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="wrap">
+    <a class="brand" href="#top" aria-label="BrailleLens home">
+      <img src="images/logo.svg" alt="" width="28" height="28">
+      BrailleLens
+    </a>
+    <nav aria-label="Sections">
+      <a href="#problem">Problem</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#results">Results</a>
+      <a href="#modes">Modes</a>
+      <a href="#media">Poster &amp; Video</a>
+      <a href="#team">Team</a>
+      <a href="#links">Links</a>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+
+  <!-- HERO -->
+  <section class="hero">
+    <div class="dots" aria-hidden="true"></div>
+    <div class="wrap">
+      <div class="hero-grid">
+      <div>
+      <div class="org">
+        <img src="images/cse_logo.png" alt="Department of Computer Science &amp; Engineering, University of Moratuwa logo">
+        <span class="meta">Dept. of Computer Science &amp; Engineering<br>University of Moratuwa</span>
+      </div>
+      <h1>Braille<em>Lens</em></h1>
+      <p class="lead">An interactive Braille learning system powered by AiSee smart glasses. Touch a cell on an embossed page and hear the character under your finger, fully offline.</p>
+      <div class="badge"><i></i>Paper accepted · NeurIPS 2026 Global South AI Workshop</div>
+      <div class="actions">
+        <a class="btn primary" href="https://www.youtube.com/watch?v=EzpY-G2qT-E" target="_blank" rel="noopener">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4l13 8-13 8z"/></svg>Watch the video
+        </a>
+        <a class="btn ghost" href="https://github.com/Kalana-Lakshan/BrailleLens" target="_blank" rel="noopener">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2c-3.3.7-4-1.6-4-1.6-.6-1.4-1.4-1.8-1.4-1.8-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.7-.3-5.5-1.3-5.5-6 0-1.2.5-2.3 1.2-3.1-.1-.4-.5-1.6.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17.3 4.7 18.3 5 18.3 5c.7 1.6.2 2.8.1 3.2.8.8 1.2 1.9 1.2 3.1 0 4.6-2.8 5.6-5.5 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .5z"/></svg>GitHub repository
+        </a>
+      </div>
+      </div>
+      <img class="hero-mark" src="images/logo.svg" alt="BrailleLens logo: a Braille cell with dots 1 and 2 raised" width="300" height="300">
+      </div>
+      <div class="people">
+        <span>Himandhi Kuruppu · Kalana Lakshan · Hasini Lawanya</span>
+        <span>Supervisor · Dr. Sandareka Wickramanayake</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- PROBLEM / SOLUTION -->
+  <section class="block" id="problem">
+    <div class="wrap">
+      <div class="head">
+        <div>
+          <div class="cat">01 · Why</div>
+          <h2>Practice without a tutor</h2>
+        </div>
+        <p>Learning Braille usually needs an experienced, sighted tutor, and such tutors are scarce in many regions, including Sri Lanka.</p>
+      </div>
+      <div class="duo">
+        <div class="col">
+          <span class="num">PROBLEM</span>
+          <h3>No way to confirm a character</h3>
+          <p>Braille learners have no way to confirm whether they read a character correctly. With trained instructors scarce, independent practice happens without immediate feedback.</p>
+        </div>
+        <div class="vr" aria-hidden="true"></div>
+        <div class="col accent">
+          <span class="num">SOLUTION</span>
+          <h3>A camera that knows where you're touching</h3>
+          <p>Point a phone or AiSee smart glasses at an embossed page. BrailleLens identifies the Braille character the student is touching, and offers learning and testing modes to support practice.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- OBJECTIVES -->
+  <section class="block" id="objectives">
+    <div class="wrap">
+      <div class="head">
+        <div>
+          <div class="cat">02 · Objectives</div>
+          <h2>Three goals</h2>
+        </div>
+        <p>The page is mapped once and the finger is located against that map, so the learner can explore the page freely and ask about any cell.</p>
+      </div>
+      <div class="objectives">
+        <div class="obj"><div class="n">01</div><h3>Detect every Braille cell on a page, hands-free</h3></div>
+        <div class="obj"><div class="n">02</div><h3>Work out the character under the fingertip geometrically</h3></div>
+        <div class="obj"><div class="n">03</div><h3>Give audio-first feedback in both modes</h3></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ARCHITECTURE -->
+  <section class="block" id="architecture">
+    <div class="wrap">
+      <div class="head">
+        <div>
+          <div class="cat">03 · System architecture</div>
+          <h2>From page to voice</h2>
+        </div>
+        <p>Five on-device stages turn a camera frame into a spoken character. The page is prescanned into a CellMap, then each fingertip frame is registered back to that map.</p>
+      </div>
+      <div class="pipeline">
+        <div class="stage">
+          <div class="step"><i></i><span class="meta">Stage 01</span></div>
+          <h3>Capture</h3>
+          <p>A phone camera or AiSee smart glasses focus on a Braille book.</p>
+        </div>
+        <div class="stage">
+          <div class="step"><i></i><span class="meta">Stage 02</span></div>
+          <h3>Page prescan</h3>
+          <p>A YOLO26n detector and a CNN classifier build a CellMap of the page.</p>
+          <div class="kpi">82.3% mAP · 99.24% acc.</div>
+        </div>
+        <div class="stage">
+          <div class="step"><i></i><span class="meta">Stage 03</span></div>
+          <h3>Fingertip + registration</h3>
+          <p>YOLO26n locates the finger, and a homography aligns the frame to the prescan.</p>
+          <div class="kpi">94.9% mAP · 94.7% recall</div>
+        </div>
+        <div class="stage">
+          <div class="step"><i></i><span class="meta">Stage 04</span></div>
+          <h3>Covered-cell lookup</h3>
+          <p>A geometric hit test finds the cell under the finger.</p>
+        </div>
+        <div class="stage out">
+          <div class="step"><i></i><span class="meta">Stage 05</span></div>
+          <h3>Audio feedback</h3>
+          <p>The result is spoken back in learning mode or testing mode.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- RESULTS -->
+  <section class="block" id="results">
+    <div class="wrap">
+      <div class="head">
+        <div>
+          <div class="cat">04 · Results</div>
+          <h2>Model performance</h2>
+        </div>
+        <p>Accuracy of the two on-device detectors and the cell classifier that power the pipeline.</p>
+      </div>
+      <div class="kpis">
+        <div class="kpi-col" style="--h:240px">
+          <span class="meta">Cell detector</span>
+          <div class="v">82.3<small>%</small></div>
+          <p>mAP · YOLO26n Braille cell detection</p>
+        </div>
+        <div class="kpi-col" style="--h:290px">
+          <span class="meta">Fingertip detector</span>
+          <div class="v">94.7<small>%</small></div>
+          <p>Recall · YOLO26n fingertip detection</p>
+        </div>
+        <div class="kpi-col" style="--h:300px">
+          <span class="meta">Fingertip detector</span>
+          <div class="v">94.9<small>%</small></div>
+          <p>mAP · YOLO26n fingertip detection</p>
+        </div>
+        <div class="kpi-col hi" style="--h:340px">
+          <span class="meta">Cell classifier</span>
+          <div class="v">99.24<small>%</small></div>
+          <p>Accuracy · CNN dot-pattern classifier</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- MODES + FEATURES -->
+  <section class="block" id="modes">
+    <div class="wrap">
+      <div class="head">
+        <div>
+          <div class="cat">05 · How learners use it</div>
+          <h2>Two modes</h2>
+        </div>
+        <p>Both modes share the same page map and fingertip lookup, so the learner moves between reading and self-testing on the same page.</p>
+      </div>
+      <div class="modes">
+        <div class="mode">
+          <span class="meta">Mode 01</span>
+          <h3>Learning mode</h3>
+          <p>Place a finger on any cell and the app reads the character under it aloud.</p>
+          <ul>
+            <li>Two-photo scan: prescan the page, then capture the finger</li>
+            <li>Speaks the character under the fingertip</li>
+            <li>Explore the page freely, cell by cell</li>
+          </ul>
+        </div>
+        <div class="mode accent">
+          <span class="meta">Mode 02</span>
+          <h3>Testing mode</h3>
+          <p>The app asks the learner to say the character, then checks the answer by speech.</p>
+          <ul>
+            <li>On-device speech recognition transcribes the answer</li>
+            <li>Names the correct character when the answer is wrong</li>
+            <li>Feedback through speech, sound, vibration and colour</li>
+          </ul>
+        </div>
+      </div>
+
+      <div style="margin-top:clamp(48px,6vw,80px)">
+        <div class="cat" style="margin-bottom:18px">Key features</div>
+        <div class="features">
+          <div class="feat">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18"/><path d="M3 9h18M9 21V9"/></svg>
+            <h3>Hands-free prescan</h3>
+            <p>Maps every cell on the page in one capture.</p>
+          </div>
+          <div class="feat">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2v8M8 6l4-4 4 4"/><rect x="7" y="12" width="10" height="10"/></svg>
+            <h3>Finger-guided lookup</h3>
+            <p>Finds the exact cell under the fingertip.</p>
+          </div>
+          <div class="feat">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5h16v14z"/><path d="M8 9h8M8 13h5"/></svg>
+            <h3>Learning mode</h3>
+            <p>Hear any character on demand.</p>
+          </div>
+          <div class="feat">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="2" width="6" height="12"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3"/></svg>
+            <h3>Testing mode</h3>
+            <p>Say the answer and get instant feedback.</p>
+          </div>
+          <div class="feat">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+            <h3>Fully offline</h3>
+            <p>All models run on-device, so pages and voices stay private.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- POSTER + VIDEO -->
+  <section class="block" id="media">
+    <div class="wrap">
+      <div class="head">
+        <div>
+          <div class="cat">06 · Poster &amp; video</div>
+          <h2>See it in action</h2>
+        </div>
+        <p>The project poster summarises the whole system on one page. The video walks through the app on a real Braille page.</p>
+      </div>
+      <div class="media-grid">
+        <figure>
+          <a class="poster" href="images/poster.png" target="_blank" rel="noopener" aria-label="Open the full-size BrailleLens poster">
+            <img src="images/poster.png" alt="BrailleLens project poster showing the system architecture, problem, proposed solution, objectives, key features, methodology, technologies and mobile app screenshots" width="2000" height="1414">
+          </a>
+          <figcaption><span class="meta">Project poster</span><a href="images/poster.png" target="_blank" rel="noopener">Open full size ↗</a></figcaption>
+        </figure>
+        <div class="side-stack">
+          <figure>
+            <div class="video" id="video">
+              <img src="images/video-thumb.jpg" alt="BrailleLens video thumbnail showing learning mode and testing mode" width="1280" height="720">
+              <button type="button" id="play" aria-label="Play the BrailleLens video"><span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4l13 8-13 8z"/></svg></span></button>
+            </div>
+            <figcaption><span class="meta">Demo video</span><a href="https://www.youtube.com/watch?v=EzpY-G2qT-E" target="_blank" rel="noopener">Watch on YouTube ↗</a></figcaption>
+          </figure>
+          <div>
+            <div class="cat" style="margin-bottom:14px">Methodology</div>
+            <p style="font-size:16px">The project moved through five stages, from requirements to on-device evaluation.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="timeline" style="margin-top:clamp(48px,6vw,80px)">
+        <div class="tl"><i></i><span class="meta">01</span><h3>Requirement analysis</h3></div>
+        <div class="tl"><i></i><span class="meta">02</span><h3>Data &amp; model training</h3></div>
+        <div class="tl"><i></i><span class="meta">03</span><h3>Mobile app development</h3></div>
+        <div class="tl"><i></i><span class="meta">04</span><h3>On-device integration</h3></div>
+        <div class="tl"><i></i><span class="meta">05</span><h3>Testing &amp; evaluation</h3></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- TECH -->
+  <section class="block" id="tech">
+    <div class="wrap">
+      <div class="head">
+        <div>
+          <div class="cat">07 · Technologies</div>
+          <h2>Built with</h2>
+        </div>
+        <p>Models are trained in Python with PyTorch, exported to ONNX and run inside a Flutter app on the phone or with AiSee glasses.</p>
+      </div>
+      <div class="tech">
+        <div><b>Flutter</b><span>Mobile app</span></div>
+        <div><b>Dart</b><span>App logic</span></div>
+        <div><b>Python</b><span>Training &amp; data pipeline</span></div>
+        <div><b>PyTorch</b><span>CNN classifier training</span></div>
+        <div><b>YOLO26n</b><span>Cell &amp; fingertip detection</span></div>
+        <div><b>OpenCV</b><span>Homography &amp; image processing</span></div>
+        <div><b>ONNX Runtime</b><span>On-device inference</span></div>
+        <div><b>AiSee Glasses</b><span>Wearable camera</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- TEAM -->
+  <section class="block" id="team">
+    <div class="wrap">
+      <div class="head">
+        <div>
+          <div class="cat">08 · Team</div>
+          <h2>The people</h2>
+        </div>
+        <p>A final-year project at the Department of Computer Science &amp; Engineering, University of Moratuwa.</p>
+      </div>
+      <div class="team">
+        <div class="person"><span class="meta">Team member</span><h3>Himandhi Kuruppu</h3></div>
+        <div class="person"><span class="meta">Team member</span><h3>Kalana Lakshan</h3></div>
+        <div class="person"><span class="meta">Team member</span><h3>Hasini Lawanya</h3></div>
+        <div class="person lead-p"><span class="meta">Supervisor</span><h3>Dr. Sandareka Wickramanayake</h3></div>
+        <div class="person"><span class="meta">Teaching assistant</span><h3>Ovindu Atukorala</h3></div>
+        <div class="person"><span class="meta">Department</span><h3>Computer Science &amp; Engineering</h3></div>
+      </div>
+      <div class="affil">
+        <img src="images/cse_logo.png" alt="Department of Computer Science &amp; Engineering, University of Moratuwa logo">
+        <span class="meta">Faculty of Engineering</span>
+        <span class="meta">University of Moratuwa · Sri Lanka</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- LINKS -->
+  <section class="block" id="links" style="border-bottom:0">
+    <div class="wrap">
+      <div class="head">
+        <div>
+          <div class="cat">09 · Links</div>
+          <h2>Find out more</h2>
+        </div>
+        <p>Source code, the demo video and the publication.</p>
+      </div>
+      <div class="links">
+        <a class="link-card" href="https://github.com/Kalana-Lakshan/BrailleLens" target="_blank" rel="noopener">
+          <span class="meta">Repository</span>
+          <h3>Source code on GitHub</h3>
+          <span class="url">github.com/Kalana-Lakshan/BrailleLens</span>
+        </a>
+        <a class="link-card" href="https://www.youtube.com/watch?v=EzpY-G2qT-E" target="_blank" rel="noopener">
+          <span class="meta">Video</span>
+          <h3>Demo on YouTube</h3>
+          <span class="url">youtube.com/watch?v=EzpY-G2qT-E</span>
+        </a>
+        <div class="link-card static">
+          <span class="meta">Publication</span>
+          <h3>Paper accepted</h3>
+          <span class="url">NeurIPS 2026 · Global South AI Workshop</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <span class="left"><img src="images/logo.svg" alt="" width="28" height="28"><span class="meta">BrailleLens · 2026</span></span>
+    <span class="meta">Dept. of Computer Science &amp; Engineering · University of Moratuwa</span>
+  </div>
+</footer>
+
+<script>
+  // Load the YouTube player only when asked, so the page stays light.
+  document.getElementById('play').addEventListener('click', function(){
+    var box = document.getElementById('video');
+    var f = document.createElement('iframe');
+    f.src = 'https://www.youtube-nocookie.com/embed/EzpY-G2qT-E?autoplay=1&rel=0';
+    f.title = 'BrailleLens demo video';
+    f.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture';
+    f.allowFullscreen = true;
+    f.referrerPolicy = 'strict-origin-when-cross-origin';
+    box.innerHTML = '';
+    box.appendChild(f);
+  });
+</script>
+</body>
+</html>
