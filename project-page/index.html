@@ -158,6 +158,17 @@
   figcaption a:hover{text-decoration:underline}
   .poster{border:1px solid var(--rule);background:#fff}
   .poster img{width:100%;height:auto}
+  .poster{cursor:zoom-in}
+
+  /* full-screen poster viewer */
+  .viewer{border:0;padding:0;margin:0;width:100vw;height:100vh;max-width:none;max-height:none;background:rgba(10,14,24,.92)}
+  .viewer::backdrop{background:rgba(10,14,24,.92)}
+  .viewer[open]{display:flex;align-items:center;justify-content:center}
+  .viewer img{max-width:calc(100vw - 32px);max-height:calc(100vh - 96px);width:auto;height:auto;background:#fff}
+  .viewer .close{position:fixed;top:16px;right:16px;display:inline-flex;align-items:center;gap:10px;padding:12px 16px;border:1px solid rgba(255,255,255,.6);background:rgba(10,14,24,.6);color:#fff;font-family:var(--mono);font-size:13px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;cursor:pointer}
+  .viewer .close:hover{background:#fff;color:var(--accent)}
+  .viewer .close svg{width:16px;height:16px;stroke:currentColor;stroke-width:2;fill:none}
+  .viewer .hint{position:fixed;bottom:16px;left:0;right:0;text-align:center;color:rgba(255,255,255,.7)}
   .video{position:relative;aspect-ratio:16/9;background:#000;overflow:hidden}
   .video img{width:100%;height:100%;object-fit:cover}
   .video button{position:absolute;inset:0;border:0;background:transparent;cursor:pointer;display:flex;align-items:center;justify-content:center}
@@ -470,10 +481,10 @@
       </div>
       <div class="media-grid">
         <figure>
-          <a class="poster" href="images/poster.png" target="_blank" rel="noopener" aria-label="Open the full-size BrailleLens poster">
+          <a class="poster" href="images/poster.png" data-viewer aria-label="Open the full-size BrailleLens poster">
             <img src="images/poster.png" alt="BrailleLens project poster showing the system architecture, problem, proposed solution, objectives, key features, methodology, technologies and mobile app screenshots" width="2000" height="1414">
           </a>
-          <figcaption><span class="meta">Project poster</span><a href="images/poster.png" target="_blank" rel="noopener">Open full size ↗</a></figcaption>
+          <figcaption><span class="meta">Project poster</span><a href="images/poster.png" data-viewer>View full size ↗</a></figcaption>
         </figure>
         <div class="side-stack">
           <figure>
@@ -601,6 +612,23 @@
     box.innerHTML = '';
     box.appendChild(f);
   });
+</script>
+<dialog class="viewer" id="viewer" aria-label="BrailleLens poster, full size">
+  <button type="button" class="close" id="viewer-close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5l14 14M19 5L5 19"/></svg>Close</button>
+  <img src="images/poster.png" alt="BrailleLens project poster, full size" width="2000" height="1414">
+  <span class="meta hint">Press Esc or tap outside the poster to close</span>
+</dialog>
+<script>
+  // Show the poster on top of the page instead of leaving it; Esc, the Close button or a tap outside closes it.
+  (function(){
+    var dlg = document.getElementById('viewer');
+    if (!dlg || !dlg.showModal) return; // very old browsers keep the plain link
+    document.querySelectorAll('[data-viewer]').forEach(function(a){
+      a.addEventListener('click', function(e){ e.preventDefault(); dlg.showModal(); });
+    });
+    document.getElementById('viewer-close').addEventListener('click', function(){ dlg.close(); });
+    dlg.addEventListener('click', function(e){ if (e.target === dlg) dlg.close(); });
+  })();
 </script>
 </body>
 </html>
