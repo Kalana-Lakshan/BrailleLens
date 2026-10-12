@@ -131,10 +131,61 @@ class CellDetectorService {
     }
 
     final kept = _nms(candidates, _iouThreshold);
+    final filtered = _dropIsolated(kept);
     debugPrint('[CellDetector] $_loadedAsset  ${rows.length} raw rows -> '
         '${candidates.length} above conf $_confThreshold -> '
-        '${kept.length} after NMS (iou $_iouThreshold)');
-    return kept;
+        '${kept.length} after NMS (iou $_iouThreshold) -> '
+        '${filtered.length} after isolation filter');
+    return filtered;
+  }
+
+  /// Drops detections with no neighbor at a plausible braille cell pitch.
+  ///
+  /// The detector has never seen a non-braille background during training
+  /// (every training image is a tightly-cropped braille page), so on an
+  /// unfamiliar surface -- a barcode, a keyboard, a face -- it can fire
+  /// confidently on textures that merely resemble a dot cluster. Real
+  /// braille cells always come in rows: even a short word has another
+  /// cell within a few cell-widths on the same line. A detection with no
+  /// such neighbor anywhere is much more likely a stray false positive
+  /// than a page containing exactly one isolated character, so it's
+  /// dropped rather than shown. This directly targets the "1 cell found"
+  /// class of false positive (e.g. a single keyboard key mistaken for a
+  /// cell) -- see reports/eval/gold_cell_detector_finetune.md and
+  /// cell_detect/CAMERA_DEGRADATION.md for the false-positive cases this
+  /// doesn't cover (dense structured look-alikes like QR codes/barcodes,
+  /// which tile in their own plausible "rows" and need hard-negative
+  /// training data instead, not a geometric filter).
+  List<CellDetection> _dropIsolated(
+    List<CellDetection> dets, {
+    double horizontalPitch = 6.0,
+    double verticalPitch = 1.5,
+  }) {
+    if (dets.length < 2) return const [];
+
+    final widths = dets.map((d) => d.box.width).toList()..sort();
+    final heights = dets.map((d) => d.box.height).toList()..sort();
+    final medianW = widths[widths.length ~/ 2];
+    final medianH = heights[heights.length ~/ 2];
+    final maxDx = medianW * horizontalPitch;
+    final maxDy = medianH * verticalPitch;
+
+    final centers = dets.map((d) => d.box.center).toList();
+    final keep = <CellDetection>[];
+    for (var i = 0; i < dets.length; i++) {
+      var hasNeighbor = false;
+      for (var j = 0; j < dets.length; j++) {
+        if (i == j) continue;
+        final dx = (centers[i].dx - centers[j].dx).abs();
+        final dy = (centers[i].dy - centers[j].dy).abs();
+        if (dx <= maxDx && dy <= maxDy) {
+          hasNeighbor = true;
+          break;
+        }
+      }
+      if (hasNeighbor) keep.add(dets[i]);
+    }
+    return keep;
   }
 
   /// Greedy NMS, highest confidence first. Safety net for the end-to-end

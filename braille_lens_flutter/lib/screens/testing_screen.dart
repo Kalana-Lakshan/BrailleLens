@@ -17,7 +17,7 @@ import '../services/tip_dwell_tracker.dart';
 import '../services/stt_onnx_service.dart';
 import '../services/voice_capture_service.dart';
 import '../utils/answer_match.dart';
-import '../utils/sinhala_prompts.dart';
+import '../utils/app_prompts.dart';
 import '../theme/app_theme.dart';
 import '../utils/image_decode.dart';
 import '../utils/sinhala_phonetics.dart';
@@ -43,13 +43,26 @@ enum _TestStage { prescan, fingerResult }
 class TestingScreen extends StatefulWidget {
   final AudioService audioService;
 
-  const TestingScreen({super.key, required this.audioService});
+  /// Picked on Home: which letters cells are read as, the prompt voice, and
+  /// which recogniser scores the answer.
+  final AppLanguage language;
+
+  const TestingScreen({
+    super.key,
+    required this.audioService,
+    this.language = AppLanguage.sinhala,
+  });
 
   @override
   State<TestingScreen> createState() => _TestingScreenState();
 }
 
 class _TestingScreenState extends State<TestingScreen> {
+  AppPrompts get _p => widget.language.prompts;
+  bool get _english => widget.language == AppLanguage.english;
+
+  Future<void> _say(String text) => _p.speak(widget.audioService, text);
+
   final CameraSourceController _camera = CameraSourceController();
   final PrescanBridge _prescanBridge = PrescanBridge();
   final FingertipOnnxService _fingertipOnnx = FingertipOnnxService();
@@ -139,8 +152,12 @@ class _TestingScreenState extends State<TestingScreen> {
     final cnnReady = await PrescanBridge.ensureOnDeviceReady();
     final tipReady = await _fingertipOnnx.initialize();
     // Speech is only needed at the end of a round, but loading it here keeps
-    // the first answer from stalling on a cold ~79 MB model load.
-    final sttReady = await _stt.initialize();
+    // the first answer from stalling on a cold ~79 MB model load. English
+    // answers go to the device recogniser instead: the model knows only
+    // Sinhala letters.
+    final sttReady = _english
+        ? await widget.audioService.initStt()
+        : await _stt.initialize();
     if (!mounted) return;
     setState(() {
       _cameraReady = _camera.isReady;
@@ -151,28 +168,31 @@ class _TestingScreenState extends State<TestingScreen> {
         tipReady
             ? 'YOLO: ${_fingertipOnnx.loadedAsset?.split('/').last}'
             : 'YOLO failed — tap fingertip',
-        sttReady
-            ? 'STT: ${_stt.loadedAsset?.split('/').last}'
-            : 'STT unavailable',
+        !sttReady
+            ? 'STT unavailable'
+            : _english
+                ? 'STT: device recogniser'
+                : 'STT: ${_stt.loadedAsset?.split('/').last}',
         'Hands-free: on',
       ].join(' · ');
     });
     if (!sttReady) {
       // Not fatal: rounds still resolve the letter and read it out, they
       // just cannot score a spoken answer.
-      debugPrint('[Testing] STT unavailable: ${_stt.lastError}');
+      debugPrint('[Testing] STT unavailable: '
+          '${_english ? 'device recogniser' : _stt.lastError}');
     }
 
     for (final (failed, warning) in [
-      (!_cameraReady, SinhalaPrompts.noCamera),
-      (!cnnReady, SinhalaPrompts.readerFailed),
-      (!tipReady, SinhalaPrompts.fingerDetectorFailed),
-      (!sttReady, SinhalaPrompts.sttFailed),
+      (!_cameraReady, _p.noCamera),
+      (!cnnReady, _p.readerFailed),
+      (!tipReady, _p.fingerDetectorFailed),
+      (!sttReady, _p.sttFailed),
     ]) {
-      if (failed) await widget.audioService.speakSinhala(warning);
+      if (failed) await _say(warning);
     }
-    await widget.audioService.speakSinhala(SinhalaPrompts.enterTesting);
-    await widget.audioService.speakSinhala(SinhalaPrompts.prescan);
+    await _say(_p.enterTesting);
+    await _say(_p.prescan);
 
     if (!mounted || !_cameraReady) return;
     _session.start();
@@ -286,7 +306,7 @@ class _TestingScreenState extends State<TestingScreen> {
     final target =
         CellHitTest.nearestCell(tipInPrescan, map, withinCells: 3.0);
     if (target == null) return null;
-    return SinhalaPrompts.direction(
+    return _p.direction(
       tipInPrescan,
       target.center,
       CellHitTest.medianCellWidth(map),
@@ -300,15 +320,8 @@ class _TestingScreenState extends State<TestingScreen> {
         case HandsFreeStatus(:final message, :final speech):
           setState(() => _statusLine = message);
           if (speech != null) await _voiceStatus(speech);
-        case HandsFreeSpeak(:final text, :final sinhala):
-          final replacement = SinhalaPrompts.sessionLine(text);
-          if (replacement != null) {
-            await widget.audioService.speakSinhala(replacement);
-          } else if (sinhala) {
-            await widget.audioService.speakSinhala(text);
-          } else {
-            await widget.audioService.speak(text);
-          }
+        case HandsFreeSpeak(:final text):
+          await _p.speakLine(widget.audioService, text);
         case HandsFreePlayCountdown(
             :final count,
             :final intervalMs,
@@ -339,21 +352,11 @@ class _TestingScreenState extends State<TestingScreen> {
     }
     _lastVoiced = text;
     _lastVoicedAt = now;
-    final sinhala = SinhalaPrompts.sessionLine(text) ??
-        (_isSinhalaScript(text) ? text : null);
-    if (sinhala != null) {
-      await widget.audioService.speakSinhala(sinhala);
-    } else {
-      debugPrint('[Testing] no Sinhala for "$text"');
-      await widget.audioService.speak(text);
-    }
+    await _p.speakLine(widget.audioService, text);
   }
 
-  static bool _isSinhalaScript(String text) =>
-      RegExp('[\u0D80-\u0DFF]').hasMatch(text);
-
   Future<void> _voiceCaptureFailed() =>
-      widget.audioService.speakSinhala(SinhalaPrompts.retryError);
+      _say(_p.retryError);
 
   Future<void> _runCountdown(
     int count,
@@ -463,7 +466,7 @@ class _TestingScreenState extends State<TestingScreen> {
         _busy = false;
         _statusLine = 'Finger still visible — refresh skipped';
       });
-      await _voiceStatus(SinhalaPrompts.fingerStillOnPage);
+      await _voiceStatus(_p.fingerStillOnPage);
       await _dispatch(_session.onSoftRescanFinished(success: false));
       _session.resume();
       return;
@@ -514,7 +517,7 @@ class _TestingScreenState extends State<TestingScreen> {
         _busy = false;
         _statusLine = _camera.source?.lastError ?? 'Camera capture failed';
       });
-      await widget.audioService.speakSinhala(SinhalaPrompts.retryError);
+      await _say(_p.retryError);
       return;
     }
     await _runPrescanFromJpeg(jpeg, speakOnSuccess: true);
@@ -532,7 +535,7 @@ class _TestingScreenState extends State<TestingScreen> {
         _busy = false;
         _statusLine = _camera.source?.lastError ?? 'Camera capture failed';
       });
-      await widget.audioService.speakSinhala(SinhalaPrompts.retryError);
+      await _say(_p.retryError);
       return;
     }
     await _runFingerLookupFromJpeg(
@@ -576,9 +579,9 @@ class _TestingScreenState extends State<TestingScreen> {
         _statusLine =
             '${fixed.cells.length} cells found · place a finger, then $_captureHint';
       });
-      await _voiceStatus(SinhalaPrompts.cellsFound(fixed.cells.length));
+      await _voiceStatus(_p.cellsFound(fixed.cells.length));
       if (speakOnSuccess) {
-        await widget.audioService.speakSinhala(SinhalaPrompts.pageReady);
+        await _say(_p.pageReady);
       }
       return true;
     } on PrescanUnavailableException catch (e) {
@@ -588,7 +591,7 @@ class _TestingScreenState extends State<TestingScreen> {
         _statusLine = e.message;
       });
       if (speakOnSuccess) {
-        await widget.audioService.speakSinhala(SinhalaPrompts.retryError);
+        await _say(_p.retryError);
       }
       return false;
     } catch (e) {
@@ -619,7 +622,7 @@ class _TestingScreenState extends State<TestingScreen> {
         _statusLine = 'No fingertip — tap on your finger tip on screen';
       });
       if (!allowTapFallback) {
-        await widget.audioService.speakSinhala(SinhalaPrompts.retryError);
+        await _say(_p.retryError);
       }
       return null;
     }
@@ -642,7 +645,8 @@ class _TestingScreenState extends State<TestingScreen> {
 
     // Indicators ("[IND-A]") and blank cells have no spoken name, so there
     // is nothing to quiz on; they are reported and the learner moves on.
-    final quizzable = result.hasHit && isNameableSinhala(result.headline);
+    final target = result.hasHit ? _p.letterOf(result.cell!) : null;
+    final quizzable = target != null;
 
     if (!mounted) return null;
     setState(() {
@@ -655,13 +659,13 @@ class _TestingScreenState extends State<TestingScreen> {
           : quizzable
               // The quiz must not print the answer before it is given.
               ? 'Cell found · name the letter'
-              : '${result.headline} · not a letter — move on';
+              : '${_p.cellLabel(result.cell!)} · not a letter — move on';
     });
 
     if (quizzable) {
       // Hands-free dwell is paused by the caller for the whole round, so the
       // sampler cannot start a new capture while the learner answers.
-      await _askAndScore(result.headline);
+      await _askAndScore(target);
       _scheduleResultClear();
       return result.cell?.id;
     }
@@ -671,15 +675,15 @@ class _TestingScreenState extends State<TestingScreen> {
         await widget.audioService.playSuccessTone();
         await widget.audioService.hapticLight();
       }
-      await widget.audioService.speakSinhala(SinhalaPrompts.notALetter);
+      await _say(_p.notALetter);
       return result.cell?.id;
     }
 
-    await widget.audioService.speakSinhala(SinhalaPrompts.retryError);
+    await _say(_p.retryError);
     // Raw-ratio mapping ('scale'): a direction from it would be a guess.
     if (!result.alignMode.startsWith('scale')) {
       final hint = _directionToNearestCell(result.tipInPrescan);
-      if (hint != null) await widget.audioService.speakSinhala(hint);
+      if (hint != null) await _say(hint);
     }
     return null;
   }
@@ -688,19 +692,24 @@ class _TestingScreenState extends State<TestingScreen> {
 
   /// Asks the learner to name [target], records the answer, transcribes it
   /// with the on-device STT model and compares it with the letter the CNN
-  /// resolved under the finger (the letter itself or its Sinhala name).
+  /// resolved under the finger (the letter itself or its name).
   Future<void> _askAndScore(String target) async {
     setState(() {
       _answering = true;
-      _targetChar = target;
-      _targetPhonetic = sinhalaLetterName(target);
+      _targetChar = _english ? target.toUpperCase() : target;
+      _targetPhonetic = _p.letterName(target);
       _spokenResult = null;
       _lastCorrect = null;
     });
     _commands.pause();
     try {
-      await widget.audioService.speakSinhala(SinhalaPrompts.askLetter);
+      await _say(_p.askLetter);
       if (!mounted || _isExiting) return;
+
+      if (_english && _sttReady) {
+        await _scoreEnglish(target);
+        return;
+      }
 
       if (!_sttReady || !_stt.canRecognise(target)) {
         // Nothing to score against: either the speech model is missing, or
@@ -708,10 +717,11 @@ class _TestingScreenState extends State<TestingScreen> {
         // knows. Read the answer out rather than fail the learner.
         setState(() => _statusLine = _sttReady
             ? '$target is not a letter the speech model can check'
-            : 'Speech model missing — add sinhala_mms_small_int8.onnx + '
-                'letters.json to assets/models/');
-        await widget.audioService
-            .speakSinhala(SinhalaPrompts.reveal(_targetPhonetic));
+            : _english
+                ? 'Speech recogniser unavailable on this device'
+                : 'Speech model missing — add sinhala_mms_small_int8.onnx + '
+                    'letters.json to assets/models/');
+        await _say(_p.reveal(_targetPhonetic));
         return;
       }
 
@@ -721,7 +731,7 @@ class _TestingScreenState extends State<TestingScreen> {
       VoiceCapture? capture;
       for (var attempt = 1; attempt <= _listenAttempts; attempt++) {
         if (attempt > 1) {
-          await widget.audioService.speakSinhala(SinhalaPrompts.didNotHear);
+          await _say(_p.didNotHear);
           if (!mounted || _isExiting) return;
         }
         setState(() {
@@ -755,9 +765,8 @@ class _TestingScreenState extends State<TestingScreen> {
 
       if (answer == null) {
         setState(() => _spokenResult = '');
-        await widget.audioService.speakSinhala(SinhalaPrompts.gaveUpListening);
-        await widget.audioService
-            .speakSinhala(SinhalaPrompts.reveal(_targetPhonetic));
+        await _say(_p.gaveUpListening);
+        await _say(_p.reveal(_targetPhonetic));
         return;
       }
 
@@ -777,18 +786,8 @@ class _TestingScreenState extends State<TestingScreen> {
             '${capture?.source.name} mic';
       });
 
-      if (matched) {
-        await widget.audioService.hapticHeavy();
-        await widget.audioService.playSuccessTone();
-        await widget.audioService
-            .speakSinhala(SinhalaPrompts.correct(_targetPhonetic));
-      } else {
-        await widget.audioService.hapticError();
-        await widget.audioService.playErrorTone();
-        // "You said <name of the heard letter>, but the correct letter…"
-        await widget.audioService.speakSinhala(SinhalaPrompts.incorrect(
-            sinhalaLetterName(spoken), _targetPhonetic));
-      }
+      // "You said <name of the heard letter>, but the correct letter…"
+      await _announceVerdict(matched, _p.letterName(spoken));
     } finally {
       if (mounted) {
         setState(() {
@@ -796,6 +795,62 @@ class _TestingScreenState extends State<TestingScreen> {
           _listening = false;
         });
       }
+    }
+  }
+
+  /// English round: the device recogniser transcribes the answer, and
+  /// [spokenAnswerMatches] accepts the letter or its name ("b", "bee").
+  Future<void> _scoreEnglish(String target) async {
+    String? heard;
+    for (var attempt = 1; attempt <= _listenAttempts; attempt++) {
+      if (attempt > 1) {
+        await _say(_p.didNotHear);
+        if (!mounted || _isExiting) return;
+      }
+      setState(() {
+        _listening = true;
+        _statusLine = 'Listening…';
+      });
+      // The recogniser plays its own open/close chimes.
+      heard = await widget.audioService.listenForAnswer(
+        timeout: const Duration(seconds: 8),
+        localeId: 'en_US',
+      );
+      if (!mounted || _isExiting) return;
+      setState(() => _listening = false);
+      if (heard != null && heard.trim().isNotEmpty) break;
+      heard = null;
+    }
+
+    if (heard == null) {
+      setState(() => _spokenResult = '');
+      await _say(_p.gaveUpListening);
+      await _say(_p.reveal(_targetPhonetic));
+      return;
+    }
+
+    final said = heard;
+    final matched = spokenAnswerMatches(said, target);
+    debugPrint('[Testing] target=$target heard="$said" matched=$matched');
+    setState(() {
+      _spokenResult = said;
+      _lastCorrect = matched;
+      _total++;
+      if (matched) _correct++;
+      _statusLine = 'You said: $said';
+    });
+    await _announceVerdict(matched, said);
+  }
+
+  Future<void> _announceVerdict(bool matched, String said) async {
+    if (matched) {
+      await widget.audioService.hapticHeavy();
+      await widget.audioService.playSuccessTone();
+      await _say(_p.correct(_targetPhonetic));
+    } else {
+      await widget.audioService.hapticError();
+      await widget.audioService.playErrorTone();
+      await _say(_p.incorrect(said, _targetPhonetic));
     }
   }
 
@@ -857,7 +912,7 @@ class _TestingScreenState extends State<TestingScreen> {
       case ScreenCommand.capture:
         await _onCapturePressed();
       case ScreenCommand.help:
-        await widget.audioService.speakSinhala(SinhalaPrompts.testingHelp);
+        await _say(_p.testingHelp);
     }
   }
 
@@ -881,7 +936,7 @@ class _TestingScreenState extends State<TestingScreen> {
     });
     _session.resetToPageHunt();
     // Back to Stage 1.
-    widget.audioService.speakSinhala(SinhalaPrompts.prescan);
+    _say(_p.prescan);
   }
 
   Future<void> _exit() async {
@@ -894,7 +949,7 @@ class _TestingScreenState extends State<TestingScreen> {
     _session.pause();
     await widget.audioService.stopSpeech();
     await widget.audioService.hapticLight();
-    await widget.audioService.speakSinhala(SinhalaPrompts.returningHome);
+    await _say(_p.returningHome);
     if (mounted) Navigator.pop(context);
   }
 

@@ -43,32 +43,55 @@ class AppConfig {
   static const double fingertipConfThreshold = 0.35;
 
   /// Multi-cell page detector — single-class YOLO26n (`braille_cell`),
-  /// 1280×1280 input, up to 800 boxes per page. Exported by
-  /// `cell_detect/export_to_onnx.py` from `cell_detect/weights/
-  /// braille_cell_gold_degraded.pt` — fine-tuned with an added synthetic
-  /// camera-degradation augmentation to close the domain gap with the AiSee
-  /// glasses camera (see `cell_detect/CAMERA_DEGRADATION.md`). Consistent
-  /// mAP50 gains on held-out Gold pages across high/low/degraded quality
-  /// variants; mixed on 2 real unseen AiSee photos (fewer merged boxes on
-  /// one, lower recall on faint dots on the other) -- see
-  /// `braille_cell_yolo26n_degraded_meta.json`'s provenance_notes. UINT8
-  /// quantized first (phone CPU), FP32 fallback — same dual-asset pattern as
-  /// [fingertipOnnxAsset]. Previous default: `braille_cell_yolo26n[_mobile].onnx`
-  /// (from `braille_cell_best.pt`), still bundled as an asset if reverting.
+  /// 1280×1280 input, up to 800 boxes per page.
   ///
-  /// Active: `braille_cell_yolo26n_lighting[_mobile].onnx` (from
-  /// `braille_cell_lighting.pt`) — the degraded model further fine-tuned for
-  /// dim and side light and on Braille-free negatives
-  /// (`lighting_robust/BrailleLens_LightingRobust_Colab.ipynb`). The degraded
-  /// files stay bundled for reverting (with threshold 0.25).
+  /// Lineage: `braille_cell_best.pt` (DSBI+Angelina) -> gold fine-tune ->
+  /// `braille_cell_gold_degraded.pt` (camera-degradation augmentation, see
+  /// `cell_detect/CAMERA_DEGRADATION.md`) -> `braille_cell_lighting.pt`
+  /// (teammate's lighting/Braille-free-negatives fine-tune, see
+  /// `lighting_robust/results/`) -> **active**: `braille_cell_lighting_negatives.pt`
+  /// -- the lighting checkpoint further fine-tuned on 39 of our own
+  /// hard-negative images (barcodes/QR codes, dense code/text, shop clutter
+  /// -- see `cell_detect/make_synthetic_negatives.py` and the "Non-braille
+  /// images" folder), same proven 12-image positive set, no other changes
+  /// (`cell_detect/gold_finetune_2.py`). Held-out test mAP50 0.926 vs 0.940
+  /// for the lighting checkpoint alone (negligible difference); full pipeline
+  /// (detect+classify+reconstruct text, 6 Gold text pages) 89.9% letters-only
+  /// vs 88.2% -- a real gain on 4 of 6 pages, the best full-pipeline result
+  /// measured all project -- see `reports/eval/gold_text.md`'s "hard-negatives
+  /// fine-tuned on top of the teammate's lighting-robust checkpoint" section.
+  /// Also confirmed clean (0 false positives) on a real AiSee photo with
+  /// background clutter (person, laptop, signage), same as the parent.
+  ///
+  /// A separate hard-negative fine-tune off an earlier point in this lineage
+  /// (`braille_cell_yolo26n_negatives[_mobile].onnx`, from
+  /// `braille_cell_gold_negatives.pt` -- built on `braille_cell_gold.pt`,
+  /// before the degradation/lighting work) independently found and fixed the
+  /// same zero-non-braille-exposure problem first; superseded by the active
+  /// checkpoint above once `braille_cell_lighting.pt` was tracked, since
+  /// stacking the same hard negatives on the stronger lighting-robust base
+  /// won on every metric. Still bundled, kept for history/comparison.
+  ///
+  /// UINT8 quantized first (phone CPU), FP32 fallback — same dual-asset
+  /// pattern as [fingertipOnnxAsset]. Every earlier stage in the lineage
+  /// above also still bundled if reverting.
   static const String cellDetectorOnnxAsset =
-      'assets/models/braille_cell_yolo26n_lighting_mobile.onnx';
+      'assets/models/braille_cell_yolo26n_lighting_negatives_mobile.onnx';
 
   static const String cellDetectorOnnxFallbackAsset =
-      'assets/models/braille_cell_yolo26n_lighting.onnx';
+      'assets/models/braille_cell_yolo26n_lighting_negatives.onnx';
 
   /// Minimum box score for [cellDetectorOnnxAsset]. Belongs with the model,
   /// not the detector code: scores are calibrated per export.
+  ///
+  /// Carried over from `braille_cell_lighting.pt` (0.40, its own sweep
+  /// against held-out Gold pages and Braille-free images -- see
+  /// `lighting_robust/results/`), not independently re-swept for this
+  /// specific derived checkpoint -- a live-detection threshold sweep
+  /// matching that same methodology hasn't been done here. A `.val()`-based
+  /// sweep (0.15-0.50) on held-out Gold pages showed a flat F1 (~0.926)
+  /// across the whole range, so this is a reasonable default, not a
+  /// rigorously re-calibrated one.
   ///
   /// The degraded model's raw head scores lower than the old end-to-end one,
   /// so the old 0.50 threw most cells away — on live phone frames all of them

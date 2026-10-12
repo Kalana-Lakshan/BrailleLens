@@ -14,10 +14,9 @@ import '../services/prescan_bridge.dart';
 import '../services/screen_command_listener.dart';
 import '../services/tip_dwell_tracker.dart';
 import '../utils/answer_match.dart';
-import '../utils/sinhala_prompts.dart';
+import '../utils/app_prompts.dart';
 import '../theme/app_theme.dart';
 import '../utils/image_decode.dart';
-import '../utils/sinhala_phonetics.dart';
 import '../widgets/frozen_image_view.dart';
 import '../widgets/tap_fingertip_dialog.dart';
 
@@ -31,13 +30,24 @@ enum _LearningStage { prescan, fingerResult }
 class LearningScreen extends StatefulWidget {
   final AudioService audioService;
 
-  const LearningScreen({super.key, required this.audioService});
+  /// Picked on Home: which letters cells are read as, and the prompt voice.
+  final AppLanguage language;
+
+  const LearningScreen({
+    super.key,
+    required this.audioService,
+    this.language = AppLanguage.sinhala,
+  });
 
   @override
   State<LearningScreen> createState() => _LearningScreenState();
 }
 
 class _LearningScreenState extends State<LearningScreen> {
+  AppPrompts get _p => widget.language.prompts;
+
+  Future<void> _say(String text) => _p.speak(widget.audioService, text);
+
   final CameraSourceController _camera = CameraSourceController();
   final PrescanBridge _prescanBridge = PrescanBridge();
   final FingertipOnnxService _fingertipOnnx = FingertipOnnxService();
@@ -117,17 +127,16 @@ class _LearningScreenState extends State<LearningScreen> {
     });
 
     if (!_cameraReady) {
-      await widget.audioService.speakSinhala(SinhalaPrompts.noCamera);
+      await _say(_p.noCamera);
     }
     if (!cnnReady) {
-      await widget.audioService.speakSinhala(SinhalaPrompts.readerFailed);
+      await _say(_p.readerFailed);
     }
     if (!tipReady) {
-      await widget.audioService
-          .speakSinhala(SinhalaPrompts.fingerDetectorFailed);
+      await _say(_p.fingerDetectorFailed);
     }
-    await widget.audioService.speakSinhala(SinhalaPrompts.enterLearning);
-    await widget.audioService.speakSinhala(SinhalaPrompts.prescan);
+    await _say(_p.enterLearning);
+    await _say(_p.prescan);
 
     if (!mounted || !_cameraReady) return;
     _session.start();
@@ -237,15 +246,8 @@ class _LearningScreenState extends State<LearningScreen> {
         case HandsFreeStatus(:final message, :final speech):
           setState(() => _statusLine = message);
           if (speech != null) await _voiceStatus(speech);
-        case HandsFreeSpeak(:final text, :final sinhala):
-          final replacement = SinhalaPrompts.sessionLine(text);
-          if (replacement != null) {
-            await widget.audioService.speakSinhala(replacement);
-          } else if (sinhala) {
-            await widget.audioService.speakSinhala(text);
-          } else {
-            await widget.audioService.speak(text);
-          }
+        case HandsFreeSpeak(:final text):
+          await _p.speakLine(widget.audioService, text);
         case HandsFreePlayCountdown(
             :final count,
             :final intervalMs,
@@ -276,21 +278,11 @@ class _LearningScreenState extends State<LearningScreen> {
     }
     _lastVoiced = text;
     _lastVoicedAt = now;
-    final sinhala = SinhalaPrompts.sessionLine(text) ??
-        (_isSinhalaScript(text) ? text : null);
-    if (sinhala != null) {
-      await widget.audioService.speakSinhala(sinhala);
-    } else {
-      debugPrint('[Learning] no Sinhala for "$text"');
-      await widget.audioService.speak(text);
-    }
+    await _p.speakLine(widget.audioService, text);
   }
 
-  static bool _isSinhalaScript(String text) =>
-      RegExp('[\u0D80-\u0DFF]').hasMatch(text);
-
   Future<void> _voiceCaptureFailed() =>
-      widget.audioService.speakSinhala(SinhalaPrompts.retryError);
+      _say(_p.retryError);
 
   Future<void> _runCountdown(
     int count,
@@ -400,7 +392,7 @@ class _LearningScreenState extends State<LearningScreen> {
         _busy = false;
         _statusLine = 'Finger still visible — refresh skipped';
       });
-      await _voiceStatus(SinhalaPrompts.fingerStillOnPage);
+      await _voiceStatus(_p.fingerStillOnPage);
       await _dispatch(_session.onSoftRescanFinished(success: false));
       _session.resume();
       return;
@@ -451,7 +443,7 @@ class _LearningScreenState extends State<LearningScreen> {
         _busy = false;
         _statusLine = _camera.source?.lastError ?? 'Camera capture failed';
       });
-      await widget.audioService.speakSinhala(SinhalaPrompts.retryError);
+      await _say(_p.retryError);
       return;
     }
     await _runPrescanFromJpeg(jpeg, speakOnSuccess: true);
@@ -469,7 +461,7 @@ class _LearningScreenState extends State<LearningScreen> {
         _busy = false;
         _statusLine = _camera.source?.lastError ?? 'Camera capture failed';
       });
-      await widget.audioService.speakSinhala(SinhalaPrompts.retryError);
+      await _say(_p.retryError);
       return;
     }
     await _runFingerLookupFromJpeg(
@@ -513,9 +505,9 @@ class _LearningScreenState extends State<LearningScreen> {
         _statusLine =
             '${fixed.cells.length} cells found · place a finger, then $_captureHint';
       });
-      await _voiceStatus(SinhalaPrompts.cellsFound(fixed.cells.length));
+      await _voiceStatus(_p.cellsFound(fixed.cells.length));
       if (speakOnSuccess) {
-        await widget.audioService.speakSinhala(SinhalaPrompts.pageReady);
+        await _say(_p.pageReady);
       }
       return true;
     } on PrescanUnavailableException catch (e) {
@@ -525,7 +517,7 @@ class _LearningScreenState extends State<LearningScreen> {
         _statusLine = e.message;
       });
       if (speakOnSuccess) {
-        await widget.audioService.speakSinhala(SinhalaPrompts.retryError);
+        await _say(_p.retryError);
       }
       return false;
     } catch (e) {
@@ -556,7 +548,7 @@ class _LearningScreenState extends State<LearningScreen> {
         _statusLine = 'No fingertip — tap on your finger tip on screen';
       });
       if (!allowTapFallback) {
-        await widget.audioService.speakSinhala(SinhalaPrompts.retryError);
+        await _say(_p.retryError);
       }
       return null;
     }
@@ -584,7 +576,7 @@ class _LearningScreenState extends State<LearningScreen> {
       _covered = result;
       _busy = false;
       _statusLine = result.hasHit
-          ? '${result.compactDots} · ${result.headline}'
+          ? '${result.compactDots} · ${_p.cellLabel(result.cell!)}'
           : result.subtitle;
     });
     _scheduleResultClear();
@@ -594,23 +586,20 @@ class _LearningScreenState extends State<LearningScreen> {
         await widget.audioService.playSuccessTone();
         await widget.audioService.hapticLight();
       }
-      final ch = result.headline;
-      if (!isNameableSinhala(ch)) {
-        await widget.audioService.speakSinhala(SinhalaPrompts.notALetter);
+      final ch = _p.letterOf(result.cell!);
+      if (ch == null) {
+        await _say(_p.notALetter);
       } else {
-        final name = sinhalaLetterName(ch);
-        await widget.audioService.speakSinhala(
-          name.isEmpty ? ch : 'අක්ෂරය $name',
-        );
+        await _say(_p.announce(_p.letterName(ch)));
       }
-      final dots = SinhalaPrompts.dots(result.compactDots);
+      final dots = _p.dots(result.compactDots);
       if (dots.isNotEmpty) {
-        await widget.audioService.speakSinhala(dots);
+        await _say(dots);
       }
       return result.cell?.id;
     }
 
-    await widget.audioService.speakSinhala(SinhalaPrompts.retryError);
+    await _say(_p.retryError);
     return null;
   }
 
@@ -672,7 +661,7 @@ class _LearningScreenState extends State<LearningScreen> {
       case ScreenCommand.capture:
         await _onCapturePressed();
       case ScreenCommand.help:
-        await widget.audioService.speakSinhala(SinhalaPrompts.learningHelp);
+        await _say(_p.learningHelp);
     }
   }
 
@@ -691,7 +680,7 @@ class _LearningScreenState extends State<LearningScreen> {
     });
     _session.resetToPageHunt();
     // Back to Stage 1.
-    widget.audioService.speakSinhala(SinhalaPrompts.prescan);
+    _say(_p.prescan);
   }
 
   Future<void> _exit() async {
@@ -704,7 +693,7 @@ class _LearningScreenState extends State<LearningScreen> {
     _session.pause();
     await widget.audioService.stopSpeech();
     await widget.audioService.hapticLight();
-    await widget.audioService.speakSinhala(SinhalaPrompts.returningHome);
+    await _say(_p.returningHome);
     if (mounted) Navigator.pop(context);
   }
 

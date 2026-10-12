@@ -15,43 +15,47 @@ bool spokenAnswerMatches(String? spoken, String expected) {
       .toList();
   if (tokens.isEmpty) return false;
 
-  const letterNames = {
-    'a': 'ay',
-    'b': 'bee',
-    'c': 'see',
-    'd': 'dee',
-    'e': 'ee',
-    'f': 'eff',
-    'g': 'gee',
-    'h': 'aitch',
-    'i': 'eye',
-    'j': 'jay',
-    'k': 'kay',
-    'l': 'ell',
-    'm': 'em',
-    'n': 'en',
-    'o': 'oh',
-    'p': 'pee',
-    'q': 'cue',
-    'r': 'ar',
-    's': 'ess',
-    't': 'tee',
-    'u': 'you',
-    'v': 'vee',
-    'w': 'doubleyou',
-    'x': 'ex',
-    'y': 'why',
-    'z': 'zed',
+  // Each letter's name and the spellings the device recogniser returns for
+  // it said alone ("L" comes back as "el", "elle", "ell"). Everyday words that
+  // are easy to say by accident ("okay", "hey", "and", "yes") are left out.
+  const letterNames = <String, Set<String>>{
+    'a': {'ay', 'eh'},
+    'b': {'bee', 'be', 'bea'},
+    'c': {'see', 'sea', 'si'},
+    'd': {'dee', 'di'},
+    'e': {'ee'},
+    'f': {'eff', 'ef'},
+    'g': {'gee', 'ji', 'jee'},
+    'h': {'aitch', 'eich', 'haitch'},
+    'i': {'eye', 'aye'},
+    'j': {'jay', 'jae'},
+    'k': {'kay', 'cay', 'kei'},
+    'l': {'ell', 'el', 'elle'},
+    'm': {'em', 'emm'},
+    'n': {'en', 'enn'},
+    'o': {'oh', 'owe'},
+    'p': {'pee', 'pea'},
+    'q': {'cue', 'queue', 'kew'},
+    'r': {'ar', 'are'},
+    's': {'ess', 'es'},
+    't': {'tee', 'tea', 'ti'},
+    'u': {'you', 'yu'},
+    'v': {'vee', 'vi'},
+    'w': {'doubleyou', 'doubleu'},
+    'x': {'ex', 'ecks'},
+    'y': {'why', 'wye'},
+    'z': {'zed', 'zee'},
   };
 
   bool tokenHits(String t) {
     if (t == exp) return true;
-    if (exp.length == 1 && t.length == 1 && t == exp) return true;
-    final name = letterNames[exp];
-    if (name != null && t == name) return true;
-    return false;
+    return letterNames[exp]?.contains(t) ?? false;
   }
 
+  // "double you" comes back as two words.
+  if (exp == 'w' && tokens.join(' ').contains(RegExp(r'\bdouble\s*(you|u)\b'))) {
+    return true;
+  }
   return tokens.any(tokenHits);
 }
 
@@ -68,6 +72,24 @@ String? parseVoiceModeCommand(String? spoken) {
   }
   for (final t in tokens) {
     if (t == 'testing' || t == 'test') return 'testing';
+  }
+  return null;
+}
+
+/// Home language command: 'english' or 'sinhala' (whole words), or null.
+String? parseVoiceLanguageCommand(String? spoken) {
+  if (spoken == null) return null;
+  final tokens = spoken
+      .toLowerCase()
+      .replaceAll(RegExp(r'[^a-z\s]'), ' ')
+      .split(RegExp(r'\s+'))
+      .where((t) => t.isNotEmpty);
+  for (final t in tokens) {
+    if (t == 'english') return 'english';
+    // The English recogniser's spellings of "Sinhala".
+    if (t == 'sinhala' || t == 'sinhalese' || t == 'singhala') {
+      return 'sinhala';
+    }
   }
   return null;
 }

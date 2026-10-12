@@ -1,0 +1,55 @@
+{
+  "model": "braille_cell_yolo26n_negatives.onnx",
+  "task": "detect",
+  "class_names": [
+    "braille_cell"
+  ],
+  "num_classes": 1,
+  "imgsz": 1280,
+  "input_layout": "NCHW",
+  "color_format": "RGB",
+  "normalize": {
+    "scale": 0.00392156862745098,
+    "mean": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "std": [
+      1.0,
+      1.0,
+      1.0
+    ]
+  },
+  "conf_threshold": 0.25,
+  "iou_threshold": 0.45,
+  "max_det": 800,
+  "nms_in_app": true,
+  "ir_version": 7,
+  "source_weights": "braille_cell_gold_negatives.pt",
+  "source_weights_sha256_16": "6c449fc91fdf360e",
+  "inputs": [
+    {
+      "name": "images",
+      "shape": [
+        1,
+        3,
+        1280,
+        1280
+      ],
+      "dtype": "float32"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "output0",
+      "shape": [
+        1,
+        5,
+        33600
+      ]
+    }
+  ],
+  "provenance_notes": "Fine-tuned with 38 hard-negative images (empty labels) added to the proven 12-image positive training set (8 high-quality + 4 low-quality-lighting pages) -- see cell_detect/make_synthetic_negatives.py and the Non-braille images folder. Adopted as the active default: held-out test mAP50 0.698->0.782, precision 0.743->0.822, recall 0.812->0.841 vs the prior default, AND eliminated every known false-positive case (VS Code screenshot: 32->0 boxes, Sri Lankan ID card: 53->0 boxes, laptop/keyboard photo: 18->0 boxes) with no sign of the positive-page training-count fragility seen elsewhere in this project. Supersedes braille_cell_yolo26n_degraded.onnx as the active default -- that experiment (see cell_detect/CAMERA_DEGRADATION.md) remains a separate, validated-but-mixed result, still bundled as an asset, not combined with this one yet.",
+  "flutter_notes": "Preprocess: resize letterbox to 1280x1280, RGB, divide by 255. Postprocess: YOLO26 detection head, output already de-duplicated (end-to-end head) -- keep every row above conf_threshold (a page has many cells, unlike the fingertip model which only keeps the single best row). Box centers are the cell centroids."
+}

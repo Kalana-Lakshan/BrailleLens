@@ -362,3 +362,108 @@ extra low-quality page at a time, 13 -> 14 -> 15 -> 16 images) would find a
 stable point between 12 and 16 -- not pursued, since the 12-image checkpoint
 already performs well and further Colab rounds have a demonstrated track
 record of not paying off on this dataset.
+
+## Adopted: hard-negative training (`braille_cell_gold_negatives.pt`)
+
+The live app was firing confidently on non-braille objects -- a VS Code
+screenshot, a Sri Lankan ID card's barcode/QR grid, a laptop/keyboard photo
+-- because every training image up to this point was a tightly-cropped
+braille page; the detector had zero exposure to what ISN'T braille. Dense,
+row-aligned, high-contrast marks (barcodes, printed/code text, shop-shelf
+clutter with small text) are close enough to braille's own structure that no
+post-hoc geometric filter (tried: dropping detections with no row-neighbor,
+see `cell_detector_service.dart`) can separate them -- it needed to be
+learned by appearance.
+
+Added 38 hard-negative images (empty label files, standard YOLO background
+convention) to the proven 12-image positive train set (8 high-quality + 4
+low-quality-lighting pages, unchanged): 30 synthetic (15 barcode/QR-style
+grids, 15 code/text-style pages -- `cell_detect/make_synthetic_negatives.py`,
+calibrated to resemble the real failure cases) + 8 real photos (shop
+clutter, product labels, hands -- "Non-braille images/"). Trained with the
+same proven hyperparameters, no other changes.
+
+Train image count went from 12 to 50 -- a bigger jump than the 12-vs-16
+regression above, but a different kind of signal (empty-label background
+images contribute no box-regression gradient, only objectness suppression).
+Result: **no regression** -- val mAP50 0.877 during training, in the same
+healthy range as every successful run, nothing like the 12-vs-16 collapse.
+Supports the hypothesis that the earlier fragility was specifically about
+adding more *positive* braille pages, not about raw image count.
+
+Held-out test (pg-10/11, high+low, n=4, 1097 instances), vs. the prior
+default:
+
+| checkpoint | mAP50 | precision | recall |
+|---|---|---|---|
+| `braille_cell_gold.pt` | 0.698 | 0.743 | 0.812 |
+| `braille_cell_gold_negatives.pt` | **0.782** | **0.822** | **0.841** |
+
+Real-photo false positives, before -> after:
+
+| test image | before | after |
+|---|---|---|
+| VS Code screenshot | 32 boxes | **0** |
+| Sri Lankan ID card | 53 boxes | **0** |
+| Laptop/keyboard photo | 18 boxes | **0** |
+
+Sanity-checked against a genuine held-out braille page (pg-10) to confirm
+this isn't a degenerate "detect nothing" collapse: 89 boxes found, a normal
+count.
+
+A clean win on every metric measured, unlike the camera-degradation
+experiment's mixed real-photo results (see `CAMERA_DEGRADATION.md`) --
+**adopted as the new active default**, wired into
+`braille_lens_flutter/lib/config/app_config.dart`. Caveat: all three
+false-positive test images are exactly the categories the 38 negatives were
+built to cover (dense grids/text, clutter); genuine generalization to
+untested categories (faces, plain backgrounds, other object classes) is
+unverified. Not yet combined with the camera-degradation augmentation --
+that remains a separate, independent improvement.
+
+## Superseded: hard negatives stacked on the teammate's lighting-robust checkpoint instead
+
+A teammate independently built `braille_cell_gold_degraded.pt` (our own
+camera-degradation checkpoint) further into `braille_cell_lighting.pt` --
+fine-tuned for dim/side lighting plus their own Braille-free negatives,
+validated across 8 degradation categories and a 28-image negative set (see
+`lighting_robust/results/`). Only its ONNX export was committed at first;
+once the actual `.pt` was tracked in the repo (`git pull` after their
+"track-model-weights" PR), re-ran the same 39 hard-negative images (38 from
+the adoption above, plus one more real keyboard photo) on top of
+`braille_cell_lighting.pt` instead of `braille_cell_gold.pt`, via
+`cell_detect/gold_finetune_2.py`, same proven hyperparameters.
+
+Training converged at 16 epochs (patience stop), val mAP50 0.945 -- no
+regression. Held-out test (pg-10/11, n=4, 1097 instances): mAP50 0.926
+(+negatives) vs 0.940 (lighting alone) -- a negligible difference, both
+healthy. Full pipeline (detect+classify+reconstruct text, 6 Gold text
+pages): **89.9% letters-only vs 88.2%** for the lighting checkpoint alone --
+a real gain on 4 of 6 pages, the best full-pipeline result measured this
+project (see `reports/eval/gold_text.md`'s matching section for the full
+table). Also re-checked a real AiSee photo with background clutter (person,
+laptop, "Sysco" signage): 0 false positives, same as the parent checkpoint,
+with slightly better on-page coverage (191 vs 181 boxes).
+
+One earlier finding does NOT reproduce here: `braille_cell_gold_negatives.pt`
+(the adoption above) showed an unexplained box-count collapse specifically
+on the detector's own training pages (pg-1: ~40-160 boxes instead of the
+normal ~300) when run through the full `eval_gold_text.py` pipeline, despite
+scoring well on held-out pg-10/11 and the 3 false-positive photos directly.
+This new checkpoint shows completely normal counts (273-312 boxes/page) on
+the same pages under the same pipeline -- the anomaly was specific to that
+checkpoint's lineage (built directly on `braille_cell_gold.pt`), not a
+general property of hard-negative training. Root cause not fully diagnosed
+(suspected: some interaction between that checkpoint's score calibration and
+`recognize_page`'s specific call path vs. a bare `CellDetector.detect_boxes()`
+call -- not confirmed).
+
+**Adopted as the new active default**, superseding both
+`braille_cell_gold_negatives.pt` and `braille_cell_lighting.pt` in
+`app_config.dart`. Confidence threshold carried over from the lighting
+checkpoint (0.40) rather than independently re-swept -- see
+`app_config.dart`'s own caveat on this. Not yet re-checked against the VS
+Code screenshot / ID card / laptop-keyboard photos from the first hard-negative
+adoption (those test images expired from the session scratchpad); the real
+AiSee background-clutter photo substitutes for that check in the meantime,
+but isn't a full replacement for it.

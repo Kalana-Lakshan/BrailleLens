@@ -7,7 +7,7 @@ import '../services/bluetooth_service.dart';
 import '../widgets/glass_device_picker.dart';
 import '../theme/app_theme.dart';
 import '../utils/answer_match.dart';
-import '../utils/sinhala_prompts.dart';
+import '../utils/app_prompts.dart';
 import 'learning_screen.dart';
 import 'model_check_screen.dart';
 import 'stt_test_screen.dart';
@@ -18,7 +18,8 @@ import 'testing_screen.dart';
 /// On launch:
 ///   1. Bluetooth scan runs in background.
 ///   2. TTS welcome prompt is spoken.
-///   3. Voice-command loop listens for "learning" / "testing".
+///   3. Voice-command loop listens for "learning" / "testing", and
+///      "english" / "sinhala" to switch the app's language.
 ///   4. Two 50/50 full-height touch zones provide large tap targets.
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -35,6 +36,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   bool _isCheckingBluetooth = true;
   BluetoothConnectionState _btState = BluetoothConnectionState.checking;
   bool _navigating = false;
+
+  /// Language for prompts and for reading the Braille page, passed on to
+  /// Learning and Testing. Sinhala until the learner switches.
+  AppLanguage _language = AppLanguage.sinhala;
+  AppPrompts get _p => _language.prompts;
 
   late AnimationController _pulseCtrl;
   late AnimationController _glowCtrl;
@@ -107,9 +113,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     await Future.delayed(const Duration(milliseconds: 700));
     if (!mounted) return;
 
-    await _audioService.speakSinhala(SinhalaPrompts.welcome);
+    await _p.speak(_audioService, _p.welcome);
     if (!mounted) return;
-    await _audioService.speakSinhala(SinhalaPrompts.homeInstructions);
+    await _p.speak(_audioService, _p.homeInstructions);
 
     _startVoiceCommandLoop();
   }
@@ -177,8 +183,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         await _navigateTo(mode);
         break;
       }
-      if (parseScreenCommand(command) == ScreenCommand.help) {
-        await _audioService.speakSinhala(SinhalaPrompts.homeInstructions);
+      final language = parseVoiceLanguageCommand(command);
+      if (language != null) {
+        await _setLanguage(AppLanguage.values.byName(language));
+        if (!mounted || _navigating) break;
+      } else if (parseScreenCommand(command) == ScreenCommand.help) {
+        await _p.speak(_audioService, _p.homeInstructions);
         if (!mounted || _navigating) break;
       }
 
@@ -203,8 +213,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       context,
       PageRouteBuilder(
         pageBuilder: (_, __, ___) => mode == 'learning'
-            ? LearningScreen(audioService: _audioService)
-            : TestingScreen(audioService: _audioService),
+            ? LearningScreen(audioService: _audioService, language: _language)
+            : TestingScreen(audioService: _audioService, language: _language),
         transitionsBuilder: (_, anim, __, child) => FadeTransition(
           opacity: anim,
           child: child,
@@ -217,10 +227,24 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       setState(() => _navigating = false);
       await Future.delayed(const Duration(milliseconds: 600));
       if (!mounted || _navigating) return;
-      await _audioService.speakSinhala(SinhalaPrompts.homeInstructions);
+      await _p.speak(_audioService, _p.homeInstructions);
       if (!mounted || _navigating) return;
       _startVoiceCommandLoop();
     }
+  }
+
+  /// Switches the app's language and says so in the new one. The recogniser
+  /// is stopped first so it does not transcribe the announcement; the voice
+  /// loop reopens it once the prompt ends.
+  Future<void> _setLanguage(AppLanguage language) async {
+    if (!mounted) return;
+    _audioService.stopListening();
+    await _audioService.stopSpeech();
+    if (!mounted) return;
+    setState(() => _language = language);
+    await _audioService.hapticMedium();
+    await _p.speak(_audioService, _p.languageChosen);
+    await _p.speak(_audioService, _p.homeInstructions);
   }
 
   /// STT bench screen. The voice-command loop holds the mic through Android's
@@ -293,7 +317,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     onTap: () => _navigateTo('learning'),
                     child: _ModeZone(
                       title: 'LEARNING\nMODE',
-                      subtitle: 'Two-photo scan · English letters',
+                      subtitle: 'Two-photo scan · ${_language == AppLanguage.sinhala ? 'Sinhala' : 'English'} letters',
                       icon: Icons.school_rounded,
                       gradientBegin: AppTheme.learningZoneBlue,
                       gradientEnd: AppTheme.learningZoneBlue,
@@ -355,6 +379,20 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     child: _LogoBadge(),
                   ),
                 ),
+              ),
+            ),
+          ),
+
+          // Language toggle, above the mic indicator so the mode zones do
+          // not take its taps.
+          Positioned(
+            bottom: 76, left: 0, right: 0,
+            child: Center(
+              child: _LanguageToggle(
+                language: _language,
+                onChanged: (l) {
+                  if (l != _language) _setLanguage(l);
+                },
               ),
             ),
           ),
@@ -457,6 +495,65 @@ class _ModeZone extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Two-segment Sinhala / English switch, each segment named in its own
+/// language and labelled for TalkBack.
+class _LanguageToggle extends StatelessWidget {
+  final AppLanguage language;
+  final ValueChanged<AppLanguage> onChanged;
+
+  const _LanguageToggle({required this.language, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: AppTheme.backgroundBlack.withValues(alpha: 0.85),
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.22)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (final l in AppLanguage.values)
+            Semantics(
+              label: l == AppLanguage.sinhala
+                  ? 'Sinhala language'
+                  : 'English language',
+              selected: l == language,
+              button: true,
+              child: GestureDetector(
+                onTap: () => onChanged(l),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  constraints: const BoxConstraints(minWidth: 96, minHeight: 44),
+                  alignment: Alignment.center,
+                  padding: const EdgeInsets.symmetric(horizontal: 18),
+                  decoration: BoxDecoration(
+                    color: l == language
+                        ? AppTheme.primaryYellow
+                        : Colors.transparent,
+                    borderRadius: BorderRadius.circular(24),
+                  ),
+                  child: Text(
+                    l.label,
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: l == language
+                          ? AppTheme.backgroundBlack
+                          : Colors.white70,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -626,7 +723,7 @@ class _MicStatus extends StatelessWidget {
                 const Icon(Icons.mic, color: AppTheme.successCyan, size: 17),
                 const SizedBox(width: 8),
                 Text(
-                  'Listening… say "Learning" or "Testing"',
+                  'Listening… say "Learning", "Testing" or a language',
                   style: TextStyle(
                     fontSize: 12,
                     color: AppTheme.successCyan.withValues(alpha: 0.9),

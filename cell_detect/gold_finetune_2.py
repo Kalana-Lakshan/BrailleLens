@@ -89,6 +89,34 @@ def _degrade_image(src_path: Path, dst_path: Path, downscale: float = DEGRADE_DO
     cv2.imwrite(str(dst_path), back)
 
 
+# Simulates warm/incandescent indoor lighting -- calibrated against two real
+# live-app screenshots showing badly sparse detection under indoor lighting
+# (only 36/~250+ cells found). Measured on those screenshots' page region:
+# mean brightness (~158-169) and sharpness were actually CLOSE to our
+# daylight-shot gold training pages, ruling out "too dark" or "too blurry" as
+# the cause. What differs sharply is color balance -- R-B channel diff ~23-25
+# on the real photos vs. ~2.5-3.3 (near-neutral) on gold pages, a classic
+# warm-light color cast the training set has never seen. Per-channel scale
+# factors below reproduce that measured cast (R+6%, G+2%, B-8%) when applied
+# to our neutral training photos -- a different, additive fix to the
+# DEGRADE_DOWNSCALE blur transform above, which targeted a separate (sharper
+# but focus-degraded) real photo and said nothing about color.
+WARM_CAST_SCALES = (1.062, 1.021, 0.917)  # (R, G, B) multipliers
+
+
+def _apply_warm_cast(src_path: Path, dst_path: Path, scales: tuple[float, float, float] = WARM_CAST_SCALES) -> None:
+    img = cv2.imread(str(src_path)).astype("float32")
+    if img is None:
+        raise FileNotFoundError(f"Could not read image: {src_path}")
+    b_scale, g_scale, r_scale = scales[2], scales[1], scales[0]
+    img[:, :, 0] *= b_scale
+    img[:, :, 1] *= g_scale
+    img[:, :, 2] *= r_scale
+    img = img.clip(0, 255).astype("uint8")
+    dst_path.parent.mkdir(parents=True, exist_ok=True)
+    cv2.imwrite(str(dst_path), img)
+
+
 def _yolo_line(x0: float, y0: float, x1: float, y1: float, img_w: int, img_h: int) -> str | None:
     x0, y0 = max(x0, 0.0), max(y0, 0.0)
     x1, y1 = min(x1, float(img_w)), min(y1, float(img_h))
@@ -101,11 +129,14 @@ def _yolo_line(x0: float, y0: float, x1: float, y1: float, img_w: int, img_h: in
     return f"{CLASS_ID} {xc:.6f} {yc:.6f} {nw:.6f} {nh:.6f}"
 
 
+_SYNTHETIC_VARIANTS = ("degraded", "warm")
+
+
 def _page_image(n: int, variant: str = "high") -> Path:
-    # "degraded" reuses the high-quality source image (it's a synthetic
-    # transform of it, not a separately-shot photo) -- degradation itself
-    # happens in _convert_page, after this returns the source to degrade.
-    variant_dir = VARIANT_DIRS["high" if variant == "degraded" else variant]
+    # "degraded"/"warm" both reuse the high-quality source image (they're
+    # synthetic transforms of it, not separately-shot photos) -- the actual
+    # transform happens in _convert_page, after this returns the source.
+    variant_dir = VARIANT_DIRS["high" if variant in _SYNTHETIC_VARIANTS else variant]
     for ext in (".jpeg", ".jpg", ".png"):
         p = variant_dir / f"pg-{n}{ext}"
         if p.exists():
@@ -114,10 +145,10 @@ def _page_image(n: int, variant: str = "high") -> Path:
 
 
 def _convert_page(n: int, split: str, out_root: Path, variant: str = "high") -> int:
-    # "degraded" reuses the high-quality annotations verbatim -- the
-    # synthetic camera-quality transform doesn't move any cell, only
-    # softens the pixels.
-    variant_dir = VARIANT_DIRS["high" if variant == "degraded" else variant]
+    # "degraded"/"warm" both reuse the high-quality annotations verbatim --
+    # neither synthetic transform moves a cell, they only alter pixels
+    # (softening, or shifting color balance respectively).
+    variant_dir = VARIANT_DIRS["high" if variant in _SYNTHETIC_VARIANTS else variant]
     json_path = variant_dir / f"pg-{n}.json"
     if not json_path.exists():
         raise FileNotFoundError(f"No LabelMe json for pg-{n}: {json_path}")
@@ -144,16 +175,35 @@ def _convert_page(n: int, split: str, out_root: Path, variant: str = "high") -> 
     stem = f"pg-{n}" if variant == "high" else f"pg-{n}-{variant}"
     if variant == "degraded":
         _degrade_image(img_path, img_dir / f"{stem}{img_path.suffix}")
+    elif variant == "warm":
+        _apply_warm_cast(img_path, img_dir / f"{stem}{img_path.suffix}")
     else:
         shutil.copy2(img_path, img_dir / f"{stem}{img_path.suffix}")
     (lbl_dir / f"{stem}.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
     return len(lines)
 
 
+def _convert_negative(img_path: Path, out_root: Path, split: str = "train") -> None:
+    """Add a non-braille image as a hard negative: copied in with an EMPTY
+    label file, so the detector trains against it as "zero objects here"
+    rather than never seeing non-braille content at all (every other image
+    in this dataset is a tightly-cropped braille page -- the model has no
+    other exposure to what ISN'T a cell). Standard YOLO/Ultralytics
+    convention: an image with an empty (or missing) label file is a valid
+    background example, not an error."""
+    img_dir = out_root / "images" / split
+    lbl_dir = out_root / "labels" / split
+    img_dir.mkdir(parents=True, exist_ok=True)
+    lbl_dir.mkdir(parents=True, exist_ok=True)
+    stem = f"neg-{img_path.stem}"
+    shutil.copy2(img_path, img_dir / f"{stem}{img_path.suffix}")
+    (lbl_dir / f"{stem}.txt").write_text("", encoding="utf-8")
+
+
 def build_dataset(
     train_pages, val_pages, test_pages, out_root: Path,
-    low_quality_pages=(), degrade_pages=(),
-) -> tuple[Path, dict[str, list[int]], dict[str, list[int]]]:
+    low_quality_pages=(), degrade_pages=(), warm_pages=(), negative_dir: Path | None = None,
+) -> tuple[Path, dict[str, list[int]], dict[str, list[int]], dict[str, list[int]], int]:
     if out_root.exists():
         shutil.rmtree(out_root)
     counts = {"train": 0, "val": 0, "test": 0}
@@ -179,12 +229,30 @@ def build_dataset(
         counts[split] += _convert_page(n, split, out_root, variant="degraded")
         degraded_used[split].append(n)
 
+    warm_used: dict[str, list[int]] = {"train": [], "val": [], "test": []}
+    for n in warm_pages:
+        split = split_for_page.get(n)
+        if split is None:
+            continue
+        counts[split] += _convert_page(n, split, out_root, variant="warm")
+        warm_used[split].append(n)
+
+    negative_count = 0
+    if negative_dir is not None and negative_dir.is_dir():
+        for img_path in sorted(negative_dir.iterdir()):
+            if img_path.suffix.lower() not in (".jpeg", ".jpg", ".png"):
+                continue
+            _convert_negative(img_path, out_root, split="train")
+            negative_count += 1
+
     print(f"Gold fine-tune dataset: train pg-{train_pages} + low pg-{low_used['train']} "
-          f"+ degraded pg-{degraded_used['train']} ({counts['train']} boxes), "
+          f"+ degraded pg-{degraded_used['train']} + warm pg-{warm_used['train']} "
+          f"+ {negative_count} hard negatives ({counts['train']} boxes), "
           f"val pg-{val_pages} + low pg-{low_used['val']} + degraded pg-{degraded_used['val']} "
-          f"({counts['val']} boxes), "
+          f"+ warm pg-{warm_used['val']} ({counts['val']} boxes), "
           f"test pg-{test_pages} + low pg-{low_used['test']} + degraded pg-{degraded_used['test']} "
-          f"({counts['test']} boxes) -- held out, never trained/monitored on")
+          f"+ warm pg-{warm_used['test']} ({counts['test']} boxes) "
+          f"-- held out, never trained/monitored on")
 
     data = {
         "path": str(out_root),
@@ -196,7 +264,7 @@ def build_dataset(
     }
     yaml_path = out_root / "data.yaml"
     yaml_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
-    return yaml_path, low_used, degraded_used
+    return yaml_path, low_used, degraded_used, warm_used, negative_count
 
 
 def main() -> None:
@@ -235,6 +303,19 @@ def main() -> None:
                               f"{DEGRADE_DOWNSCALE} then back up, see DEGRADE_DOWNSCALE's comment for the "
                               "measurement. Off by default (empty list) -- opt in per page, e.g. "
                               "--degrade-pages 1 2 3 4 5 6 7 8 9 10 11 12 for every page in the current split.")
+    parser.add_argument("--warm-pages", type=int, nargs="+", default=[],
+                         help="Add a synthetic warm/incandescent-lighting copy of these pages (any split) as extra "
+                              "training/eval images -- simulates real indoor low-light photos' color cast, "
+                              "calibrated against two live-app screenshots that badly under-detected despite "
+                              f"near-normal brightness/sharpness: per-channel scale {WARM_CAST_SCALES} (R,G,B), "
+                              "see WARM_CAST_SCALES's comment for the measurement. Off by default (empty list).")
+    parser.add_argument("--negative-dir", type=Path, default=None,
+                         help="Directory of non-braille images (any filenames, .jpeg/.jpg/.png) to add to TRAIN as "
+                              "hard negatives with empty label files -- every other image in this dataset is a "
+                              "tightly-cropped braille page, so the detector has no training-time exposure to what "
+                              "ISN'T a cell, and fires on confident look-alikes (barcodes/QR codes, dense code/text "
+                              "on a screen, keyboards, faces -- see the live-app false positives this was added "
+                              "for). Off by default (None).")
     parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--amp", action=argparse.BooleanOptionalAction, default=False,
                          help="Automatic mixed precision -- off by default, it's a CUDA feature and unreliable on CPU")
@@ -263,9 +344,9 @@ def main() -> None:
                 n for n in available if n in val_test_pages or n in SAFE_TRAIN_LOW_PAGES
             )
 
-    yaml_path, low_used, degraded_used = build_dataset(
+    yaml_path, low_used, degraded_used, warm_used, negative_count = build_dataset(
         args.train_pages, args.val_page, args.test_page, DATASET_ROOT,
-        low_quality_pages, args.degrade_pages,
+        low_quality_pages, args.degrade_pages, args.warm_pages, args.negative_dir,
     )
 
     from ultralytics import YOLO
@@ -325,19 +406,21 @@ def main() -> None:
 
     from braille_cnn.eval_report import write_eval_report
 
-    def _pages_desc(pages, low, degraded):
+    def _pages_desc(pages, low, degraded, warm):
         desc = f"pg-{pages}"
         if low:
             desc += f" + low-quality-lighting pg-{low}"
         if degraded:
             desc += f" + camera-degraded pg-{degraded}"
+        if warm:
+            desc += f" + warm-cast pg-{warm}"
         return desc
 
     lines = [
-        f"Train pages: {_pages_desc(args.train_pages, low_used['train'], degraded_used['train'])} | "
-        f"val (checkpoint selection only): {_pages_desc(args.val_page, low_used['val'], degraded_used['val'])} | "
+        f"Train pages: {_pages_desc(args.train_pages, low_used['train'], degraded_used['train'], warm_used['train'])} | "
+        f"val (checkpoint selection only): {_pages_desc(args.val_page, low_used['val'], degraded_used['val'], warm_used['val'])} | "
         f"**test (held out, never trained/monitored on): "
-        f"{_pages_desc(args.test_page, low_used['test'], degraded_used['test'])}**",
+        f"{_pages_desc(args.test_page, low_used['test'], degraded_used['test'], warm_used['test'])}**",
         "",
         "| model | mAP50 | precision | recall |",
         "|---|---|---|---|",

@@ -330,6 +330,7 @@ class AudioService {
             // A permanent error ends the session without always sending
             // a final status.
             if (val.permanent) _closeRecognizerMic();
+            _onListenError?.call(val.errorMsg);
           },
           onStatus: _onRecognizerStatus,
         );
@@ -341,70 +342,114 @@ class AudioService {
     return _isSpeechInitialized;
   }
 
+  /// Bumped by every [listenForAnswer]; a listen that is no longer the
+  /// latest must not touch the recogniser.
+  int _listenGen = 0;
+  Completer<String?>? _pendingListen;
+
+  /// Errors reported by the recogniser, routed to the listen in progress.
+  void Function(String errorMsg)? _onListenError;
+
+  /// Locales whose offline recogniser pack is missing on this phone.
+  final Set<String> _noOfflinePack = {};
+
+  /// Least time left in a listen worth reopening the mic for.
+  static const _minRelisten = Duration(milliseconds: 1500);
+
   /// Listens for a single spoken answer with a fixed [timeout].
   /// Returns the recognized words (lower-cased & trimmed), or null on timeout.
+  /// [localeId] (e.g. 'en_US') overrides the device's speech language.
   Future<String?> listenForAnswer({
     Duration timeout = const Duration(seconds: 6),
+    String? localeId,
   }) async {
     final available = await initStt();
     if (!available) return null;
     // Never open the recogniser over a prompt (see [speechIdle]).
     await speechIdle;
 
-    final completer = Completer<String?>();
-    Timer? timer;
+    // A listen still pending (e.g. the command loop's, cut short by
+    // [stopListening]) ends now. Before this, its timeout fired later and
+    // stopped the recogniser in the middle of the next listen — the learner's
+    // answer was never heard.
+    final gen = ++_listenGen;
+    final previous = _pendingListen;
+    if (previous != null && !previous.isCompleted) previous.complete(null);
 
-    timer = Timer(timeout, () {
-      if (!completer.isCompleted) {
-        _speech.stop();
-        completer.complete(null);
-      }
+    final completer = Completer<String?>();
+    _pendingListen = completer;
+
+    void finish(String? words) {
+      if (!completer.isCompleted) completer.complete(words);
+    }
+
+    final timer = Timer(timeout, () {
+      if (completer.isCompleted) return;
+      if (gen == _listenGen) _speech.stop();
+      finish(null);
     });
 
-    try {
+    void onResult(result) {
+      if (gen != _listenGen) return;
+      if (result.finalResult && result.recognizedWords.isNotEmpty) {
+        timer.cancel();
+        finish(result.recognizedWords.toLowerCase().trim());
+      }
+    }
+
+    final deadline = DateTime.now().add(timeout);
+    final localeKey = localeId ?? '';
+    var onDevice = !_noOfflinePack.contains(localeKey);
+
+    Future<void> start() async {
       if (_speech.isListening) await _speech.stop();
       await _speech.listen(
-        onResult: (result) {
-          if (result.finalResult && result.recognizedWords.isNotEmpty) {
-            timer?.cancel();
-            if (!completer.isCompleted) {
-              completer.complete(
-                result.recognizedWords.toLowerCase().trim(),
-              );
-            }
-          }
-        },
+        onResult: onResult,
         listenOptions: stt.SpeechListenOptions(
           listenMode: stt.ListenMode.confirmation,
+          localeId: localeId,
           partialResults: false,
-          onDevice: true,
+          onDevice: onDevice,
         ),
       );
+    }
+
+    void restart() {
+      unawaited(start().catchError((Object e) {
+        debugPrint('[AudioService] listenForAnswer restart error: $e');
+      }));
+    }
+
+    _onListenError = (msg) {
+      if (gen != _listenGen || completer.isCompleted) return;
+      debugPrint('[AudioService] listenForAnswer error: $msg');
+      if (onDevice && msg.contains('language')) {
+        // No offline voice pack for this language: the on-device recogniser
+        // reports an error rather than throwing. Go online, and skip the
+        // offline attempt from now on — closing and reopening the mic cut
+        // off the start of the learner's answer.
+        _noOfflinePack.add(localeKey);
+        onDevice = false;
+        restart();
+      } else if ((msg == 'error_no_match' || msg == 'error_speech_timeout') &&
+          deadline.difference(DateTime.now()) > _minRelisten) {
+        // The recogniser gives up after ~2 s of silence or one unclear
+        // word; keep the mic open for the rest of the window.
+        restart();
+      }
+    };
+
+    try {
+      await start();
     } catch (e) {
       debugPrint('[AudioService] listenForAnswer on-device error: $e');
+      onDevice = false;
       try {
-        if (_speech.isListening) await _speech.stop();
-        await _speech.listen(
-          onResult: (result) {
-            if (result.finalResult && result.recognizedWords.isNotEmpty) {
-              timer?.cancel();
-              if (!completer.isCompleted) {
-                completer.complete(
-                  result.recognizedWords.toLowerCase().trim(),
-                );
-              }
-            }
-          },
-          listenOptions: stt.SpeechListenOptions(
-            listenMode: stt.ListenMode.confirmation,
-            partialResults: false,
-            onDevice: false,
-          ),
-        );
+        await start();
       } catch (e2) {
         debugPrint('[AudioService] listenForAnswer error: $e2');
         timer.cancel();
-        if (!completer.isCompleted) completer.complete(null);
+        finish(null);
       }
     }
 
