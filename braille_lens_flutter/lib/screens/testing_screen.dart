@@ -815,6 +815,7 @@ class _TestingScreenState extends State<TestingScreen> {
       heard = await widget.audioService.listenForAnswer(
         timeout: const Duration(seconds: 8),
         localeId: 'en_US',
+        relisten: true,
       );
       if (!mounted || _isExiting) return;
       setState(() => _listening = false);

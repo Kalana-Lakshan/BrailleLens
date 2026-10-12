@@ -214,9 +214,11 @@ class EnglishAppPrompts extends AppPrompts {
   @override
   String get pageReady =>
       'Page ready. Now hold your finger still on a letter for three seconds.';
+  /// "Letter B" rather than "B": the recogniser often hears nothing in a
+  /// single short sound.
   @override
-  String get askLetter =>
-      'What is the letter under your finger? Please say it out loud.';
+  String get askLetter => 'What is the letter under your finger? '
+      "Say 'letter' and then its name, for example, 'letter A'.";
   @override
   String correct(String name) => 'Correct! The letter is $name.';
   @override

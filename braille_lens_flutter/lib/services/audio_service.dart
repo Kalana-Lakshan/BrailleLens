@@ -356,12 +356,19 @@ class AudioService {
   /// Least time left in a listen worth reopening the mic for.
   static const _minRelisten = Duration(milliseconds: 1500);
 
+  /// Errors this soon after a listen starts belong to the session before it.
+  static const _staleErrorWindow = Duration(milliseconds: 700);
+
   /// Listens for a single spoken answer with a fixed [timeout].
   /// Returns the recognized words (lower-cased & trimmed), or null on timeout.
   /// [localeId] (e.g. 'en_US') overrides the device's speech language.
+  /// With [relisten], the mic reopens when the recogniser gives up early
+  /// (silence, an unclear word) while time is left — for answers, not for
+  /// the always-on command loop.
   Future<String?> listenForAnswer({
     Duration timeout = const Duration(seconds: 6),
     String? localeId,
+    bool relisten = false,
   }) async {
     final available = await initStt();
     if (!available) return null;
@@ -383,17 +390,26 @@ class AudioService {
       if (!completer.isCompleted) completer.complete(words);
     }
 
+    // The recogniser's latest partial guess: returned when it ends without
+    // a final result, which it often does for a single short word.
+    var partial = '';
+    String? heardSoFar() => partial.isEmpty ? null : partial;
+
     final timer = Timer(timeout, () {
       if (completer.isCompleted) return;
       if (gen == _listenGen) _speech.stop();
-      finish(null);
+      finish(heardSoFar());
     });
 
     void onResult(result) {
       if (gen != _listenGen) return;
-      if (result.finalResult && result.recognizedWords.isNotEmpty) {
+      final words = result.recognizedWords.toLowerCase().trim() as String;
+      if (words.isEmpty) return;
+      if (result.finalResult) {
         timer.cancel();
-        finish(result.recognizedWords.toLowerCase().trim());
+        finish(words);
+      } else {
+        partial = words;
       }
     }
 
@@ -401,14 +417,17 @@ class AudioService {
     final localeKey = localeId ?? '';
     var onDevice = !_noOfflinePack.contains(localeKey);
 
+    var startedAt = DateTime.now();
+
     Future<void> start() async {
       if (_speech.isListening) await _speech.stop();
+      startedAt = DateTime.now();
       await _speech.listen(
         onResult: onResult,
         listenOptions: stt.SpeechListenOptions(
           listenMode: stt.ListenMode.confirmation,
           localeId: localeId,
-          partialResults: false,
+          partialResults: true,
           onDevice: onDevice,
         ),
       );
@@ -431,11 +450,19 @@ class AudioService {
         _noOfflinePack.add(localeKey);
         onDevice = false;
         restart();
-      } else if ((msg == 'error_no_match' || msg == 'error_speech_timeout') &&
-          deadline.difference(DateTime.now()) > _minRelisten) {
-        // The recogniser gives up after ~2 s of silence or one unclear
-        // word; keep the mic open for the rest of the window.
-        restart();
+      } else if (msg == 'error_no_match' || msg == 'error_speech_timeout') {
+        // Android reports the end of the session it just stopped a moment
+        // after the next one starts; that error is not this listen's.
+        if (DateTime.now().difference(startedAt) < _staleErrorWindow) return;
+        if (partial.isNotEmpty) {
+          timer.cancel();
+          finish(partial);
+        } else if (relisten &&
+            deadline.difference(DateTime.now()) > _minRelisten) {
+          // The recogniser gives up after ~2 s of silence or one unclear
+          // word; keep the mic open for the rest of the window.
+          restart();
+        }
       }
     };
 
