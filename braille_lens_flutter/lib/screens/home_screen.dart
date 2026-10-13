@@ -111,11 +111,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
     // Brief pause then speak welcome
     await Future.delayed(const Duration(milliseconds: 700));
-    if (!mounted) return;
+    // A mode opened during the permission prompts or the welcome: the Home
+    // lines would otherwise play over it.
+    if (!mounted || _navigating) return;
 
     await _p.speak(_audioService, _p.welcome);
-    if (!mounted) return;
+    if (!mounted || _navigating) return;
     await _p.speak(_audioService, _p.homeInstructions);
+    if (!mounted || _navigating) return;
 
     _startVoiceCommandLoop();
   }
